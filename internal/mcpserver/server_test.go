@@ -1,10 +1,15 @@
 package mcpserver
 
 import (
+	"aulaglobal-mcp/internal/aulaglobal"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestSecurity(t *testing.T) {
@@ -23,5 +28,121 @@ func TestSecurity(t *testing.T) {
 		if w.Code != tc.want {
 			t.Fatalf("%+v: %d", tc, w.Code)
 		}
+	}
+}
+
+type fakeUpdates struct {
+	mu        sync.Mutex
+	latest    string
+	announced bool
+}
+
+func (f *fakeUpdates) Available() string { f.mu.Lock(); defer f.mu.Unlock(); return f.latest }
+func (f *fakeUpdates) TakeNotice() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.latest == "" || f.announced {
+		return ""
+	}
+	f.announced = true
+	return "NOTICE " + f.latest
+}
+
+func connect(t *testing.T, updates Updates) *mcp.ClientSession {
+	t.Helper()
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"fullname":"Ana","userid":7,"sitename":"AulaGlobal","release":"4.1"}`))
+	}))
+	t.Cleanup(moodle.Close)
+	api := aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"})
+	var up Updates = updates
+	if updates == (*fakeUpdates)(nil) {
+		up = nil
+	}
+	server := New(api, nil, up)
+	ctx := context.Background()
+	t1, t2 := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(ctx, t1, nil); err != nil {
+		t.Fatal(err)
+	}
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil).Connect(ctx, t2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { session.Close() })
+	return session
+}
+
+func call(t *testing.T, s *mcp.ClientSession, name string, args map[string]any) *mcp.CallToolResult {
+	t.Helper()
+	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func texts(res *mcp.CallToolResult) []string {
+	var out []string
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			out = append(out, tc.Text)
+		}
+	}
+	return out
+}
+
+func TestUpdateNoticeAppendedOnceAndAuthField(t *testing.T) {
+	s := connect(t, &fakeUpdates{latest: "v0.9.0"})
+	// A failing call must not consume the notice.
+	if res := call(t, s, "download_files", map[string]any{}); !res.IsError || strings.Contains(strings.Join(texts(res), ""), "NOTICE") {
+		t.Fatalf("error result: %+v", res)
+	}
+	first := call(t, s, "auth_status", nil)
+	if first.IsError {
+		t.Fatalf("%+v", first)
+	}
+	got := texts(first)
+	if len(got) != 2 || got[1] != "NOTICE v0.9.0" {
+		t.Fatalf("first result contents: %q", got)
+	}
+	sc, _ := first.StructuredContent.(map[string]any)
+	if sc["update_available"] != "v0.9.0" || sc["fullname"] != "Ana" {
+		t.Fatalf("structured: %v", sc)
+	}
+	second := call(t, s, "auth_status", nil)
+	if len(texts(second)) != 1 {
+		t.Fatalf("notice repeated: %q", texts(second))
+	}
+	if sc, _ := second.StructuredContent.(map[string]any); sc["update_available"] != "v0.9.0" {
+		t.Fatalf("auth_status lost update_available: %v", sc)
+	}
+}
+
+func TestNoUpdateNoNoticeAndNoField(t *testing.T) {
+	for name, u := range map[string]*fakeUpdates{"up to date": {}, "disabled": nil} {
+		s := connect(t, u)
+		res := call(t, s, "auth_status", nil)
+		if len(texts(res)) != 1 {
+			t.Errorf("%s: %q", name, texts(res))
+		}
+		sc, _ := res.StructuredContent.(map[string]any)
+		if _, present := sc["update_available"]; present || sc["fullname"] != "Ana" {
+			t.Errorf("%s: %v", name, sc)
+		}
+	}
+}
+
+func TestNoticeAppearsWhenCheckFinishesLater(t *testing.T) {
+	u := &fakeUpdates{}
+	s := connect(t, u)
+	if len(texts(call(t, s, "auth_status", nil))) != 1 {
+		t.Fatal("notice before the check")
+	}
+	u.mu.Lock()
+	u.latest = "v1.0.0"
+	u.mu.Unlock()
+	if got := texts(call(t, s, "auth_status", nil)); len(got) != 2 {
+		t.Fatalf("%q", got)
 	}
 }

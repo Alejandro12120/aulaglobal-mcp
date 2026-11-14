@@ -55,3 +55,14 @@ func TestAntigravity(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateCache(t *testing.T) {
+	got, err := UpdateCache()
+	if err != nil {
+		t.Skip("no user cache dir:", err)
+	}
+	cache, _ := os.UserCacheDir()
+	if got != filepath.Join(cache, "aulaglobal-mcp", "update-check.json") {
+		t.Fatal(got)
+	}
+}

@@ -1,0 +1,2 @@
+abc123  aulaglobal-mcp_0.2.0_linux_x64.tar.gz
+def456  aulaglobal-mcp_0.2.0_windows_x64.zip

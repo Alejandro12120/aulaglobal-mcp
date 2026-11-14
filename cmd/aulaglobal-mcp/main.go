@@ -3,6 +3,7 @@ package main
 import (
 	"aulaglobal-mcp/internal/aulaglobal"
 	"aulaglobal-mcp/internal/mcpserver"
+	"aulaglobal-mcp/internal/selfupdate"
 	"aulaglobal-mcp/internal/store"
 	"aulaglobal-mcp/internal/userpaths"
 	"context"
@@ -56,6 +57,9 @@ func run() error {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		return setup(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		return update(os.Args[2:])
 	}
 	defaultToken, defaultData, err := userpaths.Defaults()
 	if err != nil {
@@ -138,7 +142,7 @@ func run() error {
 		return e
 	}
 	defer st.Root.Close()
-	server := mcpserver.New(api, st)
+	server := mcpserver.New(api, st, startUpdateCheck(ctx))
 	switch *transport {
 	case "stdio":
 		return server.Run(ctx, &mcp.StdioTransport{})
@@ -190,6 +194,7 @@ func run() error {
 }
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	selfupdate.CleanupOld()
 	if e := run(); e != nil {
 		slog.Error("server stopped", "error", aulaglobal.Redact(e.Error(), os.Getenv("AULAGLOBAL_TOKEN"), os.Getenv("MCP_HTTP_AUTH_TOKEN")))
 		os.Exit(1)
