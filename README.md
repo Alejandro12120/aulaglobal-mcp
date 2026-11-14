@@ -1,212 +1,185 @@
-# AulaGlobal para tu asistente de IA
+<div align="center">
 
-Este programa permite que tu asistente de IA (Claude, Codex, ChatGPT, OpenCode o Antigravity) entre en
-tu [AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M y te ayude con tus
-asignaturas. Puedes pedirle cosas como:
+# AulaGlobal MCP
 
-> «¿Qué entregas tengo esta semana?»
+**Conecta tu asistente de IA con AulaGlobal (UC3M)**
+
+[![CI](https://github.com/Alejandro12120/aulaglobal-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Alejandro12120/aulaglobal-mcp/actions/workflows/ci.yml)
+[![Última versión](https://img.shields.io/github/v/release/Alejandro12120/aulaglobal-mcp?label=versi%C3%B3n)](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest)
+[![Licencia MIT](https://img.shields.io/github/license/Alejandro12120/aulaglobal-mcp?label=licencia)](LICENSE)
+
+[Instalación](#instalación) · [Uso](#uso) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Documentación técnica](docs/TECNICO.md)
+
+</div>
+
+---
+
+AulaGlobal MCP permite que tu asistente de IA consulte tus asignaturas de
+[AulaGlobal](https://aulaglobal.uc3m.es), descargue sus materiales y trabaje con
+ellos. Funciona con Claude Code, Claude Desktop, Codex, ChatGPT (aplicación de
+escritorio), OpenCode y Antigravity.
+
+| Función | Descripción |
+|---|---|
+| Asignaturas | Lista las asignaturas actuales, pasadas o futuras. |
+| Materiales | Muestra y descarga los archivos de cada asignatura, organizados por tema. |
+| Lectura y búsqueda | Lee PDF, Word, PowerPoint y texto, y busca en todo lo descargado. |
+| Entregas | Muestra fechas, enunciados y, si se solicita, el estado y la calificación. |
+
+Algunos ejemplos de peticiones:
+
+> ¿Qué entregas tengo pendientes esta semana?
 >
-> «Descárgate los apuntes de Sistemas Operativos y resúmeme el tema 3.»
+> Descarga los apuntes de Sistemas Operativos y resume el tema 3.
 >
-> «Busca en mis apuntes dónde explican el algoritmo de Dijkstra.»
+> Busca en mis apuntes dónde se explica el algoritmo de Dijkstra.
 
-Los apuntes se guardan en tu ordenador, en la carpeta `AulaGlobal` de tu usuario. Tu contraseña no
-se usa nunca y tu clave de acceso se queda guardada en tu ordenador, sin que el
-asistente la vea.
-
+> [!IMPORTANT]
 > **Proyecto no oficial**, sin relación con la Universidad Carlos III de Madrid.
-> Úsalo solo con tu propia cuenta y respetando la normativa de la universidad y
+> Úsalo solo con tu propia cuenta, respetando la normativa de la universidad y
 > los derechos de autor de los materiales.
 
 ---
 
-## Antes de empezar
+## Instalación
 
-Necesitas un ordenador con Windows, Mac o Linux y un asistente compatible:
-Claude Code, Claude Desktop, Codex, ChatGPT de escritorio, OpenCode o Antigravity.
+### Requisitos
 
-## 1. Descarga el programa para tu sistema
+- Windows, macOS o Linux.
+- Uno de los asistentes compatibles indicados arriba.
 
-Abre la [página de descargas](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest)
-y elige el archivo de tu ordenador:
+No es necesario instalar Go, Docker ni WSL.
 
-| Tu ordenador | Archivo que termina en… |
+### 1. Descarga
+
+Descarga el archivo correspondiente a tu equipo desde la
+[página de versiones](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest):
+
+| Equipo | Archivo |
 |---|---|
-| Windows habitual | `windows_x64.zip` |
-| Windows con ARM | `windows_arm64.zip` |
-| Mac con chip Apple (M1–M4) | `macos_apple-silicon.tar.gz` |
-| Mac Intel | `macos_intel.tar.gz` |
-| Linux habitual | `linux_x64.tar.gz` |
-| Linux con ARM | `linux_arm64.tar.gz` |
+| Windows (Intel/AMD) | `…_windows_x64.zip` |
+| Windows (ARM) | `…_windows_arm64.zip` |
+| Mac con chip Apple (M1 o posterior) | `…_macos_apple-silicon.tar.gz` |
+| Mac con procesador Intel | `…_macos_intel.tar.gz` |
+| Linux (x86-64) | `…_linux_x64.tar.gz` |
+| Linux (ARM) | `…_linux_arm64.tar.gz` |
 
-Para saber qué Mac tienes: **menú Apple → Acerca de este Mac**.
-Descomprime el archivo y guarda el programa en una carpeta que no vayas a mover
-después. No necesitas instalar Go, Docker, WSL ni bash.
+En Mac, el tipo de procesador aparece en **menú Apple → Acerca de este Mac**.
 
-## 2. Conecta tu cuenta de AulaGlobal
+Descomprime el archivo y guarda el programa en una carpeta definitiva: la
+configuración de los asistentes apuntará a esa ubicación.
 
-Abre una terminal en esa carpeta y escribe:
+### 2. Configuración
 
-**Windows (PowerShell):**
+Abre una terminal en la carpeta del programa y ejecuta:
 
-```powershell
-.\aulaglobal-mcp.exe setup
-```
+| Sistema | Comando |
+|---|---|
+| Windows (PowerShell) | `.\aulaglobal-mcp.exe setup` |
+| macOS y Linux | `./aulaglobal-mcp setup` |
 
-También puedes abrir el programa con doble clic en Windows.
+En Windows también puede abrirse con doble clic. En macOS y Linux, si aparece un
+error de permisos, ejecuta antes `chmod +x aulaglobal-mcp`.
 
-**Mac y Linux:**
+El asistente de configuración realiza cuatro pasos:
 
-```sh
-./aulaglobal-mcp setup
-```
+1. **Carpetas.** Indica dónde se guardarán la clave de acceso y los materiales.
+2. **Cuenta de AulaGlobal.** Solicita la cookie de sesión del navegador y la
+   convierte en una clave de acceso. Las instrucciones se muestran en pantalla.
+3. **Comprobación.** Verifica la clave y muestra el nombre del titular de la cuenta.
+4. **Asistentes.** Detecta los asistentes instalados y los configura (ver abajo).
 
-Si dice que no tienes permiso, escribe primero `chmod +x aulaglobal-mcp`.
-
-El programa te guía: abre AulaGlobal, entra con tu cuenta y sigue las
-instrucciones para copiar un dato de tu sesión (la *cookie*). Pégalo solo cuando
-el programa lo pida. No se ve mientras escribes. Tu contraseña no hace falta.
-Al terminar verás **«Token válido. Hola, tu nombre»** si ha podido comprobarlo.
-
-> Ese dato da acceso a tu cuenta. No lo compartas con nadie, tampoco con el
-> asistente de IA: pégalo solo en el programa cuando te lo pida.
 <details>
-<summary>El ordenador avisa de que no conoce el programa</summary>
+<summary><strong>Cómo obtener la cookie de sesión</strong></summary>
 
-Todavía no tiene firma digital. Descárgalo solo desde la página del proyecto.
+1. Inicia sesión en <https://aulaglobal.uc3m.es>.
+2. Abre las herramientas de desarrollador con **F12** (en Mac,
+   **Cmd + Option + I**) y selecciona la pestaña **Consola**.
+3. Pega la siguiente línea y pulsa **Enter**. El valor se copia al portapapeles:
 
-En Windows: **Más información → Ejecutar de todas formas**.
+   ```js
+   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
+   ```
 
-En Mac: prueba **clic derecho → Abrir**. Si sigue bloqueado, puedes quitar la
-marca de descarga desde la terminal, en la carpeta del programa:
+4. Vuelve a la terminal y pégalo cuando se solicite. Por seguridad, el texto no
+   se muestra mientras se escribe.
 
-```sh
-xattr -d com.apple.quarantine aulaglobal-mcp
-```
+Si Chrome impide pegar en la consola, escribe `allow pasting` y pulsa Enter.
+Si la línea no funciona, el valor también puede copiarse desde
+**Aplicación → Cookies → https://aulaglobal.uc3m.es → `MoodleSessionag`**
+(en Firefox, **Almacenamiento → Cookies**).
 
 </details>
 
-## 3. setup lo añade por ti
-
-El programa muestra qué asistentes ha encontrado y comprueba si AulaGlobal ya está
-configurado. Si todo está bien, no te pregunta nada. Si falta o necesita un
-cambio, te explica qué hará: pulsa Enter para aceptar o escribe `n` para omitirlo.
-Si hay varios pendientes, puedes configurarlos todos o elegir uno a uno.
-Al terminar verás el resultado de cada uno y cómo recargar los que hayan cambiado.
-Antes de cambiar un archivo guarda una copia terminada en `.bak`.
-
-Puedes repetir setup y conservar tu token para volver a este paso. Opcionalmente,
-`setup --only-clients` conecta solo los asistentes, sin revisar tu cuenta;
-`--clients claude-code,codex` elige cuáles y `--yes` acepta los cambios sin preguntar.
-Por ejemplo: `setup --only-clients --clients claude-code,codex --yes`.
-`setup --help` muestra los nombres disponibles. Si hay un archivo que no puede
-cambiar con seguridad, muestra instrucciones para hacerlo a mano.
-
-Si no encuentra tu asistente, puedes hacerlo a mano. Donde pone
-`/ruta/al/aulaglobal-mcp`, usa la ruta completa del programa que descargaste.
-En Windows termina en `aulaglobal-mcp.exe`.
+> [!WARNING]
+> La cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
+> compartas ni la pegues en el chat del asistente: introdúcela únicamente en el
+> programa de configuración.
 
 <details>
-<summary>Claude Code: configuración manual</summary>
+<summary><strong>Aviso del sistema al abrir el programa</strong></summary>
 
-Ejecuta el comando que imprime setup, por ejemplo:
+Los ejecutables aún no están firmados digitalmente, por lo que el sistema puede
+mostrar un aviso la primera vez. Descarga el programa solo desde la página
+oficial del proyecto.
 
-```sh
-claude mcp add --scope user aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
-```
+- **Windows:** selecciona **Más información → Ejecutar de todas formas**.
+- **macOS:** haz clic derecho sobre el programa y elige **Abrir**. Si continúa
+  bloqueado, ejecuta en la carpeta del programa:
 
-También puedes guardar este contenido en `.mcp.json`, en tu proyecto:
-
-```json
-{
-  "mcpServers": {
-    "aulaglobal": {
-      "command": "/ruta/al/aulaglobal-mcp",
-      "args": ["--transport", "stdio"]
-    }
-  }
-}
-```
-
-En Windows, escribe las barras de las rutas como `/` (por ejemplo,
-`C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
-Si elegiste otras carpetas en setup, usa el comando que imprime al final
-si falla la conexión automática.
+  ```sh
+  xattr -d com.apple.quarantine aulaglobal-mcp
+  ```
 
 </details>
 
-<details>
-<summary>Claude Desktop: configuración manual</summary>
+### 3. Conexión con los asistentes
 
-Ve a **Ajustes → Desarrollador → Editar configuración** y añade el bloque
-`aulaglobal` del ejemplo anterior dentro de `mcpServers`, conservando los demás.
-El archivo está en:
+Durante el paso 4, el programa muestra los asistentes encontrados y comprueba la
+configuración de cada uno:
 
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`.
-- Mac: `~/Library/Application Support/Claude/claude_desktop_config.json`.
-- Linux: `~/.config/Claude/claude_desktop_config.json`.
+| Situación | Acción |
+|---|---|
+| AulaGlobal no está configurado | Pregunta si se debe añadir. |
+| Ya está configurado correctamente | No realiza cambios. |
+| Existe una configuración distinta | Muestra la diferencia y pregunta si se debe actualizar. |
+| El archivo no puede modificarse con seguridad | Muestra las instrucciones para hacerlo manualmente. |
 
-</details>
+Antes de modificar un archivo se guarda una copia con extensión `.bak`. Al
+finalizar se muestra un resumen por asistente y, para los que han cambiado, cómo
+recargarlos.
 
-<details>
-<summary>Codex / ChatGPT de escritorio: configuración manual</summary>
+Para comprobar la conexión, escribe `/mcp` en el asistente: debe aparecer
+`aulaglobal`.
 
-Abre `~/.codex/config.toml` (en Windows, `%USERPROFILE%\.codex\config.toml`)
-y añade:
+**Opciones adicionales**
 
-```toml
-[mcp_servers.aulaglobal]
-command = "/ruta/al/aulaglobal-mcp"
-args = ["--transport", "stdio"]
-```
+| Opción | Efecto |
+|---|---|
+| `--only-clients` | Configura solo los asistentes, sin repetir los pasos de la cuenta. |
+| `--clients claude-code,codex` | Limita la configuración a los asistentes indicados. |
+| `--yes` | Acepta los cambios propuestos sin preguntar. |
+| `--help` | Muestra la ayuda y los identificadores de asistentes disponibles. |
 
-Usa barras `/` en Windows. Después reinicia la aplicación.
-Esto es para ChatGPT de escritorio; la web se conecta de otra manera
-([detalles técnicos](docs/TECNICO.md#chatgpt-en-la-web)).
+Ejemplo: `./aulaglobal-mcp setup --only-clients --clients claude-code --yes`
 
-</details>
+---
 
-Escribe `/mcp` en tu asistente para comprobar que aparece `aulaglobal`.
+## Uso
 
-<details>
-<summary>Antigravity: configuración manual si setup no lo encuentra</summary>
+Basta con hacer las peticiones en lenguaje natural. Para comprobar que todo
+funciona:
 
-En el panel del agente, abre **… → MCP Servers → Manage MCP Servers → View raw config**.
-Añade este bloque dentro de `mcpServers`, conservando los demás asistentes:
+1. «Comprueba mi conexión con AulaGlobal.»
+2. «¿Qué asignaturas tengo este cuatrimestre?»
+3. «¿Qué materiales hay en Cálculo?»
+4. «Descarga los PDF de Cálculo y resume el primero.»
+5. «¿Qué entregas tengo pendientes y cuáles he entregado?»
 
-```json
-{
-  "mcpServers": {
-    "aulaglobal": {
-      "command": "/ruta/al/aulaglobal-mcp",
-      "args": ["--transport", "stdio"]
-    }
-  }
-}
-```
+Los materiales se guardan en la carpeta `AulaGlobal` de tu usuario, organizados
+por asignatura y sección:
 
-El archivo actual está en `~/.gemini/config/mcp_config.json` en Mac y Linux,
-y en `%USERPROFILE%\.gemini\config\mcp_config.json` en Windows.
-Usa la ruta completa del programa; en Windows puedes escribir barras `/`.
-Si elegiste otras carpetas, copia el bloque que imprime setup al fallar.
-Después vuelve a abrir Antigravity. En la aplicación puedes usar **Restart**
-en **Customizations → Installed → MCP Servers**; en el terminal, recarga desde `/mcp`.
-
-</details>
-
-## 4. ¡A usarlo!
-
-Pídele las cosas con tus palabras. Para empezar, prueba:
-
-- «Comprueba mi conexión con AulaGlobal.» (debería decir tu nombre)
-- «¿Qué asignaturas tengo?»
-- «¿Qué hay subido en *Cálculo*?»
-- «Descárgate los PDF de *Cálculo* y explícame el primero.»
-- «¿Qué entregas tengo pendientes? ¿Cuáles he entregado ya?»
-
-Lo que descargues queda en la carpeta `AulaGlobal` de tu usuario, ordenado por asignatura y tema:
-
-```
+```text
 AulaGlobal/
 └── Cálculo/
     ├── Tema 1/
@@ -216,78 +189,86 @@ AulaGlobal/
             └── enunciado.pdf
 ```
 
-Si vuelves a pedirle que descargue, solo baja lo nuevo o lo que el profesor haya
-cambiado.
+En descargas posteriores solo se obtienen los archivos nuevos o modificados.
 
 ---
 
-## Si algo falla
+## Configuración manual
 
-**Dice «token invalid or expired».**
-Tu acceso ha caducado (AulaGlobal lo hace cada cierto tiempo). Vuelve a
-ejecutar el comando del paso 2 y responde `s` cuando pregunte si quieres
-reemplazarlo.
-
-**Dice «cannot read token file».**
-Vuelve a ejecutar el paso 2. Si elegiste otra carpeta, usa la configuración
-que imprime setup al terminar.
-
-**El asistente no encuentra `aulaglobal`.**
-Revisa las rutas del paso 3 y reinicia el asistente.
-
-**No puede leer un PDF.**
-Si el PDF es un escaneo (fotos de páginas), no tiene texto que leer. Si es muy
-largo, puede tardar: pídeselo otra vez pasados unos segundos.
-
-**`setup` dice que no ha podido obtener el token.**
-Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con un dato
-nuevo.
-
----
-
-## ¿Es seguro?
-
-- Tu clave se guarda en la carpeta privada de configuración de tu usuario
-  (el programa te indica las rutas). No la compartas ni la subas a internet.
-- El asistente no ve nunca esa clave: el programa la usa por dentro.
-- El programa solo guarda y lee archivos dentro de la carpeta `AulaGlobal` de tu usuario.
-- Todo funciona en tu ordenador: no hay servidores intermedios.
-
----
-
-## Agradecimientos
-
-Este proyecto se basa en
-**[AGDownloader](https://github.com/Astrak00/AGDownloader)**, de
-[Eduardo Alarcón (Astrak00)](https://github.com/Astrak00), un descargador de
-AulaGlobal para la terminal publicado con licencia MIT. De él vienen la idea de
-obtener el acceso a partir de la sesión del navegador, la línea para la consola y
-la forma de limpiar los nombres de las asignaturas. ¡Gracias por compartirlo!
-
----
-
-## Licencia
-
-Publicado con licencia [MIT](LICENSE). El programa se ofrece **tal cual, sin
-ninguna garantía**: úsalo bajo tu propia responsabilidad.
-
----
-
-## Para usuarios avanzados
-
-En [docs/TECNICO.md](docs/TECNICO.md) están el modo servidor HTTP con Docker,
-todas las opciones de configuración, los detalles de seguridad y cómo
-desarrollar y probar el proyecto.
+Solo es necesaria si el programa de configuración no detecta tu asistente. En los
+ejemplos, sustituye `/ruta/al/aulaglobal-mcp` por la ruta completa del programa
+(en Windows termina en `aulaglobal-mcp.exe` y pueden usarse barras `/`, por
+ejemplo `C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
 
 <details>
-<summary>OpenCode: configuración manual</summary>
+<summary><strong>Claude Code</strong></summary>
 
-setup intenta usar el comando de OpenCode si permite añadirlo para todos tus proyectos.
-Si no, actualiza el archivo global y guarda una copia .bak antes de cambiarlo. Si no puede hacerlo, te muestra un
-bloque para copiar sin tocar tu configuración. Abre `opencode.json` o
-`opencode.jsonc` en la carpeta `.config/opencode` de tu usuario
-(también en Windows y Mac). Si ya tiene contenido, añade AulaGlobal dentro
-de `mcp.servers` en V2, conservando los demás servidores:
+```sh
+claude mcp add --scope user aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
+```
+
+Como alternativa, para un único proyecto, crea un archivo `.mcp.json` en su
+carpeta:
+
+```json
+{
+  "mcpServers": {
+    "aulaglobal": {
+      "command": "/ruta/al/aulaglobal-mcp",
+      "args": ["--transport", "stdio"]
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Claude Desktop</strong></summary>
+
+Abre **Ajustes → Desarrollador → Editar configuración** y añade el bloque
+`aulaglobal` del ejemplo de Claude Code dentro de `mcpServers`, conservando el
+resto. Ubicación del archivo:
+
+| Sistema | Ruta |
+|---|---|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+Reinicia la aplicación después de guardar.
+
+</details>
+
+<details>
+<summary><strong>Codex y ChatGPT (aplicación de escritorio)</strong></summary>
+
+Ambos comparten la configuración. Añade lo siguiente a `~/.codex/config.toml`
+(en Windows, `%USERPROFILE%\.codex\config.toml`):
+
+```toml
+[mcp_servers.aulaglobal]
+command = "/ruta/al/aulaglobal-mcp"
+args = ["--transport", "stdio"]
+```
+
+Reinicia la aplicación. Esta configuración no se aplica a ChatGPT en el
+navegador ([más información](docs/TECNICO.md#chatgpt-en-la-web)).
+
+</details>
+
+<details>
+<summary><strong>OpenCode</strong></summary>
+
+Si la versión instalada lo admite:
+
+```sh
+opencode mcp add aulaglobal --global -- /ruta/al/aulaglobal-mcp --transport stdio
+```
+
+En caso contrario, edita `~/.config/opencode/opencode.json` (o `opencode.jsonc`;
+la ruta es la misma en Windows y macOS) y añade la entrada dentro de
+`mcp.servers`, conservando los demás servidores:
 
 ```json
 {
@@ -296,24 +277,89 @@ de `mcp.servers` en V2, conservando los demás servidores:
     "servers": {
       "aulaglobal": {
         "type": "local",
-        "command": [
-          "/ruta/completa/aulaglobal-mcp",
-          "--transport",
-          "stdio"
-        ]
+        "command": ["/ruta/al/aulaglobal-mcp", "--transport", "stdio"]
       }
     }
   }
 }
 ```
 
-Cambia la ruta por la del programa descargado. En Windows usa barras `/`
-o duplica cada barra `\\` de la ruta. Si elegiste otras carpetas, usa el
-bloque que imprime setup. No pegues tu cookie ni tu token aquí.
-
-Si tu versión admite `--global`, puedes ejecutar `opencode mcp add aulaglobal --global -- /ruta/completa/aulaglobal-mcp --transport stdio`.
-En V1 antiguo, coloca aulaglobal directamente dentro de mcp y añade enabled: true.
-En V2, la configuración coloca los servidores dentro de `mcp.servers` y no usa `enabled`.
-Reinicia OpenCode o abre una sesión nueva después de añadirlo.
+En versiones antiguas (V1), la entrada va directamente dentro de `mcp` e incluye
+`"enabled": true`. Reinicia OpenCode después del cambio.
 
 </details>
+
+<details>
+<summary><strong>Antigravity</strong></summary>
+
+En el panel del agente, abre **… → MCP Servers → Manage MCP Servers → View raw
+config** y añade la entrada dentro de `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "aulaglobal": {
+      "command": "/ruta/al/aulaglobal-mcp",
+      "args": ["--transport", "stdio"]
+    }
+  }
+}
+```
+
+El archivo se encuentra en `~/.gemini/config/mcp_config.json` (en Windows,
+`%USERPROFILE%\.gemini\config\mcp_config.json`). Para aplicar el cambio, usa
+**Restart** en **Customizations → Installed → MCP Servers**, o recarga desde
+`/mcp` en el terminal.
+
+</details>
+
+Si en la configuración elegiste carpetas distintas de las predeterminadas, utiliza
+el bloque que muestra el programa al finalizar, ya que incluye esas rutas.
+
+---
+
+## Problemas frecuentes
+
+| Mensaje o síntoma | Solución |
+|---|---|
+| `token invalid or expired` | La clave ha caducado. Ejecuta de nuevo `setup` y acepta reemplazarla. |
+| `cannot read token file` | Ejecuta de nuevo `setup`. Si usaste otras carpetas, revisa la configuración manual. |
+| El asistente no muestra `aulaglobal` | Reinicia el asistente y, si persiste, ejecuta `setup --only-clients`. |
+| No se puede obtener la clave | Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con una cookie nueva. |
+| Un PDF no se puede leer | Los PDF escaneados no contienen texto. Los muy extensos pueden tardar: repite la petición pasados unos segundos. |
+
+---
+
+## Seguridad y privacidad
+
+- **Tu contraseña no se utiliza.** El acceso se obtiene a partir de la sesión del
+  navegador.
+- **La clave de acceso permanece en tu equipo**, en la carpeta de configuración
+  de tu usuario y con permisos restringidos. El asistente de IA nunca la recibe.
+- **Acceso limitado a tus archivos.** Las herramientas que usa el asistente solo
+  pueden leer y escribir dentro de la carpeta `AulaGlobal`.
+- **Sin intermediarios.** El programa se comunica directamente con AulaGlobal
+  desde tu equipo.
+
+---
+
+## Agradecimientos
+
+Este proyecto parte de
+[AGDownloader](https://github.com/Astrak00/AGDownloader), de
+[Eduardo Alarcón (Astrak00)](https://github.com/Astrak00), un descargador de
+AulaGlobal para terminal publicado con licencia MIT. De él proceden el método de
+obtención del acceso a partir de la sesión del navegador, la línea para la
+consola y el tratamiento de los nombres de las asignaturas.
+
+## Licencia
+
+Distribuido bajo la [licencia MIT](LICENSE). El software se proporciona
+**tal cual, sin garantía de ningún tipo**.
+
+## Documentación técnica
+
+El documento [docs/TECNICO.md](docs/TECNICO.md) describe el modo servidor HTTP
+con Docker, las opciones de configuración, el modelo de seguridad, la
+arquitectura del programa de configuración y el proceso de desarrollo y
+publicación.
