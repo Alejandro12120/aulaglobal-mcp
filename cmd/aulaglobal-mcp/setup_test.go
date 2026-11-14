@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -263,25 +264,49 @@ func TestClaudeRegistration(t *testing.T) {
 }
 
 func TestFindClaude(t *testing.T) {
-	home := t.TempDir()
-	missing := func(string) (string, error) { return "", os.ErrNotExist }
-	if got := findClaude("darwin", home, "", func(string) (string, error) { return "/from/path", nil }, os.Stat); got != "/from/path" {
-		t.Fatal(got)
-	}
-	if got := findClaude("darwin", home, "", missing, func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }); got != "" {
-		t.Fatal(got)
-	}
-	path := filepath.Join(home, ".local", "bin", "claude")
-	os.MkdirAll(filepath.Dir(path), 0700)
-	os.WriteFile(path, []byte("stub"), 0700)
-	if got := findClaude("darwin", home, "", missing, os.Stat); got != path {
-		t.Fatal(got)
-	}
-	win := filepath.Join(home, "npm", "claude.cmd")
-	os.MkdirAll(filepath.Dir(win), 0700)
-	os.WriteFile(win, []byte("stub"), 0600)
-	if got := findClaude("windows", home, home, missing, os.Stat); got != win {
-		t.Fatal(got)
+	// Fake metadata keeps simulated OS cases independent of the host's
+	// executable-bit support. Candidate paths use the host's filepath separators.
+	home, appdata := "HOME", "APPDATA"
+	local := filepath.Join(home, ".local", "bin", "claude")
+	for _, tc := range []struct {
+		name, goos, candidate, fromPath, want string
+		mode                                  os.FileMode
+	}{
+		{"PATH wins", "darwin", local, "/from/path", "/from/path", 0755},
+		{"missing", "darwin", "", "", "", 0},
+		{"darwin executable", "darwin", local, "", local, 0755},
+		{"darwin non-executable", "darwin", local, "", "", 0644},
+		{"darwin directory", "darwin", local, "", "", os.ModeDir | 0755},
+		{"linux executable", "linux", local, "", local, 0755},
+		{"windows home exe", "windows", filepath.Join(home, ".local", "bin", "claude.exe"), "", filepath.Join(home, ".local", "bin", "claude.exe"), 0644},
+		{"windows home cmd", "windows", filepath.Join(home, ".local", "bin", "claude.cmd"), "", filepath.Join(home, ".local", "bin", "claude.cmd"), 0644},
+		{"windows legacy home exe", "windows", filepath.Join(home, ".claude", "local", "claude.exe"), "", filepath.Join(home, ".claude", "local", "claude.exe"), 0644},
+		{"windows APPDATA cmd", "windows", filepath.Join(appdata, "npm", "claude.cmd"), "", filepath.Join(appdata, "npm", "claude.cmd"), 0644},
+		{"windows directory", "windows", filepath.Join(home, ".local", "bin", "claude.exe"), "", "", os.ModeDir | 0755},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			look := func(name string) (string, error) {
+				if name != "claude" {
+					t.Fatalf("PATH lookup name = %q, want claude", name)
+				}
+				if tc.fromPath != "" {
+					return tc.fromPath, nil
+				}
+				return "", os.ErrNotExist
+			}
+			stat := func(path string) (os.FileInfo, error) {
+				if tc.fromPath != "" {
+					t.Fatalf("stat(%q) called after successful PATH lookup", path)
+				}
+				if path != tc.candidate || tc.candidate == "" {
+					return nil, os.ErrNotExist
+				}
+				return fstest.MapFS{"candidate": &fstest.MapFile{Mode: tc.mode}}.Stat("candidate")
+			}
+			if got := findClaude(tc.goos, home, appdata, look, stat); got != tc.want {
+				t.Fatalf("findClaude(%q) = %q, want %q (candidate %q, mode %v)", tc.goos, got, tc.want, tc.candidate, tc.mode)
+			}
+		})
 	}
 }
 
