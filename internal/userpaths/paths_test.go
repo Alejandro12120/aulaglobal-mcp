@@ -27,3 +27,21 @@ func TestDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCode(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			home := t.TempDir()
+			xdg := t.TempDir()
+			if got := OpenCode(home, ""); got != filepath.Join(home, ".config", "opencode") {
+				t.Fatal(got)
+			}
+			if got := OpenCode(home, xdg); got != filepath.Join(xdg, "opencode") {
+				t.Fatal(got)
+			}
+			if got := OpenCode(home, "relative"); got != filepath.Join(home, ".config", "opencode") {
+				t.Fatal(got)
+			}
+		})
+	}
+}

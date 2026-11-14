@@ -24,3 +24,11 @@ func Claude(goos, home, config string) string {
 	}
 	return filepath.Join(config, "Claude", "claude_desktop_config.json")
 }
+
+// OpenCode uses XDG on every OS, including Windows and macOS.
+func OpenCode(home, xdg string) string {
+	if xdg == "" || !filepath.IsAbs(xdg) {
+		xdg = filepath.Join(home, ".config")
+	}
+	return filepath.Join(xdg, "opencode")
+}
