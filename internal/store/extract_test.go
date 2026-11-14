@@ -153,3 +153,138 @@ func TestExtractionCaps(t *testing.T) {
 		t.Fatal("page count ignored")
 	}
 }
+
+func TestLateExtractionCaches(t *testing.T) {
+	for _, callerTimeout := range []bool{false, true} {
+		t.Run(fmt.Sprint(callerTimeout), func(t *testing.T) {
+			dir := t.TempDir()
+			s, _ := Open(dir, 1024, 1)
+			defer s.Root.Close()
+			os.WriteFile(filepath.Join(dir, "slow.pdf"), []byte("fake"), 0600)
+			finished := make(chan struct{})
+			release := make(chan struct{})
+			s.pdfExtractor = func(context.Context, []byte) (document, error) {
+				<-release
+				close(finished)
+				return document{Pages: []Page{{1, "late result"}}}, nil
+			}
+			s.ExtractTimeout = 20 * time.Millisecond
+			ctx := context.Background()
+			if callerTimeout {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 10*time.Millisecond)
+				defer cancel()
+			}
+			r, e := s.Read(ctx, "slow.pdf", 0, 1000)
+			close(release)
+			<-finished
+			if (!callerTimeout && (e != nil || !strings.Contains(r.Note, "extraction in progress"))) || (callerTimeout && e != context.DeadlineExceeded) {
+				t.Errorf("timeout note: %+v %v", r, e)
+			}
+			// Wait for the asynchronous cache write, without starting another parse.
+			deadline := time.Now().Add(time.Second)
+			for {
+				entries, _ := os.ReadDir(filepath.Join(dir, ".aulaglobal-cache"))
+				cached := false
+				for _, entry := range entries {
+					if strings.HasSuffix(entry.Name(), ".json") {
+						cached = true
+					}
+				}
+				if cached {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("late successful parse was not cached")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			r, e = s.Read(context.Background(), "slow.pdf", 0, 1000)
+			if e != nil || !strings.Contains(r.Text, "late result") {
+				t.Fatalf("%+v %v", r, e)
+			}
+
+		})
+	}
+}
+func TestCanonicalFoldersAndReadableCollisions(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, 1024, 1)
+	a := aulaglobal.File{Handle: "aaa", CourseID: 1, CourseName: "Álgebra", Section: "Tema", Filename: "a.pdf"}
+	b := a
+	b.Handle = "bbb"
+	paths, e := s.paths([]aulaglobal.File{b, a})
+	if e != nil || paths["bbb"] != filepath.Join("Álgebra", "Tema", "a (2).pdf") {
+		t.Errorf("%v %v", paths, e)
+	}
+	s.Root.Close()
+	s, _ = Open(dir, 1024, 1)
+	defer s.Root.Close()
+	c := a
+	c.Handle = "ccc"
+	c.CourseName = "Renamed"
+	c.Filename = "other.pdf"
+	paths, e = s.paths([]aulaglobal.File{c, b})
+	if e != nil || paths["ccc"] != filepath.Join("Álgebra", "Tema", "other.pdf") || paths["bbb"] != filepath.Join("Álgebra", "Tema", "a (2).pdf") {
+		t.Fatalf("%v %v", paths, e)
+	}
+}
+
+func TestExtractTimeoutConfiguration(t *testing.T) {
+	for _, v := range []string{"", "1", "600", "0", "601", "-1", "abc"} {
+		t.Run(v, func(t *testing.T) {
+			t.Setenv("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS", v)
+			s, e := Open(t.TempDir(), 1024, 1)
+			good := v == "" || v == "1" || v == "600"
+			if (e == nil) != good {
+				t.Fatalf("value %q: %v", v, e)
+			}
+			if e == nil {
+				defer s.Root.Close()
+				expected := 60 * time.Second
+				if v == "1" {
+					expected = time.Second
+				}
+				if v == "600" {
+					expected = 600 * time.Second
+				}
+				if s.ExtractTimeout != expected {
+					t.Fatal(s.ExtractTimeout)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractionSlotBound(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, 1024, 1)
+	defer s.Root.Close()
+	s.ExtractTimeout = 20 * time.Millisecond
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	s.pdfExtractor = func(context.Context, []byte) (document, error) {
+		started <- struct{}{}
+		<-release
+		return document{Pages: []Page{{1, "done"}}}, nil
+	}
+	for _, name := range []string{"a.pdf", "b.pdf", "c.pdf"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("fake"), 0600)
+		r, e := s.Read(context.Background(), name, 0, 1000)
+		if e != nil || !strings.Contains(r.Note, "extraction in progress") {
+			t.Fatalf("%+v %v", r, e)
+		}
+	}
+	if len(started) != 2 {
+		t.Errorf("started %d parsers, want 2", len(started))
+	}
+	close(release)
+	// A successful retry waits until both earlier jobs have released their slots.
+	deadline := time.Now().Add(time.Second)
+	for len(extractionSlots) > 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(extractionSlots) != 0 {
+		t.Fatal("slots not released")
+	}
+}

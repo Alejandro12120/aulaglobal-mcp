@@ -132,3 +132,40 @@ func TestSecretReplaceMetadata(t *testing.T) {
 		t.Fatalf("%+v %v", a, e)
 	}
 }
+
+func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
+	for _, text := range []string{strings.Repeat("a", 2500), strings.Repeat("界", 1500), strings.Repeat("界", 2500)} {
+		t.Run(fmt.Sprint(len(text)), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.ParseForm()
+				switch r.Form.Get("wsfunction") {
+				case "mod_assign_get_assignments":
+					fmt.Fprintf(w, `{"courses":[{"id":1,"fullname":"Álgebra 26/27 Algebra","assignments":[{"id":1,"intro":%q,"introattachments":[{"filename":"a.pdf","fileurl":"http://example/a.pdf"}]}]}]}`, text)
+				case "core_course_get_contents":
+					fmt.Fprint(w, `[]`)
+				default:
+					t.Error("unnecessary course name lookup")
+					fmt.Fprint(w, `{"courses":[]}`)
+				}
+			}))
+			defer ts.Close()
+			c := New(ts.URL, StaticToken{Value: "secret"})
+			out, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, Status: "all", Language: "en"}, func(s string) string { return s })
+			if e != nil {
+				t.Fatal(e)
+			}
+			expected := text
+			if len([]rune(text)) > 2000 {
+				expected = string([]rune(text)[:2000]) + " [truncated]"
+			}
+			a := out.Assignments[0]
+			if a.Intro != expected {
+				t.Errorf("intro length %d, want %d", len([]rune(a.Intro)), len([]rune(expected)))
+			}
+			if a.CourseName != "Algebra" || a.Attachments[0].CourseName != "Álgebra" {
+				t.Errorf("names: %+v", a)
+			}
+			c.Files(context.Background(), 1, nil, nil)
+		})
+	}
+}

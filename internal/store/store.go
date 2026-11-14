@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,13 +24,23 @@ import (
 )
 
 type Store struct {
-	Root    *os.Root
-	MaxFile int64
-	Workers int
-	batch   chan struct{}
+	Root           *os.Root
+	MaxFile        int64
+	Workers        int
+	batch          chan struct{}
+	ExtractTimeout time.Duration
+	pdfExtractor   func(context.Context, []byte) (document, error)
 }
 
 func Open(path string, max int64, workers int) (*Store, error) {
+	timeout := int64(60)
+	if v := os.Getenv("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS"); v != "" {
+		var err error
+		timeout, err = strconv.ParseInt(v, 10, 64)
+		if err != nil || timeout < 1 || timeout > 600 {
+			return nil, errors.New("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS must be 1..600")
+		}
+	}
 	if max < 1 || max > 16<<30 || workers < 1 || workers > 32 {
 		return nil, errors.New("invalid size or concurrency")
 	}
@@ -40,7 +51,7 @@ func Open(path string, max int64, workers int) (*Store, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &Store{Root: r, MaxFile: max, Workers: workers, batch: make(chan struct{}, 1)}, nil
+	return &Store{Root: r, MaxFile: max, Workers: workers, ExtractTimeout: time.Duration(timeout) * time.Second, batch: make(chan struct{}, 1)}, nil
 }
 func Sanitize(s string) string {
 	s = strings.Map(func(r rune) rune {

@@ -120,7 +120,8 @@ Usa list_courses → list_course_files → download_files → read_file.
 Los handles se conservan en memoria (máximo 100000); vuelve a listar tras reiniciar.
 Las rutas usan `<Asignatura localizada>/<Sección>/<archivo>`, conservando
 subcarpetas filepath de los módulos carpeta, siempre sanitizadas.
-Solo las colisiones añaden un sufijo estable con la identidad del archivo.
+Solo las colisiones añaden sufijos legibles (2), (3), etc., asignados en orden de handle y conservados en el manifiesto.
+Cada curso usa un nombre local canónico en español, persistido por ID en el manifiesto incluso tras renombrarlo; el idioma de visualización no cambia la carpeta. Los nombres conocidos se reutilizan en memoria sin otra consulta de curso.
 El manifiesto atómico `.aulaglobal-cache/manifest.json` registra handle estable
 (hash de curso + módulo + filepath + filename), ruta, tamaño y timemodified.
 Una revisión de URL no cambia el handle ni crea otra copia; skip funciona tras
@@ -134,8 +135,8 @@ Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
 No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
 sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
 Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
-optimizado. Imagen final: 14314905 bytes (14.31 MB); detalles en VERIFICATION.md.
-Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto 5 segundos
+optimizado. Imagen final: 14326383 bytes (14.33 MB); detalles en VERIFICATION.md.
+Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto configurable de espera de 60 segundos
 por extracción; panic recuperado. Como Go no permite matar una goroutine,
 un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
 de proceso ni garantía de memoria del parser frente a un PDF malicioso.
@@ -166,6 +167,7 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 | AULAGLOBAL_DOWNLOAD_DIR | ./data; /data en Docker |
 | AULAGLOBAL_CONCURRENCY | 4; 1..32 |
 | AULAGLOBAL_DOWNLOAD_STALL_SECONDS | 60; 1..3600; tiempo sin recibir bytes |
+| AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS | 60; 1..600; espera de extracción |
 | AULAGLOBAL_MAX_FILE_BYTES | 268435456; 1..17179869184 |
 | MCP_TRANSPORT / --transport | stdio; http en Docker |
 | MCP_ADDR / --addr | 127.0.0.1:8080; 0.0.0.0:8080 en Docker |
@@ -177,6 +179,7 @@ Host se valida para evitar DNS rebinding; Origin se compara de forma exacta.
 Para otro puerto/hostname configura --allowed-hosts explícitamente.
 --dangerously-disable-http-auth desactiva autenticación con advertencia en stderr.
 Cuerpos HTTP limitados a 1 MiB, cabeceras 16 KiB, ReadHeaderTimeout 10s, ReadTimeout 30s e IdleTimeout 60s.
+Go 1.26 elimina el deadline de lectura tras consumir el cuerpo al iniciar la lectura de fondo; ReadTimeout no limita la ejecución posterior (test con conexión real).
 Sin WriteTimeout global para permitir llamadas MCP largas; desconectar el cliente cancela su contexto.
 SIGINT/SIGTERM cierran el servidor con hasta 10 segundos de margen.
 Logs JSON slog solo en stderr; stdout queda reservado para MCP stdio.
@@ -240,3 +243,5 @@ por symlinks. scripts/smoke.mjs verifica ambos transportes y seguridad HTTP.
 Estructura: cmd/aulaglobal-mcp (CLI/config/lifecycle),
 internal/aulaglobal (API/token/cookie), internal/store (descarga/lectura/búsqueda),
 internal/mcpserver (schemas/herramientas/seguridad HTTP).
+
+Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.

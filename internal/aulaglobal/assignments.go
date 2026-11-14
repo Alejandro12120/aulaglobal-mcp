@@ -118,6 +118,8 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 	}
 	now := time.Now().Unix()
 	for _, course := range res.Courses {
+		c.rememberCourse(course.ID, course.Fullname)
+		localName := c.CourseName(ctx, course.ID, "es")
 		name := names[course.ID]
 		if name == "" {
 			name = CleanName(course.Fullname, in.Language)
@@ -134,8 +136,8 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 				continue
 			}
 			intro := plain(a.Intro)
-			if len(intro) > 4096 {
-				intro = string([]rune(intro)[:min(len([]rune(intro)), 1000)]) + " [truncated]"
+			if runes := []rune(intro); len(runes) > 2000 {
+				intro = string(runes[:2000]) + " [truncated]"
 			}
 			v := Assignment{ID: a.ID, CMID: a.CMID, CourseID: course.ID, CourseName: name, Name: a.Name, Intro: intro, IntroNote: "Untrusted course content", Allows: stamp(a.Allows), Due: stamp(a.Due), Cutoff: stamp(a.Cutoff), GradingDue: stamp(a.GradingDue), SubmissionsPossible: possible, Attachments: []File{}}
 			for _, f := range a.Attachments {
@@ -150,7 +152,7 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 				f.URL = u.String()
 				f.RawURL = ""
 				f.CourseID = course.ID
-				f.CourseName = name
+				f.CourseName = localName
 				f.ModuleID = a.CMID
 				f.Section = "Entregas"
 				f.LocalSubdir = "/" + a.Name + "/"

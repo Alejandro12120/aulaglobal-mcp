@@ -68,13 +68,18 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 		f.Close()
 		return d, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	budget := s.ExtractTimeout
+	if budget <= 0 {
+		budget = 60 * time.Second
+	}
+	parseCtx := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	select {
 	case extractionSlots <- struct{}{}:
 	case <-ctx.Done():
 		f.Close()
-		return d, ctx.Err()
+		return d, extractionWaitError(ctx)
 	}
 	type result struct {
 		d document
@@ -88,6 +93,13 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 			if recover() != nil {
 				r.e = errors.New("malformed document refused")
 			}
+			if r.e == nil {
+				b, err := json.Marshal(r.d)
+				if err == nil {
+					err = s.atomic(cache, b)
+				}
+				r.e = err
+			}
 			done <- r
 		}()
 		b, err := io.ReadAll(io.LimitReader(f, 64<<20+1))
@@ -95,23 +107,28 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 			r.e = err
 			return
 		}
-		r.d, r.e = decodeDocument(ctx, path, b)
+		r.d, r.e = s.decodeDocument(parseCtx, path, b)
 	}()
 	select {
 	case <-ctx.Done():
-		return d, ctx.Err()
+		return d, extractionWaitError(ctx)
 	case r := <-done:
 		if r.e != nil {
 			return d, r.e
 		}
-		b, _ := json.Marshal(r.d)
-		if e = s.atomic(cache, b); e != nil {
-			return d, e
-		}
 		return r.d, nil
 	}
 }
+func extractionWaitError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return ctx.Err()
+	}
+	return errors.New("extraction in progress, retry shortly")
+}
 func decodeDocument(ctx context.Context, path string, b []byte) (document, error) {
+	return (&Store{}).decodeDocument(ctx, path, b)
+}
+func (s *Store) decodeDocument(ctx context.Context, path string, b []byte) (document, error) {
 	d := document{Pages: []Page{}}
 	add := func(page int, text string) error {
 		total := len(text)
@@ -126,6 +143,9 @@ func decodeDocument(ctx context.Context, path string, b []byte) (document, error
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".pdf":
+		if s.pdfExtractor != nil {
+			return s.pdfExtractor(ctx, b)
+		}
 		r, e := pdf.NewReader(bytes.NewReader(b), int64(len(b)))
 		if e != nil {
 			return d, errors.New("invalid PDF")

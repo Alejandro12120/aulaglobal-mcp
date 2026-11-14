@@ -139,6 +139,8 @@ func run() error {
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true})
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", mcpserver.SecureHTTP(handler, token, *unsafe, allowed, strings.Split(*origins, ",")))
+		// Go 1.26 clears ReadTimeout after body EOF before its background read;
+		// this bounds body reads without imposing a tool execution deadline.
 		httpServer := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 		done := make(chan error, 1)
 		go func() { done <- httpServer.ListenAndServe() }()

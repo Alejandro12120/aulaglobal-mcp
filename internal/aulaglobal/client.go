@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -72,6 +73,8 @@ type Client struct {
 	HTTP         *http.Client
 	Tokens       TokenProvider
 	StallTimeout time.Duration
+	courseMu     sync.Mutex
+	courseNames  map[int64]string
 }
 
 func New(base string, p TokenProvider) *Client {
@@ -252,6 +255,7 @@ func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, err
 		if s == "" {
 			s = all[i].Fullname
 		}
+		c.rememberCourse(all[i].ID, s)
 		all[i].Name = CleanName(s, lang)
 	}
 	return all, nil
@@ -393,11 +397,31 @@ func StableHandle(course, module int64, path, name string) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:16])
 }
+
+// Cache the bilingual source so both display languages and local Spanish names agree.
+func (c *Client) rememberCourse(id int64, name string) {
+	if name == "" {
+		return
+	}
+	c.courseMu.Lock()
+	defer c.courseMu.Unlock()
+	if c.courseNames == nil {
+		c.courseNames = make(map[int64]string)
+	}
+	c.courseNames[id] = name
+}
 func (c *Client) CourseName(ctx context.Context, id int64, lang string) string {
+	c.courseMu.Lock()
+	name := c.courseNames[id]
+	c.courseMu.Unlock()
+	if name != "" {
+		return CleanName(name, lang)
+	}
 	var res struct {
 		Courses []Course `json:"courses"`
 	}
 	if c.WS(ctx, "core_course_get_courses_by_field", url.Values{"field": {"id"}, "value": {strconv.FormatInt(id, 10)}}, &res) == nil && len(res.Courses) > 0 {
+		c.rememberCourse(id, res.Courses[0].Fullname)
 		return CleanName(res.Courses[0].Fullname, lang)
 	}
 	return fmt.Sprintf("course-%d", id)

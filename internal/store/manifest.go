@@ -14,9 +14,11 @@ import (
 )
 
 type manifestEntry struct {
-	Path     string `json:"path"`
-	Size     *int64 `json:"size"`
-	Modified int64  `json:"timemodified"`
+	CourseID     int64  `json:"course_id,omitempty"`
+	CourseFolder string `json:"course_folder,omitempty"`
+	Path         string `json:"path"`
+	Size         *int64 `json:"size"`
+	Modified     int64  `json:"timemodified"`
 }
 
 func (s *Store) atomic(path string, b []byte) error {
@@ -71,6 +73,22 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 	} else if !os.IsNotExist(e) {
 		return nil, e
 	}
+	folders := map[int64]string{}
+	// Sort legacy entries as well: a course must never depend on map iteration order.
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		v := m[id]
+		if v.CourseID != 0 && v.CourseFolder != "" {
+			if Sanitize(v.CourseFolder) != v.CourseFolder {
+				return nil, errors.New("invalid course folder")
+			}
+			folders[v.CourseID] = v.CourseFolder
+		}
+	}
 	used := map[string]string{}
 	for id, v := range m {
 		if valid(v.Path) != nil {
@@ -83,6 +101,23 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 	out := map[string]string{}
 	for _, f := range sorted {
 		id := f.Handle
+		// Recover a pre-upgrade course folder from an already assigned handle.
+		if folders[f.CourseID] == "" {
+			for _, candidate := range sorted {
+				if candidate.CourseID == f.CourseID && m[candidate.Handle].Path != "" {
+					folders[f.CourseID] = strings.Split(filepath.ToSlash(m[candidate.Handle].Path), "/")[0]
+					break
+				}
+			}
+		}
+		if folders[f.CourseID] == "" {
+			name := f.CourseName
+			if name == "" {
+				name = fmtCourse(f.CourseID)
+			}
+			folders[f.CourseID] = Sanitize(name)
+		}
+		f.CourseName = folders[f.CourseID]
 		p := m[id].Path
 		if p == "" {
 			p = Path(f)
@@ -98,16 +133,13 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 					return nil, err
 				}
 				ext := filepath.Ext(base)
-				suffix := id
-				if n > 0 {
-					suffix = fmt.Sprintf("%s-%d", id, n)
-				}
+				suffix := fmt.Sprintf("%d", n+2)
 				p = strings.TrimSuffix(base, ext) + " (" + suffix + ")" + ext
 			}
 
 		}
 		used[p] = id
-		m[id] = manifestEntry{p, f.Size, f.Modified}
+		m[id] = manifestEntry{Path: p, Size: f.Size, Modified: f.Modified, CourseID: f.CourseID, CourseFolder: f.CourseName}
 		out[id] = p
 	}
 	b, e = json.Marshal(m)
