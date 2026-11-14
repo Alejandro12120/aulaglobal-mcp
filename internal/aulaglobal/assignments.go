@@ -2,6 +2,7 @@ package aulaglobal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -171,13 +172,22 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 		return b == 0 || a < b
 	})
 	if in.IncludeSubmissionStatus {
+		// A dead token fails every call the same way: stop and report it once.
 		jobs := make(chan int)
+		stop := make(chan struct{})
+		var once sync.Once
+		var dead error
 		var wg sync.WaitGroup
 		for n := 0; n < 4; n++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				for i := range jobs {
+					select {
+					case <-stop:
+						continue
+					default:
+					}
 					a := &out.Assignments[i]
 					var res struct {
 						LastAttempt struct {
@@ -195,6 +205,10 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 					}
 					e := c.WS(ctx, "mod_assign_get_submission_status", url.Values{"assignid": {strconv.FormatInt(a.ID, 10)}}, &res)
 					a.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: res.Feedback.Grade.Grade}
+					if errors.Is(e, ErrTokenExpired) {
+						once.Do(func() { dead = e; close(stop) })
+						continue
+					}
 					if e != nil {
 						a.Submission.Error = e.Error()
 					}
@@ -206,10 +220,16 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 				out.Assignments[i].Submission = &Submission{Error: "submission status call limit: 100"}
 				continue
 			}
-			jobs <- i
+			select {
+			case jobs <- i:
+			case <-stop:
+			}
 		}
 		close(jobs)
 		wg.Wait()
+		if dead != nil {
+			return AssignmentsOutput{Assignments: []Assignment{}}, dead
+		}
 	}
 	return out, nil
 }

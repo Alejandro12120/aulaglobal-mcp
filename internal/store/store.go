@@ -92,7 +92,11 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) []Result {
+// Download fetches files with bounded workers. If Moodle rejects the token (confirmed
+// dead), dispatching stops and the returned error satisfies errors.Is(err,
+// aulaglobal.ErrTokenExpired); the per-file results are then incomplete and
+// should be discarded in favour of the single error.
+func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) ([]Result, error) {
 	// Serialize batches so concurrent tools cannot replace the same destination.
 	select {
 	case s.batch <- struct{}{}:
@@ -102,7 +106,7 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 		for i, f := range files {
 			out[i] = Result{Path: Path(f), Status: "error", Error: ctx.Err().Error()}
 		}
-		return out
+		return out, nil
 	}
 	paths, err := s.paths(files)
 	if err != nil {
@@ -110,28 +114,42 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 		for i := range out {
 			out[i] = Result{Status: "error", Error: err.Error()}
 		}
-		return out
+		return out, nil
 	}
 	out := make([]Result, len(files))
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	jobs := make(chan int)
+	stop := make(chan struct{})
+	var once sync.Once
+	var dead error
 	var wg sync.WaitGroup
 	for n := 0; n < s.Workers; n++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				out[i] = s.one(ctx, c, files[i], paths[files[i].Handle])
+				r, e := s.one(dctx, c, files[i], paths[files[i].Handle])
+				out[i] = r
+				if e != nil {
+					once.Do(func() { dead = e; close(stop); cancel() })
+				}
 			}
 		}()
 	}
 	for i := range files {
-		jobs <- i
+		select {
+		case jobs <- i:
+		case <-stop:
+		}
 	}
 	close(jobs)
 	wg.Wait()
-	return out
+	return out, dead
 }
-func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, path string) (res Result) {
+
+// one downloads a single file. The error is non-nil only when the token is dead.
+func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, path string) (res Result, fatal error) {
 	res.Path = path
 	res.Status = "error"
 	run := func() error {
@@ -170,6 +188,10 @@ func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File
 		if typ == "application/json" || strings.HasPrefix(strings.TrimSpace(string(peek)), "{") {
 			var problem struct{ Exception, Errorcode string }
 			if (json.Unmarshal(peek, &problem) == nil && (problem.Exception != "" || problem.Errorcode != "")) || regexp.MustCompile(`"(exception|errorcode)"\s*:`).Match(peek) {
+				if api := c.ClassifyAPIError(ctx, "", problem.Errorcode); errors.Is(api, aulaglobal.ErrTokenExpired) {
+					fatal = api
+					return api
+				}
 				return errors.New("Moodle JSON file error (token may be invalid or expired)")
 			}
 			if f.Mimetype != "application/json" && typ == "application/json" {

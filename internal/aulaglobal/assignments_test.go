@@ -3,6 +3,7 @@ package aulaglobal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -167,6 +169,40 @@ func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
 				t.Errorf("names: %+v", a)
 			}
 			c.Files(context.Background(), 1, nil, nil)
+		})
+	}
+}
+
+func TestAssignmentsAbortOnDeadToken(t *testing.T) {
+	now := time.Now().Unix()
+	for _, code := range []string{"invalidtoken", "accessexception"} {
+		t.Run(code, func(t *testing.T) {
+			var statusCalls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.ParseForm()
+				switch r.Form.Get("wsfunction") {
+				case "mod_assign_get_assignments":
+					asg := []string{}
+					for i := 1; i <= 30; i++ {
+						asg = append(asg, fmt.Sprintf(`{"id":%d,"cmid":%d,"name":"a%d","duedate":%d}`, i, i, i, now+3600))
+					}
+					fmt.Fprintf(w, `{"courses":[{"id":1,"fullname":"X","assignments":[%s]}]}`, strings.Join(asg, ","))
+				case "mod_assign_get_submission_status":
+					statusCalls.Add(1)
+					fmt.Fprintf(w, `{"exception":"x","errorcode":%q}`, code)
+				case "core_webservice_get_site_info":
+					fmt.Fprint(w, `{"exception":"x","errorcode":"invalidtoken"}`)
+				}
+			}))
+			defer ts.Close()
+			c := New(ts.URL, StaticToken{Value: "secret"})
+			out, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, IncludeSubmissionStatus: true}, func(s string) string { return s })
+			if !errors.Is(e, ErrTokenExpired) || len(out.Assignments) != 0 {
+				t.Fatalf("want single token error, got %v with %d assignments", e, len(out.Assignments))
+			}
+			if n := statusCalls.Load(); n > 8 {
+				t.Fatalf("not short-circuited: %d status calls", n)
+			}
 		})
 	}
 }

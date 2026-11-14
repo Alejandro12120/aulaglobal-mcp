@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -161,5 +162,63 @@ func TestWriteSecret(t *testing.T) {
 	}
 	if e = WriteSecret(path, "overwrite"); e == nil {
 		t.Fatal("overwrote existing secret")
+	}
+}
+
+func TestTokenClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name, code, siteInfo      string
+		fn                        string
+		expired, tokenOK          bool
+		wantSubstr, wantNotSubstr string
+		siteInfoCalls             int32
+	}{
+		{"invalidtoken is dead without probing", "invalidtoken", "", "core_course_get_contents", true, false, "ha caducado", "denegado", 0},
+		{"invalidtimedtoken is dead", "invalidtimedtoken", "", "core_course_get_contents", true, false, "ha caducado", "denegado", 0},
+		{"accessexception, site_info dead", "accessexception", `{"errorcode":"invalidtoken","exception":"x"}`, "core_course_get_contents", true, false, "aulaglobal-mcp setup", "denegado", 1},
+		{"accessexception, site_info itself", "accessexception", "", "core_webservice_get_site_info", true, false, "aulaglobal-mcp setup", "denegado", 0},
+		{"accessexception, token valid", "accessexception", `{"fullname":"Ana","userid":1}`, "core_course_get_contents", false, true, "denegado el acceso", "aulaglobal-mcp setup", 1},
+		{"accessexception, site_info unreachable", "accessexception", "<html>", "core_course_get_contents", false, false, "Moodle web service error: accessexception", "setup", 1},
+		{"other code", "invalidparameter", "", "core_course_get_contents", false, false, "invalidparameter", "setup", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var probes atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.ParseForm()
+				if r.Form.Get("wsfunction") == "core_webservice_get_site_info" {
+					probes.Add(1)
+					if tc.fn == "core_webservice_get_site_info" {
+						fmt.Fprintf(w, `{"exception":"x","errorcode":%q}`, tc.code)
+					} else {
+						fmt.Fprint(w, tc.siteInfo)
+					}
+					return
+				}
+				fmt.Fprintf(w, `{"exception":"x","errorcode":%q}`, tc.code)
+			}))
+			defer ts.Close()
+			c := New(ts.URL, StaticToken{Value: "secret"})
+			e := c.WS(context.Background(), tc.fn, nil, &struct{}{})
+			var api *APIError
+			if !errors.As(e, &api) || api.Code != tc.code {
+				t.Fatalf("bad error: %v", e)
+			}
+			if errors.Is(e, ErrTokenExpired) != tc.expired || api.TokenOK != tc.tokenOK {
+				t.Fatalf("expired=%v tokenOK=%v: %v", errors.Is(e, ErrTokenExpired), api.TokenOK, e)
+			}
+			if !strings.Contains(e.Error(), tc.wantSubstr) || strings.Contains(e.Error(), tc.wantNotSubstr) || strings.Contains(e.Error(), "secret") {
+				t.Fatalf("message: %v", e)
+			}
+			if probes.Load() != tc.siteInfoCalls && !(tc.fn == "core_webservice_get_site_info" && probes.Load() == 1) {
+				t.Fatalf("site_info calls = %d, want %d", probes.Load(), tc.siteInfoCalls)
+			}
+		})
+	}
+}
+
+func TestMissingTokenMessage(t *testing.T) {
+	_, e := StaticToken{}.Get(context.Background())
+	if e == nil || !strings.Contains(e.Error(), "aulaglobal-mcp setup") {
+		t.Fatal(e)
 	}
 }

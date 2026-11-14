@@ -99,19 +99,19 @@ func TestManifestReplacement(t *testing.T) {
 	b := a
 	b.Handle = "bbb"
 	b.ModuleID = 3
-	results := s.Download(context.Background(), c, []aulaglobal.File{b, a})
+	results := dl(s, context.Background(), c, []aulaglobal.File{b, a})
 	if results[0].Path == results[1].Path || results[1].Path != path.Join("Álgebra", "Tema 1", "Carpeta", "a.txt") {
 		t.Fatalf("%+v", results)
 	}
 	s.Root.Close()
 	s, _ = Open(dir, 1024, 1)
 	defer s.Root.Close()
-	if r := s.Download(context.Background(), c, []aulaglobal.File{a})[0]; r.Status != "skipped" {
+	if r := dl(s, context.Background(), c, []aulaglobal.File{a})[0]; r.Status != "skipped" {
 		t.Fatalf("%+v", r)
 	}
 	a.URL = ts.URL + "?body=new"
 	a.Modified = 2
-	r := s.Download(context.Background(), c, []aulaglobal.File{a})[0]
+	r := dl(s, context.Background(), c, []aulaglobal.File{a})[0]
 	data, _ := s.Root.ReadFile(r.Path)
 	if r.Status != "downloaded" || r.Path != results[1].Path || string(data) != "new" {
 		t.Fatalf("%+v %s", r, data)
@@ -129,7 +129,7 @@ func TestDownloadStall(t *testing.T) {
 	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
 	c.StallTimeout = 40 * time.Millisecond
 	start := time.Now()
-	r := s.Download(context.Background(), c, []aulaglobal.File{{Filename: "x.txt", Handle: "x", URL: ts.URL}})[0]
+	r := dl(s, context.Background(), c, []aulaglobal.File{{Filename: "x.txt", Handle: "x", URL: ts.URL}})[0]
 	if r.Status != "error" || time.Since(start) > time.Second {
 		t.Fatalf("%+v", r)
 	}
