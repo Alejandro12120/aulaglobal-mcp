@@ -53,6 +53,10 @@ El programa necesita un *token*: una clave que permite leer AulaGlobal en tu
 nombre, la misma que usa la app móvil de Moodle. Se obtiene a partir de la
 cookie de sesión del navegador.
 
+Ejecuta `./obtener-token.sh` desde esta carpeta. Te guiará para copiar la cookie,
+la leerá sin mostrarla y guardará el token con permisos privados. Pregunta antes
+de reemplazarlo y comprueba la conexión si tienes curl.
+
 ### 2.1 Copiar la cookie desde el navegador
 
 1. Entra en <https://aulaglobal.uc3m.es> e **inicia sesión** como siempre.
@@ -81,32 +85,24 @@ pegues en chats, foros ni en el propio asistente de IA.
 
 ### 2.2 Convertir la cookie en token
 
-Vuelve a la terminal, dentro de la carpeta `aulaglobal-mcp`, y ejecuta:
+Vuelve al asistente y pega la cookie cuando te lo pida. No verás lo que pegas.
+
+<details>
+<summary>Método manual</summary>
+
+En Bash, dentro de la carpeta del proyecto:
 
 ```bash
+mkdir -p secrets data && chmod 700 secrets data
 IFS= read -rs -p 'Pega la cookie y pulsa Enter: ' cookie; printf '\n' >&2
 printf '%s' "$cookie" | ./aulaglobal-mcp token-from-cookie --output secrets/token
 unset cookie
 ```
 
-Pega la cookie cuando lo pida (no verás lo que pegas; es a propósito) y pulsa
-Enter. Si todo va bien, se crea el archivo `secrets/token` y el mensaje dice
-`token saved`.
+Añade `--force` al subcomando para reemplazarlo. Si falla, vuelve a iniciar sesión
+y copia una cookie nueva.
 
-- Si ya tenías un token y quieres sustituirlo, añade `--force` al final del
-  segundo comando.
-- Si falla, cierra sesión en AulaGlobal, vuelve a entrar y repite desde el 2.1
-  (la cookie puede haber caducado).
-
-### 2.3 (Opcional) Comprobar que el token funciona
-
-```bash
-curl -s -X POST https://aulaglobal.uc3m.es/webservice/rest/server.php \
-  --data-urlencode "wstoken=$(cat secrets/token)" \
-  -d wsfunction=core_webservice_get_site_info -d moodlewsrestformat=json | head -c 200; echo
-```
-
-Si aparece tu nombre (`"fullname"`), el token es válido.
+</details>
 
 ---
 
@@ -136,6 +132,30 @@ Crea un archivo llamado `.mcp.json` en la carpeta donde vayas a usar Claude Code
 Abre Claude Code en esa carpeta (`claude`), acepta el servidor `aulaglobal`
 cuando te lo pregunte y escribe `/mcp` para comprobar que aparece como
 conectado.
+
+### Codex
+
+Añade este bloque a `~/.codex/config.toml`, cambiando las rutas por las reales
+(usa `pwd` para conocerlas):
+
+```toml
+[mcp_servers.aulaglobal]
+command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
+args = ["--transport", "stdio"]
+env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
+```
+
+O regístralo desde la terminal en lugar de editar el archivo:
+
+```bash
+codex mcp add aulaglobal \
+  --env AULAGLOBAL_TOKEN_FILE=/ruta/a/aulaglobal-mcp/secrets/token \
+  --env AULAGLOBAL_DOWNLOAD_DIR=/ruta/a/aulaglobal-mcp/data \
+  -- /ruta/a/aulaglobal-mcp/aulaglobal-mcp --transport stdio
+```
+
+Comprueba el registro con `codex mcp list`. Abre Codex y usa `/mcp` para comprobar
+la conexión; si ya estaba abierto, reinícialo.
 
 ### Claude Desktop u otros clientes
 
@@ -187,7 +207,7 @@ Si vuelves a descargar, solo se bajan los archivos nuevos o modificados.
 
 **«token invalid or expired»**
 El token ha caducado o no es válido. Moodle puede hacer caducar los tokens
-(por defecto, a las 12 semanas). Repite el **Paso 2** añadiendo `--force`.
+(por defecto, a las 12 semanas). Vuelve a ejecutar `./obtener-token.sh` y acepta reemplazar el token.
 
 **«cannot read token file»**
 No existe `secrets/token` o la ruta del `.mcp.json` está mal. Revisa que la ruta
@@ -241,6 +261,19 @@ En tu cliente MCP configura la URL `http://127.0.0.1:8080/mcp` y la cabecera
 `Authorization: Bearer <tu MCP_HTTP_AUTH_TOKEN>`. Si usas otro puerto, por
 ejemplo `-p 127.0.0.1:9000:8080`, añade también
 `-e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000`.
+
+En Codex, usa este bloque en `~/.codex/config.toml` en lugar del bloque stdio:
+
+```toml
+[mcp_servers.aulaglobal]
+url = "http://127.0.0.1:8080/mcp"
+bearer_token_env_var = "MCP_HTTP_AUTH_TOKEN"
+```
+
+Inicia Codex desde la terminal donde exportaste `MCP_HTTP_AUTH_TOKEN`.
+También puedes registrarlo con
+`codex mcp add aulaglobal --url http://127.0.0.1:8080/mcp --bearer-token-env-var MCP_HTTP_AUTH_TOKEN`.
+Esta contraseña es la del servidor MCP, distinta del token de AulaGlobal.
 
 Para pararlo: `docker stop aulaglobal`.
 
