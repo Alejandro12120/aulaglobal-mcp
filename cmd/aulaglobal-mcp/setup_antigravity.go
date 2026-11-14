@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -181,64 +180,15 @@ func antigravityCLIEntry(cli, exe string, extra []string) (map[string]any, error
 	return entry, nil
 }
 
-func registerAntigravity(u setupUI, detected bool, cli, path, exe string, extra []string) {
-	if !detected {
-		fmt.Fprintln(u.out, "! Antigravity: no detectado.")
-		return
-	}
-	fmt.Fprintln(u.out, "✓ Antigravity: detectado.")
-	fmt.Fprint(u.out, "\n› ¿Añadir AulaGlobal a Antigravity? [S/n] ")
-	a := strings.ToLower(strings.TrimSpace(u.line()))
-	if a != "" && a != "s" && a != "si" && a != "sí" {
-		return
-	}
-	entry := map[string]any{"command": exe, "args": []string{"--transport", "stdio"}}
-	env := openCodeEntry(exe, extra)["environment"]
-	if env != nil {
-		entry["env"] = env
-	}
-	fail := func() {
-		fmt.Fprintln(u.out, "✗ No se pudo actualizar Antigravity con seguridad. No se ha cambiado la configuración.")
-		fmt.Fprintln(u.out, "! Alternativa manual: añade este bloque desde Manage MCP Servers → View raw config:")
-		b, _, _ := antigravityConfig(nil, entry, true)
-		fmt.Fprintln(u.out, string(b))
-	}
-	old, e := os.ReadFile(path)
-	if e != nil && !os.IsNotExist(e) {
-		fail()
-		return
-	}
-	b, exists, e := antigravityConfig(old, entry, false)
-	if e != nil {
-		fail()
-		return
-	}
-	if exists {
-		if !u.yes("Ya existe aulaglobal. ¿Quieres reemplazarlo? [s/N]") {
-			return
+func antigravityAssistant() assistant {
+	return fileAssistant{id: "antigravity", name: "Antigravity", reload: "Recarga /mcp en CLI; usa Restart en Customizations → Installed → MCP Servers, o reinicia el IDE.", path: func(e clientEnv) (string, error) { return userpaths.Antigravity(e.Home), nil }, detect: func(e clientEnv) bool {
+		_, ok := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
+		return ok
+	}, merge: antigravityConfig, generate: func(e clientEnv, w desiredEntry) (map[string]any, error) {
+		cli, _ := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
+		if cli != "" {
+			return e.GenerateAG(cli, w.Exe, w.Extra)
 		}
-		b, _, e = antigravityConfig(old, entry, true)
-	}
-	if e != nil {
-		fail()
-		return
-	}
-	if cli != "" {
-		generated, err := antigravityCLIEntry(cli, exe, extra)
-		if err != nil {
-			fail()
-			return
-		}
-		b, _, e = antigravityConfig(old, generated, true)
-		if e != nil {
-			fail()
-			return
-		}
-	}
-	if e = atomicConfig(path, b); e != nil {
-		fail()
-		return
-	}
-	fmt.Fprintln(u.out, "✓ Configuración de Antigravity guardada en:\n  "+path+"\n  Copia anterior (si existía): .bak.")
-	fmt.Fprintln(u.out, "! Recarga los servidores en /mcp (CLI) o usa Restart en Customizations → Installed → MCP Servers; en el IDE, vuelve a abrir o reinicia Antigravity.")
+		return w.entry(), nil
+	}}
 }

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -195,6 +194,11 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 }
 
 func atomicConfig(path string, b []byte) error {
+	if f, e := os.Lstat(path); e == nil && !f.Mode().IsRegular() {
+		return errors.New("Configuración no regular; no se ha cambiado nada")
+	} else if e != nil && !os.IsNotExist(e) {
+		return e
+	}
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return e
 	}
@@ -229,6 +233,9 @@ func writeAtomic(path string, b []byte) error {
 func claudeConfig(old []byte, entry map[string]any) ([]byte, error) {
 	root := map[string]json.RawMessage{}
 	if len(old) > 0 {
+		if e := strictAntigravityJSON(old); e != nil {
+			return nil, e
+		}
 		if e := json.Unmarshal(old, &root); e != nil {
 			return nil, e
 		}
@@ -276,6 +283,8 @@ func codexConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, 
 	if e != nil {
 		return nil, exists, e
 	}
+	// Avoid redeclaring the parent table when replacing our own generated block.
+	block = []byte(strings.TrimPrefix(string(block), "[mcp_servers]\n"))
 	if !exists {
 		out := append(append([]byte{}, old...), '\n')
 		out = append(out, block...)
@@ -324,56 +333,6 @@ func codexConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, 
 	e = toml.Unmarshal([]byte(out.String()), &check)
 	return []byte(out.String()), true, e
 }
-func register(u setupUI, exe, token, data, claude, codex string) error {
-	entry := map[string]any{"command": exe, "args": []string{"--transport", "stdio"}, "env": map[string]string{"AULAGLOBAL_TOKEN_FILE": token, "AULAGLOBAL_DOWNLOAD_DIR": data}}
-	for _, c := range []struct {
-		path, name string
-		json       bool
-	}{{claude, "Claude Desktop", true}, {codex, "Codex / ChatGPT desktop", false}} {
-		if _, e := os.Stat(filepath.Dir(c.path)); e != nil {
-			fmt.Fprintln(u.out, "! "+c.name+": no detectado.")
-			continue
-		}
-		fmt.Fprintln(u.out, "\n✓ "+c.name+": detectado.")
-		if !u.yes("¿Añadir AulaGlobal a " + c.name + "? [s/N]") {
-			continue
-		}
-		old, e := os.ReadFile(c.path)
-		if e != nil && !os.IsNotExist(e) {
-			return e
-		}
-		var b []byte
-		if c.json {
-			var root map[string]json.RawMessage
-			if len(old) > 0 && json.Unmarshal(old, &root) != nil {
-				return errors.New("JSON inválido; no se ha cambiado nada")
-			}
-			var servers map[string]json.RawMessage
-			_ = json.Unmarshal(root["mcpServers"], &servers)
-			if _, ok := servers["aulaglobal"]; ok && !u.yes("Ya existe aulaglobal. ¿Quieres reemplazarlo? [s/N]") {
-				continue
-			}
-			b, e = claudeConfig(old, entry)
-		} else {
-			var exists bool
-			b, exists, e = codexConfig(old, entry, false)
-			if e == nil && exists {
-				if !u.yes("Ya existe aulaglobal. ¿Quieres reemplazarlo? [s/N]") {
-					continue
-				}
-				b, _, e = codexConfig(old, entry, true)
-			}
-		}
-		if e != nil {
-			return e
-		}
-		if e = atomicConfig(c.path, b); e != nil {
-			return e
-		}
-		fmt.Fprintln(u.out, "✓ Configuración guardada en:\n ", c.path, "\n  Copia anterior (si existía): .bak.")
-	}
-	return nil
-}
 func setup(args []string) (result error) {
 	token, data, e := userpaths.Defaults()
 	if e != nil {
@@ -384,9 +343,16 @@ func setup(args []string) (result error) {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	secrets := flags.String("secrets-dir", "", "Carpeta privada para el token (prioridad sobre la variable de entorno)")
 	downloads := flags.String("data-dir", data, "Carpeta de apuntes")
+	clients := flags.String("clients", "", "Asistentes separados por comas: "+clientIDs())
+	yes := flags.Bool("yes", false, "Aceptar las opciones predeterminadas de los asistentes")
+	onlyClients := flags.Bool("only-clients", false, "Configurar solo los asistentes, sin obtener ni comprobar el token")
 	noPause := flags.Bool("no-pause", false, "Salir sin esperar Enter")
 	if e = flags.Parse(args); e != nil {
 		return e
+	}
+	selected, err := selectAssistants(*clients)
+	if err != nil {
+		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("setup no acepta argumentos adicionales")
@@ -403,10 +369,10 @@ func setup(args []string) (result error) {
 		return e
 	}
 	u := setupUI{os.Stdin, os.Stdout, func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) }}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) && !*yes {
 		return errors.New("Abre una terminal y ejecuta aulaglobal-mcp setup")
 	}
-	if !*noPause {
+	if !*noPause && !*yes {
 		defer func() {
 			if result != nil {
 				fmt.Fprintln(u.out, "\n✗ "+result.Error())
@@ -415,12 +381,20 @@ func setup(args []string) (result error) {
 			u.line()
 		}()
 	}
-	ok, e := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, data, u)
-	if e != nil {
-		return e
+	if !*onlyClients && *yes {
+		if f, err := os.Stat(token); err != nil || !f.Mode().IsRegular() {
+			return errors.New("Primero ejecuta setup en una terminal para guardar el token, o usa --only-clients")
+		}
+		checkToken(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, u)
 	}
-	if !ok {
-		return nil
+	if !*onlyClients && !*yes {
+		ok, e := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, data, u)
+		if e != nil {
+			return e
+		}
+		if !ok {
+			return nil
+		}
 	}
 	exe, e := os.Executable()
 	if e != nil {
@@ -439,29 +413,19 @@ func setup(args []string) (result error) {
 		return e
 	}
 	u.step(4, "Conectar con tus asistentes")
-	cli := findClaude(runtime.GOOS, home, os.Getenv("APPDATA"), exec.LookPath, os.Stat)
 	dt, dd, e := userpaths.Defaults()
 	if e != nil {
 		return e
 	}
-	extra := []string{}
-	if token != dt {
-		extra = append(extra, "-e", "AULAGLOBAL_TOKEN_FILE="+token)
-	}
-	if data != dd {
-		extra = append(extra, "-e", "AULAGLOBAL_DOWNLOAD_DIR="+data)
-	}
-	agCLI, agDetected := findAntigravity(runtime.GOOS, home, os.Getenv("LOCALAPPDATA"), exec.LookPath, os.Stat)
-	registerAntigravity(u, agDetected, agCLI, userpaths.Antigravity(home), exe, extra)
-	openDir := userpaths.OpenCode(home, os.Getenv("XDG_CONFIG_HOME"))
-	registerOpenCode(u, findOpenCode(runtime.GOOS, home, os.Getenv("APPDATA"), exec.LookPath, os.Stat), openDir, exe, extra, runOpenCode)
-	fallback := registerCode(u, cli, exe, extra, runClaude)
-	if e = register(u, exe, token, data, userpaths.Claude(runtime.GOOS, home, config), filepath.Join(home, ".codex", "config.toml")); e != nil {
+	want, e := desired(exe, token, data, dt, dd)
+	if e != nil {
 		return e
 	}
-	fmt.Fprintln(u.out, "\n✓ Todo listo.\n\nReinicia tu asistente o abre una sesión nueva.\nEn Claude Code, usa /mcp para comprobar la conexión.\nPrueba a pedir: «¿Qué asignaturas tengo?»")
-	if fallback {
-		manualCode(u, cli, exe, extra)
+	if configureClients(u, realClientEnv(runtime.GOOS, home, config), want, selected, *yes) {
+		return errors.New("Algunos asistentes no se pudieron configurar; consulta las instrucciones anteriores")
 	}
+
 	return nil
 }
+
+func decodeTOML(b []byte, root *map[string]any) error { return toml.Unmarshal(b, root) }
