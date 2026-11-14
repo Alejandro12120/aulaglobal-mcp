@@ -15,7 +15,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 )
 
 func TestSetupOffline(t *testing.T) {
@@ -144,43 +143,6 @@ func TestConfigMerging(t *testing.T) {
 	}
 }
 
-func TestRegisterConfirmationsAndBackups(t *testing.T) {
-	dir := t.TempDir()
-	claude := filepath.Join(dir, "Claude", "config.json")
-	codex := filepath.Join(dir, ".codex", "config.toml")
-	os.MkdirAll(filepath.Dir(claude), 0700)
-	os.MkdirAll(filepath.Dir(codex), 0700)
-	originalJSON := []byte(`{"theme":"dark","mcpServers":{"aulaglobal":{"command":"old"},"other":{"command":"keep"}}}`)
-	originalTOML := []byte("# keep\nmodel='x'\n[mcp_servers.aulaglobal]\ncommand='old'\n[mcp_servers.other]\ncommand='keep'\n")
-	os.WriteFile(claude, originalJSON, 0600)
-	os.WriteFile(codex, originalTOML, 0600)
-	var out strings.Builder
-	u := setupUI{strings.NewReader("s\ns\ns\ns\n"), &out, nil}
-	if e := register(u, "/absolute/program", "/absolute/token", "/absolute/data", claude, codex); e != nil {
-		t.Fatal(e)
-	}
-	for path, want := range map[string][]byte{claude: originalJSON, codex: originalTOML} {
-		bak, _ := os.ReadFile(path + ".bak")
-		if string(bak) != string(want) {
-			t.Fatal("backup", path)
-		}
-		b, _ := os.ReadFile(path)
-		if !strings.Contains(string(b), "keep") || !strings.Contains(string(b), "/absolute/program") {
-			t.Fatal(string(b))
-		}
-	}
-	// Declining replacement leaves both the config and its backup untouched.
-	before, _ := os.ReadFile(codex)
-	u.in = strings.NewReader("n\ns\nn\n")
-	if e := register(u, "changed", "token", "data", claude, codex); e != nil {
-		t.Fatal(e)
-	}
-	after, _ := os.ReadFile(codex)
-	if string(before) != string(after) {
-		t.Fatal("declined replacement")
-	}
-}
-
 func TestThreeEmptyAttempts(t *testing.T) {
 	var out strings.Builder
 	calls := 0
@@ -189,77 +151,6 @@ func TestThreeEmptyAttempts(t *testing.T) {
 	_, e := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), filepath.Join(root, "secrets", "token"), filepath.Join(root, "data"), u)
 	if e == nil || calls != 3 {
 		t.Fatal(e, calls)
-	}
-}
-
-func TestClaudeRegistration(t *testing.T) {
-	for _, tc := range []struct {
-		name, input, get         string
-		getErr, addErr, fallback bool
-		calls                    int
-	}{
-		{"first install", "\n", "No MCP server named \"aulaglobal\". Run `claude mcp add` to add one.", true, false, false, 2},
-		{"replace", "s\ns\n", "Scope: User config (available in all your projects)", false, false, false, 3},
-		{"keep", "s\nn\n", "Scope: User config (available in all your projects)", false, false, false, 1},
-		{"project scope", "s\n", "Scope: Project config", false, false, false, 1},
-		{"other scope", "s\n", "Scope: Local config", false, false, false, 1},
-		{"legacy missing", "s\n", "NO MCP SERVER FOUND", true, false, false, 2},
-		{"failure", "s\n", "No MCP server found", true, true, true, 2},
-		{"unknown failure", "s\n", "offline", true, false, true, 1},
-		{"decline", "n\n", "", false, false, false, 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var out strings.Builder
-			var calls [][]string
-			run := func(ctx context.Context, path string, args ...string) ([]byte, error) {
-				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) < 20*time.Second {
-					t.Fatal("missing deadline")
-				}
-				calls = append(calls, append([]string{}, args...))
-				if args[1] == "get" {
-					if tc.getErr {
-						return []byte(tc.get), fmt.Errorf("missing")
-					}
-					return []byte(tc.get), nil
-				}
-				if args[1] == "add" && tc.addErr {
-					return []byte("private diagnostic"), fmt.Errorf("failure")
-				}
-				if args[1] == "add" {
-					return []byte("Added stdio MCP server aulaglobal with command: /bin/true --transport stdio to user config"), nil
-				}
-				return []byte("Removed MCP server aulaglobal from user config"), nil
-			}
-			u := setupUI{strings.NewReader(tc.input), &out, nil}
-			fallback := registerCode(u, "/cli", "/path with spaces/program", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"}, run)
-			if fallback != tc.fallback || len(calls) != tc.calls {
-				t.Fatal(fallback, calls, out.String())
-			}
-			for _, args := range calls {
-				if args[1] == "add" {
-					want := []string{"mcp", "add", "--scope", "user", "-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes", "aulaglobal", "--", "/path with spaces/program", "--transport", "stdio"}
-					if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
-						t.Fatal(args)
-					}
-				}
-			}
-			if fallback {
-				manualCode(u, "/cli", "/program", nil)
-				if !strings.Contains(out.String(), "Alternativa manual") {
-					t.Fatal(out.String())
-				}
-			}
-			if strings.Contains(out.String(), "private diagnostic") {
-				t.Fatal("diagnostic leaked")
-			}
-		})
-	}
-	var out strings.Builder
-	if !registerCode(setupUI{strings.NewReader(""), &out, nil}, "", "/program", nil, nil) {
-		t.Fatal("missing fallback")
-	}
-	if strings.Join(codeArgs("/exe", nil), " ") != "mcp add --scope user aulaglobal -- /exe --transport stdio" {
-		t.Fatal("default args")
 	}
 }
 

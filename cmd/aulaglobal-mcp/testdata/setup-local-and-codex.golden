@@ -1,0 +1,23 @@
+Asistentes encontrados en este ordenador:
+  ✓ Claude Code
+  ✓ Codex / ChatGPT
+No encontrados: Claude Desktop, OpenCode, Antigravity
+
+› ¿Configurar todos? [S/n/e=elegir uno a uno]
+
+! Claude Code: configurado solo en este proyecto (local). Se moverá a usuario para todos tus proyectos.
+› ¿Mover AulaGlobal al ámbito de usuario? [S/n]
+✓ Claude Code: actualizado.
+
+! Codex / ChatGPT: configuración diferente (comando "/installed/aulaglobal-mcp-old").
+  Se usará: /installed/aulaglobal-mcp --transport stdio
+› ¿Actualizarlo? [S/n]
+· Codex / ChatGPT: omitido.
+
+Resumen:
+  Claude Code: actualizado
+  Codex / ChatGPT: omitido
+
+Claude Code: Abre una sesión nueva y usa /mcp para comprobar la conexión.
+
+Prueba a pedir: «¿Qué asignaturas tengo?»

@@ -88,12 +88,19 @@ xattr -d com.apple.quarantine aulaglobal-mcp
 
 ## 3. setup lo añade por ti
 
-El programa busca Claude Code, Claude Desktop, Codex/ChatGPT de escritorio, OpenCode y Antigravity.
-setup añade AulaGlobal a los que tengas instalados. Te pregunta antes
-de añadirlo a cada uno. Responde `s` si quieres; después reinicia el asistente.
-En Claude Desktop y Codex guarda una copia con el nombre terminado en `.bak`.
-En Claude Code pide permiso antes de reemplazar un registro de usuario.
-Abre una sesión nueva y escribe `/mcp` para comprobarlo.
+El programa muestra qué asistentes ha encontrado y comprueba si AulaGlobal ya está
+configurado. Si todo está bien, no te pregunta nada. Si falta o necesita un
+cambio, te explica qué hará: pulsa Enter para aceptar o escribe `n` para omitirlo.
+Si hay varios pendientes, puedes configurarlos todos o elegir uno a uno.
+Al terminar verás el resultado de cada uno y cómo recargar los que hayan cambiado.
+Antes de cambiar un archivo guarda una copia terminada en `.bak`.
+
+Puedes repetir setup y conservar tu token para volver a este paso. Opcionalmente,
+`setup --only-clients` conecta solo los asistentes, sin revisar tu cuenta;
+`--clients claude-code,codex` elige cuáles y `--yes` acepta los cambios sin preguntar.
+Por ejemplo: `setup --only-clients --clients claude-code,codex --yes`.
+`setup --help` muestra los nombres disponibles. Si hay un archivo que no puede
+cambiar con seguridad, muestra instrucciones para hacerlo a mano.
 
 Si no encuentra tu asistente, puedes hacerlo a mano. Donde pone
 `/ruta/al/aulaglobal-mcp`, usa la ruta completa del programa que descargaste.

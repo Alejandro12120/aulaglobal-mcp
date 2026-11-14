@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 )
 
 type claudeRunner func(context.Context, string, ...string) ([]byte, error)
@@ -53,54 +52,12 @@ func findClaude(goos, home, appdata string, look func(string) (string, error), s
 }
 
 func codeArgs(exe string, extra []string) []string {
-	args := append([]string{"mcp", "add", "--scope", "user"}, extra...)
-	return append(args, "aulaglobal", "--", exe, "--transport", "stdio")
+	args := append([]string{"mcp", "add", "--scope", "user", "aulaglobal"}, extra...)
+	return append(args, "--", exe, "--transport", "stdio")
 }
 
 // Each CLI operation has its own deadline. Never print subprocess output:
 // a third party CLI may include private configuration in diagnostics.
-func registerCode(u setupUI, cli, exe string, extra []string, run claudeRunner) bool {
-	if cli == "" {
-		fmt.Fprintln(u.out, "! Claude Code: no detectado.")
-		return true
-	}
-	fmt.Fprintln(u.out, "✓ Claude Code: detectado.")
-	fmt.Fprint(u.out, "\n› ¿Añadir AulaGlobal a Claude Code? [S/n] ")
-	answer := strings.ToLower(strings.TrimSpace(u.line()))
-	if answer != "" && answer != "s" && answer != "si" && answer != "sí" {
-		return false
-	}
-	call := func(args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		return run(ctx, cli, args...)
-	}
-	output, err := call("mcp", "get", "aulaglobal")
-	if err == nil {
-		// Fail closed if the CLI does not clearly identify a user-scoped entry.
-		if !strings.Contains(string(output), "User config") && !strings.Contains(string(output), "User scope") {
-			fmt.Fprintln(u.out, "! Ya existe aulaglobal en otro ámbito o no se pudo identificar.\n  Revisa «claude mcp get aulaglobal» antes de añadirlo.")
-			return false
-		}
-		if !u.yes("Ya existe aulaglobal. ¿Quieres reemplazarlo? [s/N]") {
-			return false
-		}
-		if _, err = call("mcp", "remove", "aulaglobal", "--scope", "user"); err != nil {
-			fmt.Fprintln(u.out, "✗ No se pudo quitar el registro anterior.")
-			return true
-		}
-	} else if lower := strings.ToLower(string(output)); !strings.Contains(lower, "no mcp server named") && !strings.Contains(lower, "no mcp server found") {
-		fmt.Fprintln(u.out, "✗ No se pudo comprobar el registro de Claude Code.")
-		return true
-	}
-	if _, err = call(codeArgs(exe, extra)...); err != nil {
-		fmt.Fprintln(u.out, "✗ No se pudo añadir AulaGlobal a Claude Code.")
-		return true
-	}
-	fmt.Fprintln(u.out, "✓ AulaGlobal añadido a Claude Code para todos tus proyectos.")
-	return false
-}
-
 func manualCode(u setupUI, cli, exe string, extra []string) {
 	if cli == "" {
 		cli = "claude"

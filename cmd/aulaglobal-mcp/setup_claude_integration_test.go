@@ -5,13 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 )
 
-// Runs natively so the host's Claude installation is available. Never parallel:
-// HOME, USERPROFILE, config overrides and the working directory are process-wide.
+// Compiled with Docker, executed on the host so Claude is available. Every
+// subprocess inherits the isolated HOME and cwd, including local removal.
 func TestRealClaudeRegistration(t *testing.T) {
 	if os.Getenv("AULAGLOBAL_TEST_REAL_CLAUDE") != "1" {
 		t.Skip("set AULAGLOBAL_TEST_REAL_CLAUDE=1")
@@ -29,54 +29,62 @@ func TestRealClaudeRegistration(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	t.Chdir(t.TempDir())
-	safe := func() {
+	e := realClientEnv(runtime.GOOS, home, filepath.Join(home, "config"))
+	e.Look = func(n string) (string, error) {
+		if n == "claude" {
+			return cli, nil
+		}
+		return "", os.ErrNotExist
+	}
+	e.Run = func(ctx context.Context, path string, args ...string) ([]byte, error) {
+		if os.Getenv("HOME") != home || home == "" || !strings.HasPrefix(home, os.TempDir()+string(os.PathSeparator)) {
+			t.Fatal("unsafe HOME")
+		}
+		b, err := runClaude(ctx, path, args...)
+		t.Logf("claude %s: %s (error %v)", strings.Join(args, " "), strings.TrimSpace(string(b)), err)
+		return b, err
+	}
+	call := func(args ...string) string {
 		t.Helper()
-		if os.Getenv("HOME") != home || os.Getenv("USERPROFILE") != home || home == "" || home == "/" || !strings.HasPrefix(home, os.TempDir()+string(os.PathSeparator)) {
-			t.Fatal("refusing to run Claude outside temporary HOME")
+		b, err := e.call(e.Run, cli, args...)
+		if err != nil {
+			t.Fatalf("%s: %s (%v)", args, b, err)
 		}
+		return string(b)
 	}
-	call := func(args ...string) (string, error) {
-		t.Helper()
-		safe()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		out, err := runClaude(ctx, cli, args...)
-		t.Logf("claude %s: %s (error: %v)", strings.Join(args, " "), strings.TrimSpace(string(out)), err)
-		return string(out), err
+	a := claudeAssistant{}
+	w := desiredEntry{Exe: "/bin/true", Extra: []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=" + filepath.Join(home, "notes with spaces")}}
+	if i := a.Inspect(e, w); i.err != nil || i.state != missing {
+		t.Fatal(i)
 	}
-	// Cleanup also runs on assertion failure, within the isolated environment.
-	defer func() { call("mcp", "remove", "aulaglobal", "--scope", "user") }()
-	for _, input := range []string{"\n", "s\ns\n"} {
-		var ui strings.Builder
-		var operations []string
-		runner := func(ctx context.Context, path string, args ...string) ([]byte, error) {
-			safe()
-			operations = append(operations, args[1])
-			out, err := runClaude(ctx, path, args...)
-			t.Logf("%s: %s (error: %v)", args[1], strings.TrimSpace(string(out)), err)
-			return out, err
+	for _, scope := range []string{"local", "project"} {
+		call("mcp", "add", "--scope", scope, "aulaglobal", "--", "/bin/true")
+		i := a.Inspect(e, w)
+		if i.err != nil || i.state != otherScope || i.scope != scope {
+			t.Fatal(i)
 		}
-		if registerCode(setupUI{strings.NewReader(input), &ui, nil}, cli, "/bin/true", nil, runner) || !strings.Contains(ui.String(), "añadido") {
-			t.Fatal(ui.String())
+		project, _ := os.ReadFile(".mcp.json")
+		if err := a.Apply(e, w, true); err != nil {
+			t.Fatal(err)
 		}
-		want := "get,add"
-		if input != "\n" {
-			want = "get,remove,add"
+		if scope == "project" {
+			after, _ := os.ReadFile(".mcp.json")
+			if string(after) != string(project) {
+				t.Fatal("project file changed")
+			}
+			call("mcp", "remove", "aulaglobal", "--scope", "project")
 		}
-		if strings.Join(operations, ",") != want {
-			t.Fatalf("operations: %v", operations)
+		b := call("mcp", "get", "aulaglobal")
+		if !strings.Contains(b, "Scope: User config (available in all your projects)") {
+			t.Fatal(b)
 		}
-		out, err := call("mcp", "get", "aulaglobal")
-		if err != nil || !strings.Contains(out, "Scope: User config (available in all your projects)") {
-			t.Fatalf("get: %s, %v", out, err)
+		// /bin/true has no args, whereas desired entry does, so update then inspect.
+		if err := a.Apply(e, w, true); err != nil {
+			t.Fatal(err)
 		}
-	}
-	out, err := call("mcp", "remove", "aulaglobal", "--scope", "user")
-	if err != nil || !strings.Contains(out, "Removed MCP server aulaglobal from user config") {
-		t.Fatalf("remove: %s, %v", out, err)
-	}
-	out, err = call("mcp", "get", "aulaglobal")
-	if err == nil || !strings.Contains(strings.ToLower(out), "no mcp server named") {
-		t.Fatalf("get after removal: %s, %v", out, err)
+		if i := a.Inspect(e, w); i.err != nil || i.state != identical {
+			t.Fatal(i)
+		}
+		call("mcp", "remove", "aulaglobal", "--scope", "user")
 	}
 }

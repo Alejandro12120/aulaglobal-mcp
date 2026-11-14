@@ -381,15 +381,17 @@ Windows usa texto sin códigos ANSI.
 
 Claude Code se busca en PATH y en ~/.claude/local, ~/.local/bin,
 /opt/homebrew/bin y /usr/local/bin. En Windows busca .exe y .cmd
-en el perfil y %APPDATA%/npm. Cada llamada tiene un límite de 20 segundos
+en el perfil y %APPDATA%/npm. Cada llamada tiene un límite de 30 segundos
 y captura los diagnósticos sin mostrarlos para evitar filtrar datos.
 Se consulta mcp get aulaglobal antes de registrar; solo se sustituye una
 entrada identificada como de usuario, tras confirmar y quitarla con scope user.
-Los ámbitos local/proyecto o desconocidos requieren revisión manual.
-El alta usa mcp add --scope user [opciones -e] aulaglobal -- BINARIO
+El ámbito local se puede mover a usuario: remove --scope local y add --scope user,
+en el mismo cwd. Para proyecto solo se añade usuario; nunca se edita .mcp.json.
+Un ámbito desconocido requiere revisión manual.
+El alta usa mcp add --scope user aulaglobal [opciones -e] -- BINARIO
 --transport stdio. Las opciones -e solo contienen rutas distintas de las
 predeterminadas, nunca la cookie ni el token. El ejecutor es inyectable.
-Los fallos muestran un comando manual al final; no se imprime JSON de rutina.
+Los fallos muestran un comando manual inmediatamente debajo; no se imprime JSON de rutina.
 Las pruebas usan un Moodle falso y un ejecutor simulado, sin servicios reales.
 
 ### Registro de OpenCode
@@ -481,3 +483,67 @@ Fuentes oficiales consultadas:
 
 El esquema multiplataforma y la interfaz gráfica están verificados documentalmente;
 la generación de configuración y ayuda se verificaron también con el binario Linux.
+
+## Registro unificado de asistentes
+
+`setup_clients.go` define `assistant`: ID, Name, Detect, Inspect, Apply,
+Manual y Reload. La única lista ordenada `assistants` sirve para detección,
+selección por ID, ayuda y pruebas de contrato. Los estados son no instalado,
+falta, idéntico, diferente y otro ámbito. Los errores de inspección se cierran
+sin escribir ni mostrar diagnósticos privados.
+
+`configureClients` inspecciona antes de preguntar, muestra el inventario y usa
+siempre [S/n] para añadir o actualizar. Con dos o más cambios propone configurar
+todos; `e` permite elegir y `n` omite todos los pendientes. Las entradas idénticas
+no preguntan. El resumen distingue añadido, actualizado, ya estaba, omitido y
+falló, y solo imprime Reload de los clientes modificados. Los transcriptos en
+`cmd/aulaglobal-mcp/testdata/setup-*.golden` fijan el formato.
+
+Para añadir un asistente, sigue **3 pasos**:
+
+1. Crea un archivo que implemente `assistant` (o construya un `fileAssistant`
+   con las particularidades del formato, ruta, detección y recarga).
+2. Añade una línea a `assistants`. Su ID queda disponible en --help y --clients.
+3. Ejecuta las pruebas compartidas `TestAssistantContracts` y añade fixtures o
+   pruebas de las particularidades del nuevo cliente. No necesita otro flujo UI.
+
+`clientEnv` inyecta lookup/stat, ejecutores de CLI con salida capturada,
+generador agy y escritura. `desired` construye una ruta absoluta al ejecutable y
+solo añade env para token/descargas distintos de los valores predeterminados.
+`fileAssistant` comparte inspección, igualdad semántica, merge seguro y backup
+atómico. JSON rechaza claves duplicadas; TOML conserva comentarios ajenos y
+rechaza sustituciones ambiguas. Incluso --yes deja intacto un archivo inseguro.
+No hay transacción entre remove y add en Claude: si falla, se informa del fallo
+y se imprime el comando para recuperar la entrada de usuario.
+
+Particularidades mantenidas (fuentes oficiales en las secciones anteriores):
+
+- Claude Code: CLI con --scope user; local se quita con --scope local en el mismo
+  cwd; proyecto se conserva. Verificado con el CLI real en HOME y cwd temporales:
+  `Scope: Local config (private to you in this project)`,
+  `Scope: Project config (shared via .mcp.json)`,
+  `Scope: User config (available in all your projects)` y
+  `No MCP server named "aulaglobal"`. `mcp remove --help` confirma
+  `-s, --scope <scope>`. Fuente: https://code.claude.com/docs/en/mcp y ayuda local.
+- Claude Desktop: mcpServers JSON, ruta por sistema; cierra y abre la aplicación.
+  Fuente: https://modelcontextprotocol.io/docs/develop/connect-local-servers.
+- Codex / ChatGPT: ~/.codex/config.toml, mcp_servers; reemplazo sin duplicar la
+  tabla padre que genera el serializador. Fuente: https://developers.openai.com/codex/mcp/.
+- OpenCode: prueba --global en la ayuda antes de usar el CLI; verifica la entrada
+  global escrita, conserva V1/V2, rechaza dos archivos simultáneos y JSONC ambiguo.
+- Antigravity: ~/.gemini/config/mcp_config.json; agy genera en HOME temporal y el
+  merge escribe el destino. disabled:false equivale al valor por defecto.
+
+`setup --only-clients` omite token y red. `--clients` filtra IDs y rechaza
+los desconocidos antes de realizar cambios. `--yes` no pregunta ni espera Enter;
+con un token existente lo conserva y comprueba; sin token pide ejecutar primero
+setup interactivo (o usar --only-clients). No altera token-from-cookie.
+
+Validación real opcional: compila las pruebas con Docker y ejecuta el binario en
+el host con `AULAGLOBAL_TEST_REAL_CLAUDE=1`; usa
+`AULAGLOBAL_TEST_AGY=/ruta/agy` para el generador de Antigravity. Ambas pruebas
+usan carpetas temporales, sin credenciales ni conexiones a UC3M.
+
+La prueba real con rutas con espacios confirma que el nombre debe ir antes de
+las opciones -e: el parser variádico de Claude puede consumir aulaglobal como
+una variable si se coloca después de -e. El separador -- precede al ejecutable.
