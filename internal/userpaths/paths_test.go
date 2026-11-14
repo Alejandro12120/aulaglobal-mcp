@@ -45,3 +45,13 @@ func TestOpenCode(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravity(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			if got := Antigravity("HOME"); got != filepath.Join("HOME", ".gemini", "config", "mcp_config.json") {
+				t.Fatal(got)
+			}
+		})
+	}
+}

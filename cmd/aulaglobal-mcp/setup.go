@@ -451,6 +451,8 @@ func setup(args []string) (result error) {
 	if data != dd {
 		extra = append(extra, "-e", "AULAGLOBAL_DOWNLOAD_DIR="+data)
 	}
+	agCLI, agDetected := findAntigravity(runtime.GOOS, home, os.Getenv("LOCALAPPDATA"), exec.LookPath, os.Stat)
+	registerAntigravity(u, agDetected, agCLI, userpaths.Antigravity(home), exe, extra)
 	openDir := userpaths.OpenCode(home, os.Getenv("XDG_CONFIG_HOME"))
 	registerOpenCode(u, findOpenCode(runtime.GOOS, home, os.Getenv("APPDATA"), exec.LookPath, os.Stat), openDir, exe, extra, runOpenCode)
 	fallback := registerCode(u, cli, exe, extra, runClaude)

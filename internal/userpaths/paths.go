@@ -32,3 +32,8 @@ func OpenCode(home, xdg string) string {
 	}
 	return filepath.Join(xdg, "opencode")
 }
+
+// Antigravity uses the same home-relative global config on every OS.
+func Antigravity(home string) string {
+	return filepath.Join(home, ".gemini", "config", "mcp_config.json")
+}
