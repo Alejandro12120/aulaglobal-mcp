@@ -344,7 +344,7 @@ func register(u setupUI, exe, token, data, claude, codex string) error {
 	fmt.Fprintf(u.out, "Alternativa Claude Code (si usas las carpetas predeterminadas):\nclaude mcp add aulaglobal -- %q --transport stdio\nO guarda este contenido en .mcp.json (incluye tus carpetas):\n%s\n", exe, snippet)
 	return nil
 }
-func setup(args []string) error {
+func setup(args []string) (result error) {
 	token, data, e := userpaths.Defaults()
 	if e != nil {
 		return e
@@ -377,7 +377,13 @@ func setup(args []string) error {
 		return errors.New("Abre una terminal y ejecuta aulaglobal-mcp setup")
 	}
 	if !*noPause {
-		defer func() { fmt.Fprint(u.out, "Pulsa Enter para salir"); u.line() }()
+		defer func() {
+			if result != nil {
+				fmt.Fprintln(u.out, result.Error())
+			}
+			fmt.Fprint(u.out, "Pulsa Enter para salir")
+			u.line()
+		}()
 	}
 	ok, e := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, data, u)
 	if e != nil {
