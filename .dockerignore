@@ -7,3 +7,5 @@ secrets
 aulaglobal-mcp
 
 .env*
+
+dist
