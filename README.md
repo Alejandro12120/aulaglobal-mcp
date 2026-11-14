@@ -27,7 +27,7 @@ Claude Code, Claude Desktop, Codex o ChatGPT de escritorio.
 
 ## 1. Descarga el programa para tu sistema
 
-Abre la [página de descargas](https://github.com/<usuario>/aulaglobal-mcp/releases/latest)
+Abre la [página de descargas](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest)
 y elige el archivo de tu ordenador:
 
 | Tu ordenador | Archivo que termina en… |

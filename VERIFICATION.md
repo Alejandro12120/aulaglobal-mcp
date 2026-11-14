@@ -181,9 +181,9 @@ Snapshot: CGO_ENABLED=0; linux, darwin, windows × amd64, arm64.
 No se publican los resultados. README y docs/TECNICO.md están en cada archivo;
 no se añade LICENSE porque no existe. checksums.txt acompaña los seis archivos.
 
-Pendientes: sustituir <usuario> en el enlace Releases de README, elegir licencia
-propia (AGDownloader es MIT y está acreditado), configurar remoto, ejecutar CI
-nativa, firma Windows/notarización Apple. GHCR y attestations se dejan fuera.
+Resueltos después: enlace Releases (Alejandro12120/aulaglobal-mcp), licencia MIT
+(AGDownloader también es MIT y está acreditado), remoto configurado y CI nativa.
+Pendientes: firma Windows/notarización Apple. GHCR y attestations se dejan fuera.
 TOML con texto multilínea o definición inline del servidor existente se rechaza
 al reemplazar para evitar pérdida de contenido; se ofrece configuración manual.
 
