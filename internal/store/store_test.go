@@ -3,6 +3,7 @@ package store
 import (
 	"aulaglobal-mcp/internal/aulaglobal"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -61,7 +62,7 @@ func TestManyDownloads(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for _, r := range s.Download(ctx, c, files) {
+	for _, r := range dl(s, ctx, c, files) {
 		if r.Status != "downloaded" {
 			t.Fatalf("%+v", r)
 		}
@@ -69,13 +70,13 @@ func TestManyDownloads(t *testing.T) {
 	if peak.Load() > 4 {
 		t.Fatal("unbounded concurrency")
 	}
-	for _, r := range s.Download(ctx, c, files) {
+	for _, r := range dl(s, ctx, c, files) {
 		if r.Status != "skipped" {
 			t.Fatalf("%+v", r)
 		}
 	}
 	cancel()
-	if r := s.Download(ctx, c, files[:1])[0]; r.Status != "error" {
+	if r := dl(s, ctx, c, files[:1])[0]; r.Status != "error" {
 		t.Fatal("cancellation ignored")
 	}
 }
@@ -97,7 +98,7 @@ func TestRejectBadDownloads(t *testing.T) {
 		f := aulaglobal.File{Filename: "x.pdf", Handle: "x", URL: ts.URL, Size: &tc.size}
 		defer s.Root.Close()
 		defer ts.Close()
-		r := s.Download(context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
+		r := dl(s, context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
 		if r.Status != "error" {
 			t.Fatalf("saved invalid file %+v", r)
 		}
@@ -213,7 +214,7 @@ func TestPortablePathRoundTrip(t *testing.T) {
 	if got := Path(f); got != want {
 		t.Fatalf("Path = %q, want %q", got, want)
 	}
-	result := s.Download(context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
+	result := dl(s, context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
 	if result.Status != "downloaded" || result.Path != want {
 		t.Fatalf("download: %+v", result)
 	}
@@ -231,5 +232,65 @@ func TestPortablePathRoundTrip(t *testing.T) {
 	r, err := s.Read(context.Background(), filepath.FromSlash(want), 0, 100)
 	if err != nil || r.Path != want || r.Text != "portable needle" {
 		t.Fatalf("native read: %+v, %v", r, err)
+	}
+}
+
+// dl drops the batch-level error for tests that only inspect per-file results.
+func dl(s *Store, ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) []Result {
+	r, _ := s.Download(ctx, c, files)
+	return r
+}
+
+func TestDownloadAbortsOnDeadToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, fileCode, siteInfo string
+		abort                    bool
+	}{
+		{"invalidtoken", "invalidtoken", "", true},
+		{"accessexception with dead token", "accessexception", `{"errorcode":"invalidtoken","exception":"x"}`, true},
+		{"accessexception with valid token", "accessexception", `{"fullname":"Ana","userid":1}`, false},
+		{"unrelated error", "filenotfound", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var fileCalls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/server.php") {
+					fmt.Fprint(w, tc.siteInfo)
+					return
+				}
+				fileCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"errorcode":%q,"exception":"x"}`, tc.fileCode)
+			}))
+			defer ts.Close()
+			s, e := Open(t.TempDir(), 1024, 2)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer s.Root.Close()
+			files := []aulaglobal.File{}
+			for i := 0; i < 40; i++ {
+				files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/pluginfile.php/f"})
+			}
+			c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
+			res, e := s.Download(context.Background(), c, files)
+			if !tc.abort {
+				if e != nil || len(res) != len(files) || fileCalls.Load() != int32(len(files)) {
+					t.Fatalf("per-file errors expected: %v, %d results, %d calls", e, len(res), fileCalls.Load())
+				}
+				for _, r := range res {
+					if r.Status != "error" || r.Error == "" {
+						t.Fatalf("%+v", r)
+					}
+				}
+				return
+			}
+			if !errors.Is(e, aulaglobal.ErrTokenExpired) || strings.Contains(e.Error(), "secret") {
+				t.Fatalf("want token expired error, got %v", e)
+			}
+			if n := fileCalls.Load(); n > 4 {
+				t.Fatalf("batch not short-circuited: %d file requests", n)
+			}
+		})
 	}
 }

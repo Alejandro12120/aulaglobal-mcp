@@ -1,0 +1,21 @@
+
+── Paso 1 de 4 · Carpetas ──
+
+Tu token se guarda en:
+  <tmp>/secrets/token
+
+Tus apuntes se guardarán en:
+  <tmp>/data
+
+── Paso 2 de 4 · Tu cuenta de AulaGlobal ──
+
+Ya tienes un token guardado.
+Obtenido el: 2026-01-02T03:04:05Z
+! No se ha podido comprobar si sigue siendo válido (¿sin conexión?).
+
+› ¿Quieres reemplazarlo? [s/N] Conservamos tu token.
+
+── Paso 3 de 4 · Comprobación ──
+
+! No se pudo confirmar el token.
+  Comprueba auth_status o repite setup.

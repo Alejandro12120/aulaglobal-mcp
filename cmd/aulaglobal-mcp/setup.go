@@ -72,12 +72,19 @@ func (u setupUI) step(n int, title string) {
 	fmt.Fprintf(u.out, "\n%s\n\n", header)
 }
 func checkToken(ctx context.Context, api *aulaglobal.Client, token string, u setupUI) {
-	u.step(3, "Comprobación")
 	api.Tokens = aulaglobal.StaticToken{File: token}
 	auth, e := api.Auth(ctx)
-	if e != nil {
+	reportToken(u, auth, e)
+}
+
+func reportToken(u setupUI, auth aulaglobal.Auth, e error) {
+	u.step(3, "Comprobación")
+	switch {
+	case errors.Is(e, aulaglobal.ErrTokenExpired):
+		fmt.Fprintln(u.out, "! El token ha caducado o ya no es válido.\n  Repite setup para renovarlo.")
+	case e != nil:
 		fmt.Fprintln(u.out, "! No se pudo confirmar el token.\n  Comprueba auth_status o repite setup.")
-	} else {
+	default:
 		fmt.Fprintln(u.out, "✓ Token válido. Hola, "+auth.Fullname)
 	}
 }
@@ -116,10 +123,25 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 		if json.Unmarshal(b, &meta) == nil && meta.ObtainedAt != "" {
 			fmt.Fprintln(u.out, "Obtenido el:", meta.ObtainedAt)
 		}
-		if !u.yes("¿Quieres reemplazarlo? [s/N]") {
-			fmt.Fprintln(u.out, "✓ Conservamos tu token.")
-			checkToken(ctx, api, token, u)
-			return true, nil
+		// Validate first: an expired token needs no question, only a new cookie.
+		api.Tokens = aulaglobal.StaticToken{File: token}
+		auth, ae := api.Auth(ctx)
+		if errors.Is(ae, aulaglobal.ErrTokenExpired) {
+			fmt.Fprintln(u.out, "! Tu token ha caducado o ya no es válido. Vamos a renovarlo.")
+			fmt.Fprintln(u.out)
+		} else {
+			if ae != nil {
+				fmt.Fprintln(u.out, "! No se ha podido comprobar si sigue siendo válido (¿sin conexión?).")
+			}
+			if !u.yes("¿Quieres reemplazarlo? [s/N]") {
+				if ae == nil {
+					fmt.Fprintln(u.out, "✓ Conservamos tu token.")
+				} else {
+					fmt.Fprintln(u.out, "Conservamos tu token.")
+				}
+				reportToken(u, auth, ae)
+				return true, nil
+			}
 		}
 		force = true
 	} else if !os.IsNotExist(e) {

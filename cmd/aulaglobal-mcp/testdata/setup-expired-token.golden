@@ -1,0 +1,41 @@
+
+── Paso 1 de 4 · Carpetas ──
+
+Tu token se guarda en:
+  <tmp>/secrets/token
+
+Tus apuntes se guardarán en:
+  <tmp>/data
+
+── Paso 2 de 4 · Tu cuenta de AulaGlobal ──
+
+Ya tienes un token guardado.
+Obtenido el: 2026-01-02T03:04:05Z
+! Tu token ha caducado o ya no es válido. Vamos a renovarlo.
+
+1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
+
+2. Pulsa F12 (Mac: Cmd + Option + I).
+   Abre Consola.
+
+3. Pega este comando y pulsa Enter:
+
+   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
+
+   Si Chrome bloquea pegar, escribe «allow pasting» primero.
+   También puede aparecer como «permitir pegar».
+
+   Otra opción: Aplicación → Cookies → https://aulaglobal.uc3m.es
+   Copia el Valor de MoodleSessionag.
+   En Firefox: Almacenamiento → Cookies.
+
+4. Vuelve aquí y pega la cookie.
+   No se verá mientras escribes.
+
+! No compartas la cookie ni el token.
+
+› Pega la cookie y pulsa Enter (intento 1/3):
+
+── Paso 3 de 4 · Comprobación ──
+
+✓ Token válido. Hola, Ana

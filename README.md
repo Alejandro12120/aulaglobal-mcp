@@ -318,7 +318,8 @@ el bloque que muestra el programa al finalizar, ya que incluye esas rutas.
 
 | Mensaje o síntoma | Solución |
 |---|---|
-| `token invalid or expired` | La clave ha caducado. Ejecuta de nuevo `setup` y acepta reemplazarla. |
+| «La sesión de AulaGlobal ha caducado…» | El token ha caducado (Moodle los caduca periódicamente). Inicia sesión en AulaGlobal en el navegador y ejecuta de nuevo `aulaglobal-mcp setup`: detecta el token caducado y te pide una cookie nueva. No hace falta reiniciar el asistente. |
+| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» | No es una caducidad: Moodle no permite esa función con tu cuenta o servicio. No hace falta renovar el token. |
 | `cannot read token file` | Ejecuta de nuevo `setup`. Si usaste otras carpetas, revisa la configuración manual. |
 | El asistente no muestra `aulaglobal` | Reinicia el asistente y, si persiste, ejecuta `setup --only-clients`. |
 | No se puede obtener la clave | Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con una cookie nueva. |

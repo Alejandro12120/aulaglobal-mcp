@@ -213,7 +213,11 @@ envía firma:::token[:::privatetoken], sin fecha de creación/caducidad.
 no exponen en esa versión el validuntil del token; los ajustes de autologin no
 son la caducidad del token WS. Por eso auth_status devuelve expires_at:null y
 expiry_source:unknown..., nunca calcula 12 semanas desde la fecha de conversión.
-invalidtoken/accessexception/invalidtimedtoken generan un error claro.
+invalidtoken/invalidtimedtoken indican token caducado; accessexception se confirma con
+core_webservice_get_site_info: si también falla, el token está caducado (ErrTokenExpired,
+mensaje en español con instrucciones de renovación); si funciona, es un problema de
+permisos y el mensaje lo distingue. Con token caducado, download_files y
+list_assignments abortan el lote con un único error en lugar de un error por elemento.
 
 TokenProvider.Get(ctx) permite incorporar renovación sin cambiar API/herramientas;
 Invalidator es una interfaz opcional. El proveedor estático relee archivos por
@@ -222,7 +226,10 @@ al recibir error de autenticación y use un flujo Moodle explícitamente compati
 quizás el privatetoken para autologin. **No existe aquí una renovación automática**
 ni se considera privatetoken un refresh token OAuth.
 Si la política tokenduration del sitio caduca el token (12 semanas por defecto
-upstream), vuelve a ejecutar token-from-cookie con --force. obtained_at registra
+upstream), ejecuta de nuevo `aulaglobal-mcp setup`: valida el token guardado y, si ha
+caducado, salta directamente al paso de la cookie. `token-from-cookie --force` sigue
+disponible como alternativa de bajo nivel. No hace falta reiniciar el asistente
+(el archivo del token se relee en cada petición). obtained_at registra
 la conversión, no la creación del token; expires_at sigue siendo null.
 
 ## Desarrollo y comprobación

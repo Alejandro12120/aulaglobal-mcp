@@ -42,7 +42,7 @@ func (p StaticToken) Get(ctx context.Context) (string, error) {
 	}
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", errors.New("token missing — configure AULAGLOBAL_TOKEN or AULAGLOBAL_TOKEN_FILE")
+		return "", errors.New("No hay ningún token de AulaGlobal configurado. Ejecuta `aulaglobal-mcp setup` en una terminal para conectar tu cuenta (o define AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE).")
 	}
 	return s, nil
 }
@@ -59,13 +59,93 @@ func Redact(s string, secrets ...string) string {
 	return secretQuery.ReplaceAllString(s, "$1=[REDACTED]")
 }
 
-type APIError struct{ Code string }
+// ErrTokenExpired marks a token that Moodle no longer accepts. Test with errors.Is.
+var ErrTokenExpired = errors.New("AulaGlobal token expired or invalid")
 
+const siteInfoFn = "core_webservice_get_site_info"
+
+// APIError is a Moodle web service error. Expired is set only when the token is
+// known to be dead; TokenOK only when a follow-up site_info call proved the token
+// valid (so an access error is a permission problem, not an expiry).
+type APIError struct {
+	Code    string
+	Expired bool
+	TokenOK bool
+}
+
+func (e *APIError) Is(target error) bool { return target == ErrTokenExpired && e.Expired }
 func (e *APIError) Error() string {
-	if e.Code == "invalidtoken" || e.Code == "accessexception" || e.Code == "invalidtimedtoken" {
-		return "token invalid or expired — obtain a new one (or check service permissions)"
+	switch {
+	case e.Expired:
+		return "La sesión de AulaGlobal ha caducado o el token ya no es válido (Moodle caduca los tokens periódicamente). " +
+			"Para renovarla, inicia sesión en " + Site + " en el navegador y ejecuta `aulaglobal-mcp setup` en una terminal; " +
+			"detectará el token caducado y te guiará para sustituirlo. No hace falta reiniciar el asistente. " +
+			"Los apuntes ya descargados siguen disponibles con read_file y search_files."
+	case e.TokenOK:
+		return "El token de AulaGlobal es válido, pero Moodle ha denegado el acceso a esta función o servicio (errorcode: " + e.Code + "). " +
+			"No es un problema de caducidad: no hace falta renovar el token."
 	}
 	return "Moodle web service error: " + e.Code
+}
+
+var errorCode = regexp.MustCompile("^[a-zA-Z0-9_]+$")
+
+// ClassifyAPIError turns a Moodle errorcode into an APIError, deciding whether the
+// token is dead. invalidtoken/invalidtimedtoken are conclusive; accessexception is
+// also raised for plain permission problems, so it is confirmed with site_info
+// (fn is the failing function, "" outside web service calls such as pluginfile).
+func (c *Client) ClassifyAPIError(ctx context.Context, fn, code string) *APIError {
+	if !errorCode.MatchString(code) {
+		code = "unknown"
+	}
+	e := &APIError{Code: code}
+	switch code {
+	case "invalidtoken", "invalidtimedtoken":
+		e.Expired = true
+	case "accessexception":
+		if fn == siteInfoFn {
+			e.Expired = true
+			break
+		}
+		switch c.probeToken(ctx) {
+		case probeDead:
+			e.Expired = true
+		case probeValid:
+			e.TokenOK = true
+		}
+	}
+	return e
+}
+
+type probeResult int
+
+const (
+	probeUnknown probeResult = iota
+	probeValid
+	probeDead
+)
+
+// probeToken calls site_info. A valid verdict is cached briefly so a batch of
+// permission errors does not double the request count.
+func (c *Client) probeToken(ctx context.Context) probeResult {
+	c.probeMu.Lock()
+	ok := time.Now().Before(c.validUntil)
+	c.probeMu.Unlock()
+	if ok {
+		return probeValid
+	}
+	e := c.ws(ctx, siteInfoFn, nil, &struct{}{})
+	if e == nil {
+		c.probeMu.Lock()
+		c.validUntil = time.Now().Add(30 * time.Second)
+		c.probeMu.Unlock()
+		return probeValid
+	}
+	var api *APIError
+	if errors.As(e, &api) && (api.Code == "invalidtoken" || api.Code == "invalidtimedtoken" || api.Code == "accessexception") {
+		return probeDead
+	}
+	return probeUnknown
 }
 
 type Client struct {
@@ -75,6 +155,8 @@ type Client struct {
 	StallTimeout time.Duration
 	courseMu     sync.Mutex
 	courseNames  map[int64]string
+	probeMu      sync.Mutex
+	validUntil   time.Time
 }
 
 func New(base string, p TokenProvider) *Client {
@@ -91,6 +173,16 @@ func New(base string, p TokenProvider) *Client {
 	}}
 }
 func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) error {
+	e := c.ws(ctx, fn, args, out)
+	var api *APIError
+	if errors.As(e, &api) {
+		return c.ClassifyAPIError(ctx, fn, api.Code)
+	}
+	return e
+}
+
+// ws performs one web service call; Moodle errors come back unclassified.
+func (c *Client) ws(ctx context.Context, fn string, args url.Values, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	token, e := c.Tokens.Get(ctx)
@@ -126,11 +218,7 @@ func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) er
 	var problem struct{ Exception, Errorcode string }
 	_ = json.Unmarshal(b, &problem)
 	if problem.Exception != "" || problem.Errorcode != "" {
-		code := problem.Errorcode
-		if !regexp.MustCompile("^[a-zA-Z0-9_]+$").MatchString(code) {
-			code = "unknown"
-		}
-		return &APIError{Code: code}
+		return &APIError{Code: problem.Errorcode}
 	}
 	if json.Unmarshal(b, out) != nil {
 		return errors.New("invalid Moodle JSON response")
@@ -151,7 +239,7 @@ type Auth struct {
 
 func (c *Client) Auth(ctx context.Context) (Auth, error) {
 	var a Auth
-	e := c.WS(ctx, "core_webservice_get_site_info", nil, &a)
+	e := c.WS(ctx, siteInfoFn, nil, &a)
 	a.ExpirySource = "unknown: get_site_info and mobile launch do not expose this token's validuntil; site duration policy is not an expiry timestamp"
 	if p, ok := c.Tokens.(StaticToken); ok && p.File != "" {
 		var meta struct {
@@ -229,7 +317,7 @@ func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, err
 		e := c.WS(ctx, "core_course_get_enrolled_courses_by_timeline_classification", url.Values{"classification": {class}, "limit": {"100"}, "offset": {strconv.Itoa(offset)}}, &res)
 		if e != nil {
 			var api *APIError
-			if !errors.As(e, &api) || (api.Code != "invalidparameter" && api.Code != "servicenotavailable" && api.Code != "wsfunctionnotavailable" && api.Code != "accessexception") {
+			if errors.Is(e, ErrTokenExpired) || !errors.As(e, &api) || (api.Code != "invalidparameter" && api.Code != "servicenotavailable" && api.Code != "wsfunctionnotavailable" && api.Code != "accessexception") {
 				return nil, e
 			}
 			a, err := c.Auth(ctx)
