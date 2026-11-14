@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aulaglobal": {
+      "command": "/home/dev/projects/aulaglobal-mcp/aulaglobal-mcp",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "AULAGLOBAL_TOKEN_FILE": "/home/dev/projects/aulaglobal-mcp/secrets/token",
+        "AULAGLOBAL_DOWNLOAD_DIR": "/home/dev/projects/aulaglobal-mcp/data"
+      }
+    }
+  }
+}

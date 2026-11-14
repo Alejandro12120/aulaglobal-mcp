@@ -1,247 +1,252 @@
 # AulaGlobal MCP
 
-Servidor Go ligero para consultar asignaturas y descargar/leer sus documentos en
-AulaGlobal UC3M. SDK oficial MCP Go, stdio o Streamable HTTP en /mcp.
-Go **1.26.9** fijado (incluido el contenedor de compilación); no requiere Go en el host.
+Conecta tu asistente de IA (Claude Code, Claude Desktop u otro cliente MCP) con
+[AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M. Con él, el asistente puede:
 
-## Token
+- ver tus asignaturas,
+- descargar los apuntes y materiales a tu ordenador,
+- leerlos (PDF, Word, PowerPoint, texto…) y buscar dentro de ellos,
+- consultar tus entregas pendientes y su estado.
 
-No se aceptan credenciales por herramientas MCP. Configura **una** de
-AULAGLOBAL_TOKEN o AULAGLOBAL_TOKEN_FILE (el archivo tiene prioridad).
-Mantén los archivos de secretos con permisos 0600 y directorios 0700.
+Ejemplos de lo que puedes pedirle:
 
-Para convertir una cookie MoodleSessionag de tu propia sesión, copia **solo su
-valor** desde las herramientas del navegador. En Bash, sin eco ni historial del
-valor, usando el binario compilado:
+> «¿Qué entregas tengo esta semana?»
+> «Descarga los PDF de Sistemas Operativos y resúmeme el tema 3.»
+> «Busca en mis apuntes dónde se explica el algoritmo de Dijkstra.»
+
+Todo se guarda en tu ordenador. El asistente nunca ve tu contraseña ni tu token.
+
+---
+
+## Lo que necesitas
+
+- **Linux o macOS** con una terminal (en Windows, usa WSL).
+- **[Docker](https://docs.docker.com/get-docker/)** instalado. Solo se usa para
+  compilar el programa; no hace falta instalar Go.
+- Un cliente MCP, por ejemplo **[Claude Code](https://claude.com/claude-code)**.
+
+---
+
+## Paso 1 · Descargar y compilar
+
+Abre una terminal y ejecuta:
 
 ```bash
-IFS= read -rs -p 'MoodleSessionag: ' cookie
-printf '\n' >&2
+git clone <url-de-este-repositorio> aulaglobal-mcp
+cd aulaglobal-mcp
+
+docker run --rm -u "$(id -u):$(id -g)" -e GOCACHE=/tmp/gocache -e GOPATH=/tmp/gopath \
+  -v "$PWD":/src -w /src golang:1.26.9 \
+  sh -c 'CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o aulaglobal-mcp ./cmd/aulaglobal-mcp'
+
+mkdir -p secrets data && chmod 700 secrets data
+```
+
+Al terminar tendrás un archivo llamado `aulaglobal-mcp` en la carpeta. Ese es el
+programa.
+
+---
+
+## Paso 2 · Conseguir tu token de AulaGlobal
+
+El programa necesita un *token*: una clave que permite leer AulaGlobal en tu
+nombre, la misma que usa la app móvil de Moodle. Se obtiene a partir de la
+cookie de sesión del navegador.
+
+### 2.1 Copiar la cookie desde el navegador
+
+1. Entra en <https://aulaglobal.uc3m.es> e **inicia sesión** como siempre.
+2. Pulsa **F12** (en Mac: `Cmd + Option + I`) para abrir las herramientas de
+   desarrollador.
+3. Ve a la pestaña **Consola** (*Console*).
+4. Pega este comando y pulsa **Enter**:
+
+   ```js
+   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
+   ```
+
+   La cookie queda **copiada en el portapapeles**; no se muestra nada en pantalla
+   (o solo `undefined`), y es normal.
+
+> **¿Chrome no te deja pegar?** La primera vez, Chrome muestra un aviso. Escribe
+> `allow pasting` (o `permitir pegar`), pulsa Enter y vuelve a pegar el comando.
+>
+> **¿Se ha copiado algo vacío?** Hazlo a mano: en las herramientas de
+> desarrollador ve a **Aplicación → Cookies → https://aulaglobal.uc3m.es**
+> (en Firefox: **Almacenamiento → Cookies**) y copia el **valor** de la fila
+> `MoodleSessionag`.
+
+⚠️ Esa cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
+pegues en chats, foros ni en el propio asistente de IA.
+
+### 2.2 Convertir la cookie en token
+
+Vuelve a la terminal, dentro de la carpeta `aulaglobal-mcp`, y ejecuta:
+
+```bash
+IFS= read -rs -p 'Pega la cookie y pulsa Enter: ' cookie; printf '\n' >&2
 printf '%s' "$cookie" | ./aulaglobal-mcp token-from-cookie --output secrets/token
 unset cookie
 ```
 
-El subcomando lee stdin (rechaza terminales para evitar eco), no argv; no sigue
-redirecciones, exige Location moodlemobile://token=..., decodifica base64 y
-verifica MD5(siteurl+passport) usando un passport aleatorio. Nunca imprime el
-token. Crea archivos nuevos con 0600; usa `--force` para sustituirlos atómicamente dentro de un directorio privado. Si existe
-privatetoken lo guarda en secrets/token.private; no se necesita para este
-servidor. Guarda también `<tokenfile>.meta.json` (0600), con `obtained_at` RFC3339 sin secretos. `auth_status` lo lee junto a AULAGLOBAL_TOKEN_FILE y devuelve `token_obtained_at` y `token_age_days`. No lo compartas. Puede que Moodle exija volver a iniciar sesión o una
-confirmación: el subcomando devuelve un error, no automatiza SSO.
+Pega la cookie cuando lo pida (no verás lo que pegas; es a propósito) y pulsa
+Enter. Si todo va bien, se crea el archivo `secrets/token` y el mensaje dice
+`token saved`.
 
-Para compilar el binario sin instalar Go:
+- Si ya tenías un token y quieres sustituirlo, añade `--force` al final del
+  segundo comando.
+- Si falla, cierra sesión en AulaGlobal, vuelve a entrar y repite desde el 2.1
+  (la cookie puede haber caducado).
 
-```bash
-docker run --rm -v "$PWD":/src -w /src golang:1.26.9   sh -c 'CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o aulaglobal-mcp ./cmd/aulaglobal-mcp'
-```
-
-## Stdio
+### 2.3 (Opcional) Comprobar que el token funciona
 
 ```bash
-AULAGLOBAL_TOKEN_FILE="$PWD/secrets/token" ./aulaglobal-mcp --transport stdio
+curl -s -X POST https://aulaglobal.uc3m.es/webservice/rest/server.php \
+  --data-urlencode "wstoken=$(cat secrets/token)" \
+  -d wsfunction=core_webservice_get_site_info -d moodlewsrestformat=json | head -c 200; echo
 ```
 
-Claude Code (también formato habitual en clientes MCP; sustituye rutas absolutas):
+Si aparece tu nombre (`"fullname"`), el token es válido.
+
+---
+
+## Paso 3 · Conectarlo con tu asistente
+
+### Claude Code
+
+Crea un archivo llamado `.mcp.json` en la carpeta donde vayas a usar Claude Code
+(por ejemplo, la propia carpeta `aulaglobal-mcp`) con este contenido, cambiando
+`/ruta/a/aulaglobal-mcp` por la ruta real (la obtienes con el comando `pwd`):
 
 ```json
 {
   "mcpServers": {
     "aulaglobal": {
-      "command": "/ruta/aulaglobal-mcp",
+      "command": "/ruta/a/aulaglobal-mcp/aulaglobal-mcp",
       "args": ["--transport", "stdio"],
       "env": {
-        "AULAGLOBAL_TOKEN_FILE": "/ruta/secrets/token",
-        "AULAGLOBAL_DOWNLOAD_DIR": "/ruta/documentos"
+        "AULAGLOBAL_TOKEN_FILE": "/ruta/a/aulaglobal-mcp/secrets/token",
+        "AULAGLOBAL_DOWNLOAD_DIR": "/ruta/a/aulaglobal-mcp/data"
       }
     }
   }
 }
 ```
 
-Cliente genérico mediante Docker, sin pseudo-TTY:
+Abre Claude Code en esa carpeta (`claude`), acepta el servidor `aulaglobal`
+cuando te lo pregunte y escribe `/mcp` para comprobar que aparece como
+conectado.
 
-```json
-{
-  "mcpServers": {
-    "aulaglobal": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i",
-        "-v", "/ruta/secrets/token:/run/secrets/token:ro",
-        "-v", "ag-data:/data",
-        "-e", "AULAGLOBAL_TOKEN_FILE=/run/secrets/token",
-        "aulaglobal-mcp:local", "--transport", "stdio"]
-    }
-  }
-}
+### Claude Desktop u otros clientes
+
+Usa el mismo bloque `"aulaglobal": { ... }` dentro de la sección `mcpServers` del
+archivo de configuración de tu cliente (en Claude Desktop: *Ajustes → Desarrollador
+→ Editar configuración*) y reinicia el cliente.
+
+---
+
+## Paso 4 · Usarlo
+
+Pídeselo con tus palabras. Para empezar, prueba:
+
+1. «Comprueba mi conexión con AulaGlobal» → debería decir tu nombre.
+2. «Lista mis asignaturas.»
+3. «¿Qué archivos hay en *nombre de asignatura*?»
+4. «Descarga los PDF de *asignatura* y resúmeme el primero.»
+5. «¿Qué entregas tengo pendientes y cuáles ya he entregado?»
+
+Los archivos descargados quedan en la carpeta `data/`, ordenados así:
+
+```
+data/
+└── Nombre de la asignatura/
+    ├── Tema 1/
+    │   └── apuntes.pdf
+    └── Entregas/
+        └── Práctica 1/
+            └── enunciado.pdf
 ```
 
-El UID 65532 del contenedor debe poder leer los secretos: para archivos 0600,
-utiliza propietario 65532 o ejecuta con tu UID y un directorio de datos escribible.
+Si vuelves a descargar, solo se bajan los archivos nuevos o modificados.
 
-## HTTP con Docker
+### Qué puede hacer el asistente
 
-```bash
-docker build -t aulaglobal-mcp:local .
-# MCP_HTTP_AUTH_TOKEN debe contener un secreto aleatorio independiente del token Moodle.
-docker run --rm --name aulaglobal -p 127.0.0.1:8080:8080   -e MCP_HTTP_AUTH_TOKEN   -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token   -v /ruta/secrets/token:/run/secrets/token:ro   -v ag-data:/data aulaglobal-mcp:local
-```
-
-Configura el cliente HTTP con URL http://127.0.0.1:8080/mcp y
-Authorization: Bearer <secreto MCP>. Transporte stateless, sin sesiones persistentes.
-Al mapear un puerto distinto, Host contiene el puerto del **host**:
-```bash
-docker run --rm -p 127.0.0.1:9000:8080 -e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000 -e MCP_HTTP_AUTH_TOKEN -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token -v /ruta/secrets/token:/run/secrets/token:ro -v ag-data:/data aulaglobal-mcp:local
-```
-Configura el cliente con http://127.0.0.1:9000/mcp. MCP_ALLOWED_HOSTS es una
-lista de valores Host exactos separados por comas; no uses comodines.
-Si no se configura, acepta localhost y 127.0.0.1 con el puerto de escucha.
-
-El contenedor escucha 0.0.0.0 internamente para el port mapping; el binario
-por defecto escucha 127.0.0.1. Expón el puerto solo en loopback o mediante un
-proxy TLS autenticado. Todos los usuarios con el bearer comparten datos y token.
-
-## Herramientas y contratos
-
-Todas publican inputSchema/outputSchema tipados y devuelven JSON estructurado.
-Los errores globales son errores de herramienta MCP; los errores individuales
-de descarga se devuelven en results.
-
-| Herramienta | Entrada | Salida |
-|---|---|---|
-| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales |
-| list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
-| list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections → modules → contents: filename, filesize nullable, mimetype, timemodified, handle, section, module |
-| download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
-| read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
-| search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
-| list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
-
-Usa list_courses → list_course_files → download_files → read_file.
-Los handles se conservan en memoria (máximo 100000); vuelve a listar tras reiniciar.
-Las rutas usan `<Asignatura localizada>/<Sección>/<archivo>`, conservando
-subcarpetas filepath de los módulos carpeta, siempre sanitizadas.
-Solo las colisiones añaden sufijos legibles (2), (3), etc., asignados en orden de handle y conservados en el manifiesto.
-Cada curso usa un nombre local canónico en español, persistido por ID en el manifiesto incluso tras renombrarlo; el idioma de visualización no cambia la carpeta. Los nombres conocidos se reutilizan en memoria sin otra consulta de curso.
-El manifiesto atómico `.aulaglobal-cache/manifest.json` registra handle estable
-(hash de curso + módulo + filepath + filename), ruta, tamaño y timemodified.
-Una revisión de URL no cambia el handle ni crea otra copia; skip funciona tras
-reiniciar. Las rutas ya asignadas se conservan aunque cambie el nombre del curso.
-Para descargar por handle tras reiniciar, vuelve a listar para recuperar la URL.
-No migra automáticamente las descargas del diseño antiguo.
-Excluir siempre prevalece sobre incluir. Fallback de cursos en Moodle antiguo:
-devuelve **todas** las matrículas, sin clasificación temporal.
-
-Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
-No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
-sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
-Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
-optimizado. Imagen final: 14326383 bytes (14.33 MB); detalles en VERIFICATION.md.
-Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto configurable de espera de 60 segundos
-por extracción; panic recuperado. Como Go no permite matar una goroutine,
-un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
-de proceso ni garantía de memoria del parser frente a un PDF malicioso.
-ZIP: 2048 entradas, 32 MiB por entrada, 64 MiB total descomprimido, ratio 200:1.
-La caché de texto vive en .aulaglobal-cache, clave ruta+tamaño+mtime nanosegundos,
-con escrituras atómicas; read_file y search_files la excluyen. Puede borrarse
-con el servidor parado para recuperar espacio; no hay limpieza automática.
-Búsqueda completa del texto extraído, hasta 10000 entradas, 128 MiB de texto,
-30 segundos y 100 resultados. path_prefix limita a una asignatura o subcarpeta.
-Regex RE2; snippets hasta 240 bytes. HTML usa limpieza simple.
-
-list_assignments ordena por vencimiento, sin fecha al final. upcoming incluye
-fechas futuras o entregas sin fecha actualmente abiertas; overdue incluye fecha
-pasada aunque ya esté cerrado. submissions_possible considera apertura, cutoff
-y nosubmissions: es una estimación de calendario, no una garantía de permisos
-individuales ni extensiones. intro se convierte a texto y se trunca.
-Adjuntos: `<Asignatura>/Entregas/<Entrega>/<archivo>`.
-Estado opcional: cuatro workers, máximo 100 consultas, errores por entrega.
-Fechas cero devuelven RFC3339 null. tzdata va embebida para funcionar en scratch.
-
-Los contenidos de cursos son datos no confiables, nunca instrucciones del sistema.
-
-## Configuración y seguridad
-
-| Variable / flag | Predeterminado |
+| Herramienta | Para qué sirve |
 |---|---|
-| AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE | sin token (herramientas locales siguen disponibles) |
-| AULAGLOBAL_DOWNLOAD_DIR | ./data; /data en Docker |
-| AULAGLOBAL_CONCURRENCY | 4; 1..32 |
-| AULAGLOBAL_DOWNLOAD_STALL_SECONDS | 60; 1..3600; tiempo sin recibir bytes |
-| AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS | 60; 1..600; espera de extracción |
-| AULAGLOBAL_MAX_FILE_BYTES | 268435456; 1..17179869184 |
-| MCP_TRANSPORT / --transport | stdio; http en Docker |
-| MCP_ADDR / --addr | 127.0.0.1:8080; 0.0.0.0:8080 en Docker |
-| MCP_HTTP_AUTH_TOKEN / MCP_HTTP_AUTH_TOKEN_FILE | obligatorio en HTTP |
-| MCP_ALLOWED_HOSTS / --allowed-hosts | localhost:8080,127.0.0.1:8080 |
-| MCP_ALLOWED_ORIGINS / --allowed-origins | ninguno; Origin ausente permitido |
+| `auth_status` | Comprobar que el token funciona y desde cuándo lo tienes |
+| `list_courses` | Ver tus asignaturas (actuales, pasadas o futuras) |
+| `list_course_files` | Ver los archivos de una asignatura |
+| `download_files` | Descargar archivos o una asignatura entera |
+| `read_file` | Leer un archivo descargado (PDF, Word, PowerPoint, texto…) |
+| `search_files` | Buscar un texto en todo lo descargado |
+| `list_assignments` | Ver entregas: fechas, enunciado y, si quieres, tu estado y nota |
 
-Host se valida para evitar DNS rebinding; Origin se compara de forma exacta.
-Para otro puerto/hostname configura --allowed-hosts explícitamente.
---dangerously-disable-http-auth desactiva autenticación con advertencia en stderr.
-Cuerpos HTTP limitados a 1 MiB, cabeceras 16 KiB, ReadHeaderTimeout 10s, ReadTimeout 30s e IdleTimeout 60s.
-Go 1.26 elimina el deadline de lectura tras consumir el cuerpo al iniciar la lectura de fondo; ReadTimeout no limita la ejecución posterior (test con conexión real).
-Sin WriteTimeout global para permitir llamadas MCP largas; desconectar el cliente cancela su contexto.
-SIGINT/SIGTERM cierran el servidor con hasta 10 segundos de margen.
-Logs JSON slog solo en stderr; stdout queda reservado para MCP stdio.
+---
 
-Cliente HTTP compartido: dial/TLS 10s, cabeceras 30s, WS y conversión de cookie 60s; descargas sin timeout total, con detector de inactividad;
-contexto propagado, redirecciones solo al mismo host/esquema (máximo 5).
-POST form para WS; token query solo para pluginfile. Errores de red redactados,
-mensajes Moodle arbitrarios no se propagan. Solo GET idempotentes reintentan
-timeouts/5xx (3 intentos, backoff cancelable); no se reintenta POST.
-Descargas verifican status, rechazan HTML inesperado y errores JSON, tamaño,
-y escriben temporal exclusivo → fsync → rename. Skip compara tamaño y mtime.
-os.Root confina lecturas/escrituras incluso ante enlaces simbólicos hacia fuera.
-Usa un volumen dedicado; no permitas que procesos no confiables escriban en él.
-Los archivos se crean 0600, directorios 0700; no se almacena una cookie.
-La imagen scratch contiene únicamente binario estático, CA y /data, UID 65532;
-incluye tzdata embebida (Europe/Madrid con horario de verano).
+## Problemas frecuentes
 
-## Caducidad y futura renovación
+**«token invalid or expired»**
+El token ha caducado o no es válido. Moodle puede hacer caducar los tokens
+(por defecto, a las 12 semanas). Repite el **Paso 2** añadiendo `--force`.
 
-No se debe asumir que un token móvil no caduca. En Moodle 4.5,
-[generate_token_for_current_user](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/external/classes/util.php)
-asigna validuntil = timecreated + CFG->tokenduration a nuevos tokens y describe
-12 semanas como valor por defecto. Puede reutilizar un token existente.
-Esto **no demuestra** la política/version de UC3M ni la fecha de este token.
+**«cannot read token file»**
+No existe `secrets/token` o la ruta del `.mcp.json` está mal. Revisa que la ruta
+sea absoluta (empieza por `/`) y que hiciste el Paso 2.
 
-[get_site_info](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/webservice/externallib.php)
-no expone validuntil.
-[launch.php](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/admin/tool/mobile/launch.php)
-envía firma:::token[:::privatetoken], sin fecha de creación/caducidad.
-[get_config/get_public_config](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/admin/tool/mobile/classes/api.php)
-no exponen en esa versión el validuntil del token; los ajustes de autologin no
-son la caducidad del token WS. Por eso auth_status devuelve expires_at:null y
-expiry_source:unknown..., nunca calcula 12 semanas desde la fecha de conversión.
-invalidtoken/accessexception/invalidtimedtoken generan un error claro.
+**El servidor no aparece en `/mcp`**
+Comprueba la ruta de `command` en `.mcp.json` y que el archivo `aulaglobal-mcp`
+existe y es ejecutable (`ls -l aulaglobal-mcp`). Reinicia Claude Code.
 
-TokenProvider.Get(ctx) permite incorporar renovación sin cambiar API/herramientas;
-Invalidator es una interfaz opcional. El proveedor estático relee archivos por
-petición (rotación externa posible). Futuro: proveedor sincronizado que invalide
-al recibir error de autenticación y use un flujo Moodle explícitamente compatible,
-quizás el privatetoken para autologin. **No existe aquí una renovación automática**
-ni se considera privatetoken un refresh token OAuth.
-Si la política tokenduration del sitio caduca el token (12 semanas por defecto
-upstream), vuelve a ejecutar token-from-cookie con --force. obtained_at registra
-la conversión, no la creación del token; expires_at sigue siendo null.
+**Un PDF no se puede leer**
+Los PDF escaneados (imágenes) no tienen texto y no se pueden leer: no hay OCR.
+Si es muy grande, el asistente puede recibir «extraction in progress»: vuelve a
+pedírselo en unos segundos.
 
-## Desarrollo y comprobación
+---
+
+## Seguridad en pocas palabras
+
+- El token se guarda solo en `secrets/token`, con permisos que solo tú puedes
+  leer. **No lo compartas ni lo subas a Git** (la carpeta ya está en `.gitignore`).
+- El asistente nunca recibe el token: el programa lo usa por dentro y lo borra de
+  cualquier mensaje de error.
+- El programa solo puede escribir y leer dentro de la carpeta `data/`.
+- El contenido de los cursos se trata como datos: si un PDF contiene
+  instrucciones raras, el asistente no debe obedecerlas.
+
+---
+
+## Avanzado: servidor HTTP con Docker
+
+Si prefieres tenerlo como servicio (por ejemplo, para varios clientes en tu
+máquina):
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src golang:1.26.9 go vet ./...
-docker run --rm -v "$PWD":/src -w /src golang:1.26.9 go test -race ./...
 docker build -t aulaglobal-mcp:local .
-node scripts/smoke.mjs
-docker image inspect aulaglobal-mcp:local --format '{{.Size}}'
+
+# Contraseña para el servidor MCP (distinta de tu token de AulaGlobal)
+export MCP_HTTP_AUTH_TOKEN="$(openssl rand -hex 32)"
+echo "$MCP_HTTP_AUTH_TOKEN"   # guárdala: la necesita tu cliente
+
+docker run -d --name aulaglobal --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:8080:8080 \
+  -e MCP_HTTP_AUTH_TOKEN \
+  -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token \
+  -v "$PWD/secrets/token:/run/secrets/token:ro" \
+  -v "$PWD/data:/data" \
+  aulaglobal-mcp:local
 ```
 
-Pruebas sin credenciales reales: httptest Moodle, errores JSON HTTP 200, token
-inválido, redacción, redirects de launch, filtros/nombres, 200 descargas con cuatro
-workers, skip, cancelación, HTML/JSON/tamaño incorrectos, colisiones y escapes
-por symlinks. scripts/smoke.mjs verifica ambos transportes y seguridad HTTP.
+En tu cliente MCP configura la URL `http://127.0.0.1:8080/mcp` y la cabecera
+`Authorization: Bearer <tu MCP_HTTP_AUTH_TOKEN>`. Si usas otro puerto, por
+ejemplo `-p 127.0.0.1:9000:8080`, añade también
+`-e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000`.
 
-Estructura: cmd/aulaglobal-mcp (CLI/config/lifecycle),
-internal/aulaglobal (API/token/cookie), internal/store (descarga/lectura/búsqueda),
-internal/mcpserver (schemas/herramientas/seguridad HTTP).
+Para pararlo: `docker stop aulaglobal`.
 
-Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.
+---
+
+## Más información
+
+Configuración completa (variables de entorno, límites), detalles de seguridad,
+caducidad del token y desarrollo: [docs/TECNICO.md](docs/TECNICO.md).
