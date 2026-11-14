@@ -4,7 +4,7 @@
 
 **Conecta tu asistente de IA con AulaGlobal (UC3M)**
 
-[Instalación](#instalación) · [Uso](#uso) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Documentación técnica](docs/TECNICO.md)
+[Instalación](#instalación) · [Uso](#uso) · [Actualización](#actualización) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Documentación técnica](docs/TECNICO.md)
 
 </div>
 
@@ -186,6 +186,32 @@ AulaGlobal/
 ```
 
 En descargas posteriores solo se obtienen los archivos nuevos o modificados.
+
+---
+
+## Actualización
+
+Para instalar la última versión publicada, abre una terminal en la carpeta del
+programa y ejecuta:
+
+| Sistema | Comando |
+|---|---|
+| Windows (PowerShell) | `.\aulaglobal-mcp.exe update` |
+| macOS y Linux | `./aulaglobal-mcp update` |
+
+El programa indica la versión instalada y la disponible, pide confirmación y se
+sustituye a sí mismo. Con la opción `--check` solo comprueba si hay una versión
+nueva, sin instalar nada. Después de actualizar, reinicia el asistente.
+
+Antes de instalar, el programa verifica la firma digital de la versión y la
+integridad del archivo descargado; si alguna comprobación falla, no cambia nada.
+Las compilaciones propias (versión `dev`) solo se actualizan con `--force`.
+
+Al iniciarse, el programa consulta como máximo una vez al día si existe una
+versión nueva, y en ese caso el asistente puede sugerirte actualizar. Para
+desactivar esta consulta, define la variable de entorno
+`AULAGLOBAL_UPDATE_CHECK=0` en la configuración del servidor. La actualización
+nunca la realiza el asistente: solo la ejecutas tú desde la terminal.
 
 ---
 

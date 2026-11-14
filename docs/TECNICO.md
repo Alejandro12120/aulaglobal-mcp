@@ -108,7 +108,7 @@ de descarga se devuelven en results.
 
 | Herramienta | Entrada | Salida |
 |---|---|---|
-| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales |
+| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional |
 | list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
 | list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections → modules → contents: filename, filesize nullable, mimetype, timemodified, handle, section, module |
 | download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
@@ -174,6 +174,8 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 | MCP_HTTP_AUTH_TOKEN / MCP_HTTP_AUTH_TOKEN_FILE | obligatorio en HTTP |
 | MCP_ALLOWED_HOSTS / --allowed-hosts | localhost:8080,127.0.0.1:8080 |
 | MCP_ALLOWED_ORIGINS / --allowed-origins | ninguno; Origin ausente permitido |
+| AULAGLOBAL_UPDATE_CHECK | activada; `0` desactiva la consulta diaria de versiones nuevas |
+| AULAGLOBAL_IN_CONTAINER | definida en la imagen Docker; desactiva update y la consulta |
 
 Host se valida para evitar DNS rebinding; Origin se compara de forma exacta.
 Para otro puerto/hostname configura --allowed-hosts explícitamente.
@@ -356,6 +358,95 @@ volver a descargar un archivo con fecha impar; es conservador y evita omitir
 cambios. NTFS/APFS no necesitan tolerancia. Entradas interactivas aceptan CRLF.
 SIGINT/SIGTERM compilan en Windows; el cierre por señal Unix requiere CI/host Unix.
 
+## Actualización automática
+
+`aulaglobal-mcp update [--check] [--yes] [--force]` está implementado en
+internal/selfupdate (la CLI en cmd/aulaglobal-mcp/update.go).
+
+Flujo: consulta `GET https://api.github.com/repos/Alejandro12120/aulaglobal-mcp/releases/latest`
+(sin autenticación, User-Agent `aulaglobal-mcp/<versión>`; excluye borradores y
+prereleases), compara versiones semver estrictas (`vX.Y.Z`; nunca se baja de
+versión) y, si hay una más reciente y el usuario confirma ([S/n], o `--yes`):
+
+1. Descarga `checksums.txt` y `checksums.txt.sig` y verifica la firma con la
+   clave embebida **antes** de fiarse de nada más.
+2. Descarga el archivo de la plataforma actual
+   (`aulaglobal-mcp_<ver>_<os>_<arch>.tar.gz`, zip en Windows; mismo
+   name_template que .goreleaser.yaml) y comprueba su SHA-256 contra la línea
+   exacta de `checksums.txt`.
+3. Extrae únicamente la entrada `aulaglobal-mcp` / `aulaglobal-mcp.exe` de la
+   raíz del archivo (coincidencia exacta de nombre; no se escribe nada por el
+   nombre de la entrada), con tope de 100 MiB.
+4. Escribe un temporal en el mismo directorio que el ejecutable real
+   (os.Executable + EvalSymlinks), `chmod 0755` y lo sustituye. Unix: rename
+   atómico sobre el binario. Windows: el ejecutable en uso se renombra a
+   `<nombre>.old`, el nuevo se mueve a su sitio y, si falla, se restaura el
+   anterior. Cualquier comando elimina en el siguiente arranque un `.old`
+   sobrante (si sigue bloqueado, se ignora). Si el directorio no es escribible,
+   el error lo indica y no queda estado parcial.
+
+Límites: 1 MiB para el JSON y checksums.txt, 16 KiB para la firma, 100 MiB por
+archivo; timeouts de 15 s (API), 30 s (checksums/firma) y 10 min (archivo);
+las redirecciones se limitan a 5 y nunca bajan de https a http. Las URL de
+descarga se construyen a partir de la etiqueta validada, no se toman del JSON.
+`update` se niega a ejecutarse dentro de un contenedor (`AULAGLOBAL_IN_CONTAINER`
+o `/.dockerenv`; el Dockerfile lo define) y con versión `dev` o no comparable
+salvo `--force`. No hay ninguna herramienta MCP que actualice.
+
+### Firma (OpenSSH SSHSIG)
+
+La clave pública de firma está en internal/selfupdate/update_key.pub (se
+embebe con go:embed y la lee también release.yml). La verificación se hace en Go
+sin dependencias (sshsig.go): se decodifica el bloque
+`-----BEGIN SSH SIGNATURE-----`, se exige magic `SSHSIG`, versión 1, que la
+clave incluida coincida byte a byte con la de confianza, namespace
+`aulaglobal-mcp-update`, hash sha512 (o sha256) y se verifica con
+crypto/ed25519 la firma sobre
+`"SSHSIG" || string(namespace) || string(reserved) || string(hash_alg) || string(H(mensaje))`.
+Los fixtures de internal/selfupdate/testdata los generó el `ssh-keygen` real con
+una clave de prueba desechable.
+
+### Aviso de versión nueva
+
+Al arrancar el servidor (stdio o http) se lanza una única goroutine que, salvo
+`AULAGLOBAL_UPDATE_CHECK=0`, contenedor o versión `dev`, lee la caché
+`update-check.json` (`{"checked_at": RFC3339, "latest": "vX.Y.Z"}`) en
+`os.UserCacheDir()/aulaglobal-mcp/`: `~/.cache` (Linux),
+`~/Library/Caches` (macOS), `%LocalAppData%` (Windows). Si tiene menos de 24 h
+se usa; si no, se consulta GitHub (5 s) y se reescribe la caché de forma
+atómica con permisos 0600. Cualquier error se ignora (solo log debug). Las
+llamadas a herramientas nunca esperan: leen el resultado en memoria.
+
+Si hay una versión más reciente, auth_status añade `update_available` y el
+primer resultado correcto de cualquier herramienta del proceso lleva un
+contenido de texto adicional con un texto fijo en español en el que solo se
+interpola la versión, validada como `vX.Y.Z`. Nunca se incluye texto remoto
+(notas de versión, etc.), para evitar inyección de instrucciones.
+
+### Mantenimiento: clave de firma
+
+```sh
+ssh-keygen -t ed25519 -N "" -C aulaglobal-mcp-update -f aulaglobal-update
+```
+
+- Guarda el contenido de `aulaglobal-update` (clave privada) como secreto del
+  repositorio `UPDATE_SIGNING_KEY` y borra el archivo local.
+- Sustituye el contenido de internal/selfupdate/update_key.pub por
+  `aulaglobal-update.pub` y publica una versión con ese cambio.
+- release.yml escribe el secreto en un archivo 0600 bajo `$RUNNER_TEMP`, falla si
+  está vacío o si su clave pública no coincide con update_key.pub, y GoReleaser
+  firma `checksums.txt` con `ssh-keygen -Y sign -n aulaglobal-mcp-update`
+  (genera `checksums.txt.sig`). Tras publicar, un paso comprueba la firma con
+  `ssh-keygen -Y verify` y un allowed_signers construido desde update_key.pub.
+- Rotación: los binarios ya instalados solo confían en la clave con la que se
+  compilaron. Para rotar, publica primero una versión firmada con la clave
+  **antigua** que embeba la clave nueva; las siguientes pueden firmarse con la
+  nueva (en esa versión de transición hay que relajar temporalmente la
+  comprobación de coincidencia clave-secreto de release.yml). Si la clave
+  se pierde o se compromete, los usuarios deben descargar manualmente una
+  versión nueva. Las compilaciones locales con GoReleaser
+  requieren `--skip=sign`.
+
 ## Compilar tú mismo y publicar versiones
 
 El helper opcional ./obtener-token.sh ofrece compilar con Docker y ejecuta setup;
@@ -372,11 +463,12 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt.
+release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt y checksums.txt.sig (ver Actualización automática).
 Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versión.
 No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
-firma: quedan pendientes Authenticode, firma/notarización de Apple y provenance.
+firma de sistema operativo (la firma de checksums.txt solo protege la actualización): quedan pendientes Authenticode, firma/notarización de Apple y provenance.
 El proyecto usa licencia MIT (archivo LICENSE, incluido en cada archivo de release).
+
 
 
 ### Presentación y registro de Claude Code en setup
