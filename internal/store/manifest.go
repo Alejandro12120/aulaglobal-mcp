@@ -60,7 +60,7 @@ func Path(f aulaglobal.File) string {
 	for _, part := range strings.FieldsFunc(subdir, func(r rune) bool { return r == '/' || r == '\\' }) {
 		parts = append(parts, Sanitize(part))
 	}
-	return filepath.Join(append(parts, Sanitize(f.Filename))...)
+	return filepath.ToSlash(filepath.Join(append(parts, Sanitize(f.Filename))...))
 }
 func fmtCourse(id int64) string { b, _ := json.Marshal(id); return "course-" + string(b) }
 func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {

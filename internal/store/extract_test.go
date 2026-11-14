@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,6 +92,7 @@ func TestManifestReplacement(t *testing.T) {
 	defer ts.Close()
 	dir := t.TempDir()
 	s, _ := Open(dir, 1024, 2)
+	defer s.Root.Close()
 	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
 	n := int64(3)
 	a := aulaglobal.File{CourseID: 1, CourseName: "Álgebra", Section: "Tema 1", ModuleID: 2, Filepath: "/Carpeta/", Filename: "a.txt", Handle: "aaa", URL: ts.URL + "?body=old", Size: &n, Modified: 1}
@@ -98,7 +100,7 @@ func TestManifestReplacement(t *testing.T) {
 	b.Handle = "bbb"
 	b.ModuleID = 3
 	results := s.Download(context.Background(), c, []aulaglobal.File{b, a})
-	if results[0].Path == results[1].Path || results[1].Path != filepath.Join("Álgebra", "Tema 1", "Carpeta", "a.txt") {
+	if results[0].Path == results[1].Path || results[1].Path != path.Join("Álgebra", "Tema 1", "Carpeta", "a.txt") {
 		t.Fatalf("%+v", results)
 	}
 	s.Root.Close()
@@ -210,11 +212,12 @@ func TestLateExtractionCaches(t *testing.T) {
 func TestCanonicalFoldersAndReadableCollisions(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := Open(dir, 1024, 1)
+	defer s.Root.Close()
 	a := aulaglobal.File{Handle: "aaa", CourseID: 1, CourseName: "Álgebra", Section: "Tema", Filename: "a.pdf"}
 	b := a
 	b.Handle = "bbb"
 	paths, e := s.paths([]aulaglobal.File{b, a})
-	if e != nil || paths["bbb"] != filepath.Join("Álgebra", "Tema", "a (2).pdf") {
+	if e != nil || paths["bbb"] != path.Join("Álgebra", "Tema", "a (2).pdf") {
 		t.Errorf("%v %v", paths, e)
 	}
 	s.Root.Close()
@@ -225,7 +228,7 @@ func TestCanonicalFoldersAndReadableCollisions(t *testing.T) {
 	c.CourseName = "Renamed"
 	c.Filename = "other.pdf"
 	paths, e = s.paths([]aulaglobal.File{c, b})
-	if e != nil || paths["ccc"] != filepath.Join("Álgebra", "Tema", "other.pdf") || paths["bbb"] != filepath.Join("Álgebra", "Tema", "a (2).pdf") {
+	if e != nil || paths["ccc"] != path.Join("Álgebra", "Tema", "other.pdf") || paths["bbb"] != path.Join("Álgebra", "Tema", "a (2).pdf") {
 		t.Fatalf("%v %v", paths, e)
 	}
 }
@@ -235,12 +238,14 @@ func TestExtractTimeoutConfiguration(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			t.Setenv("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS", v)
 			s, e := Open(t.TempDir(), 1024, 1)
+			if e == nil {
+				defer s.Root.Close()
+			}
 			good := v == "" || v == "1" || v == "600"
 			if (e == nil) != good {
 				t.Fatalf("value %q: %v", v, e)
 			}
 			if e == nil {
-				defer s.Root.Close()
 				expected := 60 * time.Second
 				if v == "1" {
 					expected = time.Second

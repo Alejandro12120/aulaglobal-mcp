@@ -253,7 +253,7 @@ func textLike(p string) bool {
 	return false
 }
 func (s *Store) Read(ctx context.Context, path string, offset, length int) (ReadResult, error) {
-	r := ReadResult{Path: path, Offset: offset, NextOffset: -1}
+	r := ReadResult{Path: filepath.ToSlash(path), Offset: offset, NextOffset: -1}
 	if e := valid(path); e != nil {
 		return r, e
 	}
@@ -398,7 +398,7 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 					for _, loc := range re.FindAllStringIndex(page.Text, limit-len(out)) {
 						start := max(0, loc[0]-80)
 						end := min(len(page.Text), start+240)
-						out = append(out, Match{p, loc[0], page.Number, strings.ToValidUTF8(page.Text[start:end], "�")})
+						out = append(out, Match{filepath.ToSlash(p), loc[0], page.Number, strings.ToValidUTF8(page.Text[start:end], "�")})
 					}
 				}
 			}

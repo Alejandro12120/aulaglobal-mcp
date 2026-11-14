@@ -95,6 +95,8 @@ func TestRejectBadDownloads(t *testing.T) {
 			t.Fatal(e)
 		}
 		f := aulaglobal.File{Filename: "x.pdf", Handle: "x", URL: ts.URL, Size: &tc.size}
+		defer s.Root.Close()
+		defer ts.Close()
 		r := s.Download(context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
 		if r.Status != "error" {
 			t.Fatalf("saved invalid file %+v", r)
@@ -193,5 +195,41 @@ func TestManifestPortablePaths(t *testing.T) {
 	b, e := s.cacheRead(".aulaglobal-cache/manifest.json")
 	if e != nil || strings.Contains(string(b), `\\`) {
 		t.Fatal(string(b), e)
+	}
+}
+
+func TestPortablePathRoundTrip(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "portable needle")
+	}))
+	defer ts.Close()
+	s, err := Open(t.TempDir(), 1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Root.Close()
+	f := aulaglobal.File{Handle: "portable", CourseID: 1, CourseName: "Course", Section: "Section", Filename: "notes.txt", URL: ts.URL}
+	const want = "Course/Section/notes.txt"
+	if got := Path(f); got != want {
+		t.Fatalf("Path = %q, want %q", got, want)
+	}
+	result := s.Download(context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
+	if result.Status != "downloaded" || result.Path != want {
+		t.Fatalf("download: %+v", result)
+	}
+	for _, prefix := range []string{"", "Course/Section", want} {
+		matches, err := s.Search(context.Background(), "needle", false, 10, prefix)
+		if err != nil || len(matches) != 1 || matches[0].Path != want {
+			t.Fatalf("search prefix %q: %+v, %v", prefix, matches, err)
+		}
+		r, err := s.Read(context.Background(), matches[0].Path, 0, 100)
+		if err != nil || r.Path != want || r.Text != "portable needle" {
+			t.Fatalf("read: %+v, %v", r, err)
+		}
+	}
+	// Native Windows input is also accepted, while returned paths stay portable.
+	r, err := s.Read(context.Background(), filepath.FromSlash(want), 0, 100)
+	if err != nil || r.Path != want || r.Text != "portable needle" {
+		t.Fatalf("native read: %+v, %v", r, err)
 	}
 }
