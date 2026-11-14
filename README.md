@@ -103,7 +103,7 @@ El asistente de configuración realiza cuatro pasos:
 4. **Asistentes.** Detecta los asistentes instalados y los configura (ver abajo).
 
 <details>
-<summary><strong>Cómo obtener la cookie de sesión</strong></summary>
+<summary><strong>Cómo obtener la cookie de sesión</strong> (el programa de configuración te guía en este paso; estas instrucciones son solo de referencia)</summary>
 
 1. Inicia sesión en <https://aulaglobal.uc3m.es>.
 2. Abre las herramientas de desarrollador con **F12** (en Mac,
