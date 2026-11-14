@@ -1,118 +1,103 @@
-# AulaGlobal MCP
+# AulaGlobal para tu asistente de IA
 
-Conecta tu asistente de IA (Claude Code, Claude Desktop, ChatGPT Work de escritorio u otro cliente MCP) con
-[AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M. Con él, el asistente puede:
-
-- ver tus asignaturas,
-- descargar los apuntes y materiales a tu ordenador,
-- leerlos (PDF, Word, PowerPoint, texto…) y buscar dentro de ellos,
-- consultar tus entregas pendientes y su estado.
-
-Ejemplos de lo que puedes pedirle:
+Este programa permite que tu asistente de IA (Claude, Codex o ChatGPT) entre en
+tu [AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M y te ayude con tus
+asignaturas. Puedes pedirle cosas como:
 
 > «¿Qué entregas tengo esta semana?»
-> «Descarga los PDF de Sistemas Operativos y resúmeme el tema 3.»
-> «Busca en mis apuntes dónde se explica el algoritmo de Dijkstra.»
+>
+> «Descárgate los apuntes de Sistemas Operativos y resúmeme el tema 3.»
+>
+> «Busca en mis apuntes dónde explican el algoritmo de Dijkstra.»
 
-Todo se guarda en tu ordenador. El asistente nunca ve tu contraseña ni tu token.
-
----
-
-## Lo que necesitas
-
-- **Linux o macOS** con una terminal (en Windows, usa WSL).
-- **[Docker](https://docs.docker.com/get-docker/)** instalado. Solo se usa para
-  compilar el programa; no hace falta instalar Go.
-- Un cliente MCP, por ejemplo **[Claude Code](https://claude.com/claude-code)**.
+Los apuntes se guardan en tu ordenador, en la carpeta `data`. Tu contraseña no
+se usa nunca y tu clave de acceso se queda guardada en tu ordenador, sin que el
+asistente la vea.
 
 ---
 
-## Paso 1 · Descargar y compilar
+## Antes de empezar
 
-Abre una terminal y ejecuta:
+Necesitas tres cosas:
+
+1. **Un ordenador con Linux o Mac.** En Windows funciona dentro de
+   [WSL](https://learn.microsoft.com/es-es/windows/wsl/install).
+2. **[Docker](https://docs.docker.com/get-docker/)** instalado. Solo hace falta
+   la primera vez, para preparar el programa.
+3. **Un asistente** compatible: [Claude Code](https://claude.com/claude-code),
+   Claude Desktop, Codex o la aplicación de escritorio de ChatGPT.
+
+---
+
+## 1. Descarga el proyecto
+
+Abre una terminal y escribe:
 
 ```bash
 git clone <url-de-este-repositorio> aulaglobal-mcp
 cd aulaglobal-mcp
-
-docker run --rm -u "$(id -u):$(id -g)" -e GOCACHE=/tmp/gocache -e GOPATH=/tmp/gopath \
-  -v "$PWD":/src -w /src golang:1.26.9 \
-  sh -c 'CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o aulaglobal-mcp ./cmd/aulaglobal-mcp'
-
-mkdir -p secrets data && chmod 700 secrets data
 ```
 
-Al terminar tendrás un archivo llamado `aulaglobal-mcp` en la carpeta. Ese es el
-programa.
+## 2. Conecta tu cuenta de AulaGlobal
 
----
+En la misma terminal, escribe:
 
-## Paso 2 · Conseguir tu token de AulaGlobal
+```bash
+./obtener-token.sh
+```
 
-El programa necesita un *token*: una clave que permite leer AulaGlobal en tu
-nombre, la misma que usa la app móvil de Moodle. Se obtiene a partir de la
-cookie de sesión del navegador.
+El programa te va guiando paso a paso. La primera vez te preguntará si quieres
+prepararlo con Docker: responde `s`.
 
-Ejecuta `./obtener-token.sh` desde esta carpeta. Te guiará para copiar la cookie,
-la leerá sin mostrarla y guardará el token con permisos privados. Pregunta antes
-de reemplazarlo y comprueba la conexión si tienes curl.
+Después te pedirá un dato de tu sesión de AulaGlobal (la *cookie*). Para
+conseguirlo:
 
-### 2.1 Copiar la cookie desde el navegador
-
-1. Entra en <https://aulaglobal.uc3m.es> e **inicia sesión** como siempre.
-2. Pulsa **F12** (en Mac: `Cmd + Option + I`) para abrir las herramientas de
-   desarrollador.
-3. Ve a la pestaña **Consola** (*Console*).
-4. Pega este comando y pulsa **Enter**:
+1. Entra en <https://aulaglobal.uc3m.es> con tu usuario, como siempre.
+2. Pulsa **F12** (en Mac, `Cmd + Option + I`). Se abre un panel lateral.
+3. Haz clic en la pestaña **Consola**.
+4. Copia esta línea, pégala ahí y pulsa **Enter**:
 
    ```js
    copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
    ```
 
-   La cookie queda **copiada en el portapapeles**; no se muestra nada en pantalla
-   (o solo `undefined`), y es normal.
+   No verás nada especial (como mucho la palabra `undefined`). El dato ya está
+   copiado.
+5. Vuelve a la terminal, pégalo y pulsa **Enter**. Por seguridad, lo que pegas
+   no se ve en pantalla.
 
-> **¿Chrome no te deja pegar?** La primera vez, Chrome muestra un aviso. Escribe
-> `allow pasting` (o `permitir pegar`), pulsa Enter y vuelve a pegar el comando.
->
-> **¿Se ha copiado algo vacío?** Hazlo a mano: en las herramientas de
-> desarrollador ve a **Aplicación → Cookies → https://aulaglobal.uc3m.es**
-> (en Firefox: **Almacenamiento → Cookies**) y copia el **valor** de la fila
-> `MoodleSessionag`.
-
-⚠️ Esa cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
-pegues en chats, foros ni en el propio asistente de IA.
-
-### 2.2 Convertir la cookie en token
-
-Vuelve al asistente y pega la cookie cuando te lo pida. No verás lo que pegas.
+Si todo ha ido bien, verás **«Token válido. Hola, *tu nombre*»**. Listo.
 
 <details>
-<summary>Método manual</summary>
+<summary>¿Chrome no te deja pegar en la consola?</summary>
 
-En Bash, dentro de la carpeta del proyecto:
-
-```bash
-mkdir -p secrets data && chmod 700 secrets data
-IFS= read -rs -p 'Pega la cookie y pulsa Enter: ' cookie; printf '\n' >&2
-printf '%s' "$cookie" | ./aulaglobal-mcp token-from-cookie --output secrets/token
-unset cookie
-```
-
-Añade `--force` al subcomando para reemplazarlo. Si falla, vuelve a iniciar sesión
-y copia una cookie nueva.
+La primera vez, Chrome lo bloquea por seguridad. Escribe `allow pasting` (o
+`permitir pegar`), pulsa Enter y vuelve a pegar la línea.
 
 </details>
 
----
+<details>
+<summary>¿No funciona la línea de la consola?</summary>
 
-## Paso 3 · Conectarlo con tu asistente
+Puedes copiar el dato a mano. En el mismo panel, ve a **Aplicación → Cookies →
+https://aulaglobal.uc3m.es** (en Firefox: **Almacenamiento → Cookies**), busca la
+fila `MoodleSessionag` y copia lo que pone en **Valor**.
+
+</details>
+
+> ⚠️ Ese dato da acceso a tu cuenta. No se lo pases a nadie, ni tampoco al
+> asistente de IA: pégalo solo en la terminal cuando el programa te lo pida.
+
+## 3. Añádelo a tu asistente
+
+En todos los casos tienes que poner la ruta de la carpeta del proyecto. Para
+saberla, escribe `pwd` en la terminal dentro de la carpeta. Te saldrá algo como
+`/home/ana/aulaglobal-mcp`; úsalo donde pone `/ruta/a/aulaglobal-mcp`.
 
 ### Claude Code
 
-Crea un archivo llamado `.mcp.json` en la carpeta donde vayas a usar Claude Code
-(por ejemplo, la propia carpeta `aulaglobal-mcp`) con este contenido, cambiando
-`/ruta/a/aulaglobal-mcp` por la ruta real (la obtienes con el comando `pwd`):
+Crea un archivo llamado `.mcp.json` dentro de la carpeta del proyecto con este
+contenido (cambia las rutas):
 
 ```json
 {
@@ -129,23 +114,19 @@ Crea un archivo llamado `.mcp.json` en la carpeta donde vayas a usar Claude Code
 }
 ```
 
-Abre Claude Code en esa carpeta (`claude`), acepta el servidor `aulaglobal`
-cuando te lo pregunte y escribe `/mcp` para comprobar que aparece como
-conectado.
+Abre Claude Code en esa carpeta (escribe `claude`) y acepta cuando te pregunte
+por `aulaglobal`.
 
-### Codex
+### Claude Desktop
 
-Añade este bloque a `~/.codex/config.toml`, cambiando las rutas por las reales
-(usa `pwd` para conocerlas):
+Ve a **Ajustes → Desarrollador → Editar configuración**, pega el mismo contenido
+de arriba (o añade el bloque `"aulaglobal"` si ya tenías otros) y reinicia la
+aplicación.
 
-```toml
-[mcp_servers.aulaglobal]
-command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
-args = ["--transport", "stdio"]
-env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
-```
+### Codex y ChatGPT (aplicación de escritorio)
 
-O regístralo desde la terminal en lugar de editar el archivo:
+Los dos comparten la misma configuración, así que solo tienes que hacerlo una
+vez. Escribe en la terminal (cambia las rutas):
 
 ```bash
 codex mcp add aulaglobal \
@@ -154,77 +135,41 @@ codex mcp add aulaglobal \
   -- /ruta/a/aulaglobal-mcp/aulaglobal-mcp --transport stdio
 ```
 
-Comprueba el registro con `codex mcp list`. Abre Codex y usa `/mcp` para comprobar
-la conexión; si ya estaba abierto, reinícialo.
+Si no tienes Codex instalado, abre el archivo `~/.codex/config.toml` (créalo si no
+existe) y añade esto:
 
-### ChatGPT Work (aplicación de escritorio)
+```toml
+[mcp_servers.aulaglobal]
+command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
+args = ["--transport", "stdio"]
+env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
+```
 
-La [documentación oficial de MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=app)
-confirma que el escritorio admite **stdio local**, comparte `~/.codex/config.toml`
-con Codex y admite HTTP con bearer u OAuth. No necesitas publicar este servidor.
+Después reinicia Codex o ChatGPT. En ChatGPT puedes comprobarlo en **Settings →
+MCP servers**; si no aparece, pulsa **Restart**.
 
-1. Abre **Settings → MCP servers → Add server**.
-2. Pon el nombre `aulaglobal`, elige **STDIO** y usa como comando la ruta
-   absoluta al ejecutable.
-3. Para configurar argumentos y variables sin depender de los campos de tu
-   versión, copia este bloque en `~/.codex/config.toml` (si ya seguiste la
-   sección Codex, no lo dupliques). Sustituye las rutas:
+> Esto funciona en la **aplicación de escritorio** de ChatGPT, no en la web.
+> ([Documentación de OpenAI](https://learn.chatgpt.com/docs/extend/mcp?surface=app))
 
-   ```toml
-   [mcp_servers.aulaglobal]
-   command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
-   args = ["--transport", "stdio"]
-   env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
-   ```
+### Comprobar que funciona
 
-4. Guarda, selecciona **Restart** y comprueba la conexión con `/mcp`.
+Escribe `/mcp` en tu asistente: debería aparecer `aulaglobal` como conectado.
 
-También puedes elegir **Streamable HTTP** e introducir la URL local
-`http://127.0.0.1:8080/mcp`: utiliza el bloque HTTP de Codex de la sección Docker
-para enviar `MCP_HTTP_AUTH_TOKEN`. La configuración admite cabeceras estáticas;
-no requiere OAuth. La aplicación debe heredar la variable con el bearer.
+## 4. ¡A usarlo!
 
-El [escritorio](https://learn.chatgpt.com/docs/app) se ofrece en macOS, Windows y
-Linux; este proyecto requiere Linux/macOS (en Windows usa WSL y rutas accesibles
-desde el entorno que ejecuta el comando). Los [planes y límites](https://learn.chatgpt.com/docs/pricing)
-incluyen Plus, Pro, Business y Enterprise/Edu; Free y Go tienen acceso de escritorio
-sujeto a despliegue. La guía MCP no publica una matriz específica por plan/OS:
-comprueba la disponibilidad de Work y las políticas de tu organización.
+Pídele las cosas con tus palabras. Para empezar, prueba:
 
-**La conexión web es distinta.** Según el [Centro de ayuda de OpenAI](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt),
-las conexiones personalizadas web están disponibles en Business y Enterprise/Edu
-con permisos del administrador. Se añaden desde **Plugins → + → Add custom MCP
-server**, con nombre, descripción opcional, URL HTTPS pública (o Secure MCP
-Tunnel) y autenticación. Esa vía no lee tu configuración local. Para empezar,
-usa stdio en el escritorio: evita exponer tus archivos de cursos y el acceso a
-AulaGlobal a través de una URL pública. Nunca publiques este servidor con la
-autenticación HTTP desactivada.
+- «Comprueba mi conexión con AulaGlobal.» (debería decir tu nombre)
+- «¿Qué asignaturas tengo?»
+- «¿Qué hay subido en *Cálculo*?»
+- «Descárgate los PDF de *Cálculo* y explícame el primero.»
+- «¿Qué entregas tengo pendientes? ¿Cuáles he entregado ya?»
 
-Fuentes consultadas el 14 de noviembre de 2026; los menús pueden cambiar.
-
-### Claude Desktop u otros clientes
-
-Usa el mismo bloque `"aulaglobal": { ... }` dentro de la sección `mcpServers` del
-archivo de configuración de tu cliente (en Claude Desktop: *Ajustes → Desarrollador
-→ Editar configuración*) y reinicia el cliente.
-
----
-
-## Paso 4 · Usarlo
-
-Pídeselo con tus palabras. Para empezar, prueba:
-
-1. «Comprueba mi conexión con AulaGlobal» → debería decir tu nombre.
-2. «Lista mis asignaturas.»
-3. «¿Qué archivos hay en *nombre de asignatura*?»
-4. «Descarga los PDF de *asignatura* y resúmeme el primero.»
-5. «¿Qué entregas tengo pendientes y cuáles ya he entregado?»
-
-Los archivos descargados quedan en la carpeta `data/`, ordenados así:
+Lo que descargues queda en la carpeta `data`, ordenado por asignatura y tema:
 
 ```
 data/
-└── Nombre de la asignatura/
+└── Cálculo/
     ├── Tema 1/
     │   └── apuntes.pdf
     └── Entregas/
@@ -232,99 +177,58 @@ data/
             └── enunciado.pdf
 ```
 
-Si vuelves a descargar, solo se bajan los archivos nuevos o modificados.
-
-### Qué puede hacer el asistente
-
-| Herramienta | Para qué sirve |
-|---|---|
-| `auth_status` | Comprobar que el token funciona y desde cuándo lo tienes |
-| `list_courses` | Ver tus asignaturas (actuales, pasadas o futuras) |
-| `list_course_files` | Ver los archivos de una asignatura |
-| `download_files` | Descargar archivos o una asignatura entera |
-| `read_file` | Leer un archivo descargado (PDF, Word, PowerPoint, texto…) |
-| `search_files` | Buscar un texto en todo lo descargado |
-| `list_assignments` | Ver entregas: fechas, enunciado y, si quieres, tu estado y nota |
+Si vuelves a pedirle que descargue, solo baja lo nuevo o lo que el profesor haya
+cambiado.
 
 ---
 
-## Problemas frecuentes
+## Si algo falla
 
-**«token invalid or expired»**
-El token ha caducado o no es válido. Moodle puede hacer caducar los tokens
-(por defecto, a las 12 semanas). Vuelve a ejecutar `./obtener-token.sh` y acepta reemplazar el token.
+**Dice «token invalid or expired».**
+Tu acceso ha caducado (AulaGlobal lo hace cada cierto tiempo). Vuelve a
+ejecutar `./obtener-token.sh` y responde `s` cuando pregunte si quieres
+reemplazarlo.
 
-**«cannot read token file»**
-No existe `secrets/token` o la ruta del `.mcp.json` está mal. Revisa que la ruta
-sea absoluta (empieza por `/`) y que hiciste el Paso 2.
+**Dice «cannot read token file».**
+Falta el paso 2, o la ruta que pusiste en el paso 3 está mal. Revisa que empiece
+por `/` y que coincida con lo que te dice `pwd`.
 
-**El servidor no aparece en `/mcp`**
-Comprueba la ruta de `command` en `.mcp.json` y que el archivo `aulaglobal-mcp`
-existe y es ejecutable (`ls -l aulaglobal-mcp`). Reinicia Claude Code.
+**El asistente no encuentra `aulaglobal`.**
+Revisa las rutas del paso 3 y reinicia el asistente.
 
-**Un PDF no se puede leer**
-Los PDF escaneados (imágenes) no tienen texto y no se pueden leer: no hay OCR.
-Si es muy grande, el asistente puede recibir «extraction in progress»: vuelve a
-pedírselo en unos segundos.
+**No puede leer un PDF.**
+Si el PDF es un escaneo (fotos de páginas), no tiene texto que leer. Si es muy
+largo, puede tardar: pídeselo otra vez pasados unos segundos.
 
----
-
-## Seguridad en pocas palabras
-
-- El token se guarda solo en `secrets/token`, con permisos que solo tú puedes
-  leer. **No lo compartas ni lo subas a Git** (la carpeta ya está en `.gitignore`).
-- El asistente nunca recibe el token: el programa lo usa por dentro y lo borra de
-  cualquier mensaje de error.
-- El programa solo puede escribir y leer dentro de la carpeta `data/`.
-- El contenido de los cursos se trata como datos: si un PDF contiene
-  instrucciones raras, el asistente no debe obedecerlas.
+**`obtener-token.sh` dice que no ha podido obtener el token.**
+Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con un dato
+nuevo.
 
 ---
 
-## Avanzado: servidor HTTP con Docker
+## ¿Es seguro?
 
-Si prefieres tenerlo como servicio (por ejemplo, para varios clientes en tu
-máquina):
-
-```bash
-docker build -t aulaglobal-mcp:local .
-
-# Contraseña para el servidor MCP (distinta de tu token de AulaGlobal)
-export MCP_HTTP_AUTH_TOKEN="$(openssl rand -hex 32)"
-echo "$MCP_HTTP_AUTH_TOKEN"   # guárdala: la necesita tu cliente
-
-docker run -d --name aulaglobal --user "$(id -u):$(id -g)" \
-  -p 127.0.0.1:8080:8080 \
-  -e MCP_HTTP_AUTH_TOKEN \
-  -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token \
-  -v "$PWD/secrets/token:/run/secrets/token:ro" \
-  -v "$PWD/data:/data" \
-  aulaglobal-mcp:local
-```
-
-En tu cliente MCP configura la URL `http://127.0.0.1:8080/mcp` y la cabecera
-`Authorization: Bearer <tu MCP_HTTP_AUTH_TOKEN>`. Si usas otro puerto, por
-ejemplo `-p 127.0.0.1:9000:8080`, añade también
-`-e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000`.
-
-En Codex, usa este bloque en `~/.codex/config.toml` en lugar del bloque stdio:
-
-```toml
-[mcp_servers.aulaglobal]
-url = "http://127.0.0.1:8080/mcp"
-bearer_token_env_var = "MCP_HTTP_AUTH_TOKEN"
-```
-
-Inicia Codex desde la terminal donde exportaste `MCP_HTTP_AUTH_TOKEN`.
-También puedes registrarlo con
-`codex mcp add aulaglobal --url http://127.0.0.1:8080/mcp --bearer-token-env-var MCP_HTTP_AUTH_TOKEN`.
-Esta contraseña es la del servidor MCP, distinta del token de AulaGlobal.
-
-Para pararlo: `docker stop aulaglobal`.
+- Tu clave de acceso se guarda en la carpeta `secrets`, y solo tu usuario puede
+  leerla. No la compartas ni la subas a internet.
+- El asistente no ve nunca esa clave: el programa la usa por dentro.
+- El programa solo guarda y lee archivos dentro de la carpeta `data`.
+- Todo funciona en tu ordenador: no hay servidores intermedios.
 
 ---
 
-## Más información
+## Agradecimientos
 
-Configuración completa (variables de entorno, límites), detalles de seguridad,
-caducidad del token y desarrollo: [docs/TECNICO.md](docs/TECNICO.md).
+Este proyecto se basa en
+**[AGDownloader](https://github.com/Astrak00/AGDownloader)**, de
+[Eduardo Alarcón (Astrak00)](https://github.com/Astrak00), un descargador de
+AulaGlobal para la terminal publicado con licencia MIT. De él vienen la idea de
+obtener el acceso a partir de la sesión del navegador, la línea para la consola y
+la forma de limpiar los nombres de las asignaturas. ¡Gracias por compartirlo!
+
+---
+
+## Para usuarios avanzados
+
+En [docs/TECNICO.md](docs/TECNICO.md) están el modo servidor HTTP con Docker,
+todas las opciones de configuración, los detalles de seguridad y cómo
+desarrollar y probar el proyecto.

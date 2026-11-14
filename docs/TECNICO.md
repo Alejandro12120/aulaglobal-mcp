@@ -1,4 +1,4 @@
-# AulaGlobal MCP
+# AulaGlobal MCP · Referencia técnica
 
 Servidor Go ligero para consultar asignaturas y descargar/leer sus documentos en
 AulaGlobal UC3M. SDK oficial MCP Go, stdio o Streamable HTTP en /mcp.
@@ -245,3 +245,57 @@ internal/aulaglobal (API/token/cookie), internal/store (descarga/lectura/búsque
 internal/mcpserver (schemas/herramientas/seguridad HTTP).
 
 Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.
+
+## Guía rápida: servidor HTTP con Docker
+
+Si prefieres tenerlo como servicio (por ejemplo, para varios clientes en tu
+máquina):
+
+```bash
+docker build -t aulaglobal-mcp:local .
+
+# Contraseña para el servidor MCP (distinta de tu token de AulaGlobal)
+export MCP_HTTP_AUTH_TOKEN="$(openssl rand -hex 32)"
+echo "$MCP_HTTP_AUTH_TOKEN"   # guárdala: la necesita tu cliente
+
+docker run -d --name aulaglobal --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:8080:8080 \
+  -e MCP_HTTP_AUTH_TOKEN \
+  -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token \
+  -v "$PWD/secrets/token:/run/secrets/token:ro" \
+  -v "$PWD/data:/data" \
+  aulaglobal-mcp:local
+```
+
+En tu cliente MCP configura la URL `http://127.0.0.1:8080/mcp` y la cabecera
+`Authorization: Bearer <tu MCP_HTTP_AUTH_TOKEN>`. Si usas otro puerto, por
+ejemplo `-p 127.0.0.1:9000:8080`, añade también
+`-e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000`.
+
+En Codex, usa este bloque en `~/.codex/config.toml` en lugar del bloque stdio:
+
+```toml
+[mcp_servers.aulaglobal]
+url = "http://127.0.0.1:8080/mcp"
+bearer_token_env_var = "MCP_HTTP_AUTH_TOKEN"
+```
+
+Inicia Codex desde la terminal donde exportaste `MCP_HTTP_AUTH_TOKEN`.
+También puedes registrarlo con
+`codex mcp add aulaglobal --url http://127.0.0.1:8080/mcp --bearer-token-env-var MCP_HTTP_AUTH_TOKEN`.
+Esta contraseña es la del servidor MCP, distinta del token de AulaGlobal.
+
+Para pararlo: `docker stop aulaglobal`.
+
+## ChatGPT en la web
+
+**La conexión web es distinta.** Según el [Centro de ayuda de OpenAI](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt),
+las conexiones personalizadas web están disponibles en Business y Enterprise/Edu
+con permisos del administrador. Se añaden desde **Plugins → + → Add custom MCP
+server**, con nombre, descripción opcional, URL HTTPS pública (o Secure MCP
+Tunnel) y autenticación. Esa vía no lee tu configuración local. Para empezar,
+usa stdio en el escritorio: evita exponer tus archivos de cursos y el acceso a
+AulaGlobal a través de una URL pública. Nunca publiques este servidor con la
+autenticación HTTP desactivada.
+
+Fuentes consultadas el 14 de noviembre de 2026; los menús pueden cambiar.
