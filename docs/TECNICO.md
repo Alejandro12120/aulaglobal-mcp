@@ -370,3 +370,24 @@ Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versió
 No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
 firma: quedan pendientes Authenticode, firma/notarización de Apple y provenance.
 El proyecto usa licencia MIT (archivo LICENSE, incluido en cada archivo de release).
+
+
+### Presentación y registro de Claude Code en setup
+
+El instalador separa carpetas, token, comprobación y asistentes en cuatro pasos.
+La entrada de cookie sigue oculta; también comprueba el token conservado.
+Los encabezados usan negrita solo con stdout terminal y NO_COLOR ausente;
+Windows usa texto sin códigos ANSI.
+
+Claude Code se busca en PATH y en ~/.claude/local, ~/.local/bin,
+/opt/homebrew/bin y /usr/local/bin. En Windows busca .exe y .cmd
+en el perfil y %APPDATA%/npm. Cada llamada tiene un límite de 20 segundos
+y captura los diagnósticos sin mostrarlos para evitar filtrar datos.
+Se consulta mcp get aulaglobal antes de registrar; solo se sustituye una
+entrada identificada como de usuario, tras confirmar y quitarla con scope user.
+Los ámbitos local/proyecto o desconocidos requieren revisión manual.
+El alta usa mcp add --scope user [opciones -e] aulaglobal -- BINARIO
+--transport stdio. Las opciones -e solo contienen rutas distintas de las
+predeterminadas, nunca la cookie ni el token. El ejecutor es inyectable.
+Los fallos muestran un comando manual al final; no se imprime JSON de rutina.
+Las pruebas usan un Moodle falso y un ejecutor simulado, sin servicios reales.

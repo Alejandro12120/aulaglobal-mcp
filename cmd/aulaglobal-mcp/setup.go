@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -58,10 +59,30 @@ func (u setupUI) line() string {
 	return s.String()
 }
 func (u setupUI) yes(q string) bool {
-	fmt.Fprint(u.out, q+" ")
+	fmt.Fprint(u.out, "\n› "+q+" ")
 	s := strings.ToLower(strings.TrimSpace(u.line()))
 	return s == "s" || s == "si" || s == "sí"
 }
+func (u setupUI) step(n int, title string) {
+	header := fmt.Sprintf("── Paso %d de 4 · %s ──", n, title)
+	if f, ok := u.out.(*os.File); ok && runtime.GOOS != "windows" && term.IsTerminal(int(f.Fd())) {
+		if _, disabled := os.LookupEnv("NO_COLOR"); !disabled {
+			header = "\033[1m" + header + "\033[0m"
+		}
+	}
+	fmt.Fprintf(u.out, "\n%s\n\n", header)
+}
+func checkToken(ctx context.Context, api *aulaglobal.Client, token string, u setupUI) {
+	u.step(3, "Comprobación")
+	api.Tokens = aulaglobal.StaticToken{File: token}
+	auth, e := api.Auth(ctx)
+	if e != nil {
+		fmt.Fprintln(u.out, "! No se pudo confirmar el token.\n  Comprueba auth_status o repite setup.")
+	} else {
+		fmt.Fprintln(u.out, "✓ Token válido. Hola, "+auth.Fullname)
+	}
+}
+
 func cleanup(token string) error {
 	paths := []string{token + ".meta.json", token + ".private"}
 	temps, e := filepath.Glob(filepath.Join(filepath.Dir(token), ".token-*"))
@@ -83,6 +104,9 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 	if e := os.MkdirAll(data, 0700); e != nil {
 		return false, e
 	}
+	u.step(1, "Carpetas")
+	fmt.Fprintln(u.out, "Tu token se guarda en:\n  "+token+"\n\nTus apuntes se guardarán en:\n  "+data)
+	u.step(2, "Tu cuenta de AulaGlobal")
 	force := false
 	if _, e := os.Lstat(token); e == nil {
 		fmt.Fprintln(u.out, "Ya tienes un token guardado.")
@@ -94,30 +118,42 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 			fmt.Fprintln(u.out, "Obtenido el:", meta.ObtainedAt)
 		}
 		if !u.yes("¿Quieres reemplazarlo? [s/N]") {
-			fmt.Fprintln(u.out, "Conservamos tu token.")
+			fmt.Fprintln(u.out, "✓ Conservamos tu token.")
+			checkToken(ctx, api, token, u)
 			return true, nil
 		}
 		force = true
 	} else if !os.IsNotExist(e) {
 		return false, e
 	} else {
-		fmt.Fprintln(u.out, "Se limpiarán solo los restos incompletos de un token anterior, si los hay.")
+		fmt.Fprintln(u.out, "Se limpiarán los restos incompletos de un token anterior.")
 		if e := cleanup(token); e != nil {
 			return false, e
 		}
 	}
 	fmt.Fprintln(u.out, `1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
-2. Pulsa F12 (Mac: Cmd + Option + I) y abre Consola.
+
+2. Pulsa F12 (Mac: Cmd + Option + I).
+   Abre Consola.
+
 3. Pega este comando y pulsa Enter:
-copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
-Si Chrome bloquea pegar, escribe «allow pasting» (o «permitir pegar») primero.
-Alternativa: Aplicación → Cookies → https://aulaglobal.uc3m.es →
-MoodleSessionag → Valor (Firefox: Almacenamiento → Cookies).
-4. Vuelve aquí y pega la cookie. No se verá mientras escribes.
-No compartas la cookie ni el token.`)
+
+   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
+
+   Si Chrome bloquea pegar, escribe «allow pasting» primero.
+   También puede aparecer como «permitir pegar».
+
+   Otra opción: Aplicación → Cookies → https://aulaglobal.uc3m.es
+   Copia el Valor de MoodleSessionag.
+   En Firefox: Almacenamiento → Cookies.
+
+4. Vuelve aquí y pega la cookie.
+   No se verá mientras escribes.
+
+! No compartas la cookie ni el token.`)
 	var cookie string
 	for i := 1; i <= 3; i++ {
-		fmt.Fprintf(u.out, "Pega la cookie y pulsa Enter (intento %d/3): ", i)
+		fmt.Fprintf(u.out, "\n› Pega la cookie y pulsa Enter (intento %d/3): ", i)
 		b, e := u.password()
 		fmt.Fprintln(u.out)
 		if e != nil {
@@ -128,7 +164,7 @@ No compartas la cookie ni el token.`)
 		if cookie != "" {
 			break
 		}
-		fmt.Fprintln(u.out, "No has pegado ningún valor. Copia el valor de MoodleSessionag e inténtalo otra vez.")
+		fmt.Fprintln(u.out, "! No has pegado ningún valor.\n  Copia el valor de MoodleSessionag e inténtalo otra vez.")
 	}
 	if cookie == "" {
 		return false, errors.New("No se recibió ninguna cookie")
@@ -154,13 +190,7 @@ No compartas la cookie ni el token.`)
 	if e = aulaglobal.SaveSecret(token+".meta.json", string(meta), force); e != nil {
 		return false, e
 	}
-	api.Tokens = aulaglobal.StaticToken{File: token}
-	auth, e := api.Auth(ctx)
-	if e != nil {
-		fmt.Fprintln(u.out, "Aviso: no se pudo confirmar el token. Comprueba auth_status o repite setup.")
-	} else {
-		fmt.Fprintln(u.out, "Token válido. Hola, "+auth.Fullname)
-	}
+	checkToken(ctx, api, token, u)
 	return true, nil
 }
 
@@ -301,9 +331,11 @@ func register(u setupUI, exe, token, data, claude, codex string) error {
 		json       bool
 	}{{claude, "Claude Desktop", true}, {codex, "Codex / ChatGPT desktop", false}} {
 		if _, e := os.Stat(filepath.Dir(c.path)); e != nil {
+			fmt.Fprintln(u.out, "! "+c.name+": no detectado.")
 			continue
 		}
-		if !u.yes("Se ha detectado " + c.name + ". ¿Quieres añadir AulaGlobal? [s/N]") {
+		fmt.Fprintln(u.out, "\n✓ "+c.name+": detectado.")
+		if !u.yes("¿Añadir AulaGlobal a " + c.name + "? [s/N]") {
 			continue
 		}
 		old, e := os.ReadFile(c.path)
@@ -338,10 +370,8 @@ func register(u setupUI, exe, token, data, claude, codex string) error {
 		if e = atomicConfig(c.path, b); e != nil {
 			return e
 		}
-		fmt.Fprintln(u.out, "Configuración guardada en", c.path, "(copia anterior: .bak). Reinicia la aplicación.")
+		fmt.Fprintln(u.out, "✓ Configuración guardada en:\n ", c.path, "\n  Copia anterior (si existía): .bak.")
 	}
-	snippet, _ := claudeConfig(nil, entry)
-	fmt.Fprintf(u.out, "Alternativa Claude Code (si usas las carpetas predeterminadas):\nclaude mcp add aulaglobal -- %q --transport stdio\nO guarda este contenido en .mcp.json (incluye tus carpetas):\n%s\n", exe, snippet)
 	return nil
 }
 func setup(args []string) (result error) {
@@ -379,9 +409,9 @@ func setup(args []string) (result error) {
 	if !*noPause {
 		defer func() {
 			if result != nil {
-				fmt.Fprintln(u.out, result.Error())
+				fmt.Fprintln(u.out, "\n✗ "+result.Error())
 			}
-			fmt.Fprint(u.out, "Pulsa Enter para salir")
+			fmt.Fprint(u.out, "\n› Pulsa Enter para salir ")
 			u.line()
 		}()
 	}
@@ -408,7 +438,26 @@ func setup(args []string) (result error) {
 	if e != nil {
 		return e
 	}
-	fmt.Fprintln(u.out, "Tu token se guarda en", token)
-	fmt.Fprintln(u.out, "Tus apuntes se guardarán en", data)
-	return register(u, exe, token, data, userpaths.Claude(runtime.GOOS, home, config), filepath.Join(home, ".codex", "config.toml"))
+	u.step(4, "Conectar con tus asistentes")
+	cli := findClaude(runtime.GOOS, home, os.Getenv("APPDATA"), exec.LookPath, os.Stat)
+	dt, dd, e := userpaths.Defaults()
+	if e != nil {
+		return e
+	}
+	extra := []string{}
+	if token != dt {
+		extra = append(extra, "-e", "AULAGLOBAL_TOKEN_FILE="+token)
+	}
+	if data != dd {
+		extra = append(extra, "-e", "AULAGLOBAL_DOWNLOAD_DIR="+data)
+	}
+	fallback := registerCode(u, cli, exe, extra, runClaude)
+	if e = register(u, exe, token, data, userpaths.Claude(runtime.GOOS, home, config), filepath.Join(home, ".codex", "config.toml")); e != nil {
+		return e
+	}
+	fmt.Fprintln(u.out, "\n✓ Todo listo.\n\nReinicia tu asistente o abre una sesión nueva.\nEn Claude Code, usa /mcp para comprobar la conexión.\nPrueba a pedir: «¿Qué asignaturas tengo?»")
+	if fallback {
+		manualCode(u, cli, exe, extra)
+	}
+	return nil
 }

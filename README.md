@@ -88,9 +88,12 @@ xattr -d com.apple.quarantine aulaglobal-mcp
 
 ## 3. setup lo añade por ti
 
-El programa busca Claude Desktop y Codex/ChatGPT de escritorio. Te pregunta antes
+El programa busca Claude Code, Claude Desktop y Codex/ChatGPT de escritorio.
+setup añade AulaGlobal a los que tengas instalados. Te pregunta antes
 de añadirlo a cada uno. Responde `s` si quieres; después reinicia el asistente.
-Si ya había configuración, guarda una copia con el nombre terminado en `.bak`.
+En Claude Desktop y Codex guarda una copia con el nombre terminado en `.bak`.
+En Claude Code pide permiso antes de reemplazar un registro de usuario.
+Abre una sesión nueva y escribe `/mcp` para comprobarlo.
 
 Si no encuentra tu asistente, puedes hacerlo a mano. Donde pone
 `/ruta/al/aulaglobal-mcp`, usa la ruta completa del programa que descargaste.
@@ -102,7 +105,7 @@ En Windows termina en `aulaglobal-mcp.exe`.
 Ejecuta el comando que imprime setup, por ejemplo:
 
 ```sh
-claude mcp add aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
+claude mcp add --scope user aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
 ```
 
 También puedes guardar este contenido en `.mcp.json`, en tu proyecto:
@@ -120,7 +123,8 @@ También puedes guardar este contenido en `.mcp.json`, en tu proyecto:
 
 En Windows, escribe las barras de las rutas como `/` (por ejemplo,
 `C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
-Si elegiste otras carpetas en setup, usa el contenido que imprime al final.
+Si elegiste otras carpetas en setup, usa el comando que imprime al final
+si falla la conexión automática.
 
 </details>
 
