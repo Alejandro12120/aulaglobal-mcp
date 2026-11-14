@@ -71,7 +71,7 @@ func registerCode(u setupUI, cli, exe string, extra []string, run claudeRunner) 
 		return false
 	}
 	call := func(args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return run(ctx, cli, args...)
 	}
@@ -89,7 +89,7 @@ func registerCode(u setupUI, cli, exe string, extra []string, run claudeRunner) 
 			fmt.Fprintln(u.out, "✗ No se pudo quitar el registro anterior.")
 			return true
 		}
-	} else if !strings.Contains(strings.ToLower(string(output)), "no mcp server found") {
+	} else if lower := strings.ToLower(string(output)); !strings.Contains(lower, "no mcp server named") && !strings.Contains(lower, "no mcp server found") {
 		fmt.Fprintln(u.out, "✗ No se pudo comprobar el registro de Claude Code.")
 		return true
 	}

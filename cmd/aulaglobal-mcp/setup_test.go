@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSetupOffline(t *testing.T) {
@@ -196,10 +197,12 @@ func TestClaudeRegistration(t *testing.T) {
 		getErr, addErr, fallback bool
 		calls                    int
 	}{
-		{"new", "\n", "No MCP server found with name: aulaglobal", true, false, false, 2},
-		{"replace", "s\ns\n", "Scope: User config", false, false, false, 3},
-		{"keep", "s\nn\n", "Scope: User config", false, false, false, 1},
+		{"first install", "\n", "No MCP server named \"aulaglobal\". Run `claude mcp add` to add one.", true, false, false, 2},
+		{"replace", "s\ns\n", "Scope: User config (available in all your projects)", false, false, false, 3},
+		{"keep", "s\nn\n", "Scope: User config (available in all your projects)", false, false, false, 1},
+		{"project scope", "s\n", "Scope: Project config", false, false, false, 1},
 		{"other scope", "s\n", "Scope: Local config", false, false, false, 1},
+		{"legacy missing", "s\n", "NO MCP SERVER FOUND", true, false, false, 2},
 		{"failure", "s\n", "No MCP server found", true, true, true, 2},
 		{"unknown failure", "s\n", "offline", true, false, true, 1},
 		{"decline", "n\n", "", false, false, false, 0},
@@ -208,7 +211,7 @@ func TestClaudeRegistration(t *testing.T) {
 			var out strings.Builder
 			var calls [][]string
 			run := func(ctx context.Context, path string, args ...string) ([]byte, error) {
-				if _, ok := ctx.Deadline(); !ok {
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) < 20*time.Second {
 					t.Fatal("missing deadline")
 				}
 				calls = append(calls, append([]string{}, args...))
@@ -221,7 +224,10 @@ func TestClaudeRegistration(t *testing.T) {
 				if args[1] == "add" && tc.addErr {
 					return []byte("private diagnostic"), fmt.Errorf("failure")
 				}
-				return nil, nil
+				if args[1] == "add" {
+					return []byte("Added stdio MCP server aulaglobal with command: /bin/true --transport stdio to user config"), nil
+				}
+				return []byte("Removed MCP server aulaglobal from user config"), nil
 			}
 			u := setupUI{strings.NewReader(tc.input), &out, nil}
 			fallback := registerCode(u, "/cli", "/path with spaces/program", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"}, run)
