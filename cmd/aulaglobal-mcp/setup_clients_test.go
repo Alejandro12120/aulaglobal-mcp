@@ -292,10 +292,46 @@ func TestClientTranscripts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(want) != got {
-				t.Fatalf("transcript mismatch\n%s", got)
+			if diff := transcriptDifference(string(want), got); diff != "" {
+				t.Fatalf("transcript mismatch: %s\n%s", diff, got)
 			}
 		})
+	}
+}
+
+// Quote the first differing line so invisible whitespace is visible in CI logs.
+func transcriptDifference(want, got string) string {
+	want = strings.ReplaceAll(want, "\r\n", "\n")
+	got = strings.ReplaceAll(got, "\r\n", "\n")
+	if want == got {
+		return ""
+	}
+	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := 0; i < len(w) || i < len(g); i++ {
+		if i >= len(w) {
+			return fmt.Sprintf("line %d: want <EOF>, got %q", i+1, g[i])
+		}
+		if i >= len(g) {
+			return fmt.Sprintf("line %d: want %q, got <EOF>", i+1, w[i])
+		}
+		if w[i] != g[i] {
+			return fmt.Sprintf("line %d: want %q, got %q", i+1, w[i], g[i])
+		}
+	}
+	return ""
+}
+
+func TestTranscriptDifference(t *testing.T) {
+	for _, tc := range []struct{ want, got, diff string }{
+		{"one\r\ntwo\r\n", "one\ntwo\n", ""},
+		{"one\ntwo\n", "one\r\ntwo\r\n", ""},
+		{"one\ntwo\n", "one\ntwo \n", `line 2: want "two", got "two "`},
+		{"one\n", "one", `line 2: want "", got <EOF>`},
+		{"one", "one\n", `line 2: want <EOF>, got ""`},
+	} {
+		if got := transcriptDifference(tc.want, tc.got); got != tc.diff {
+			t.Fatalf("difference = %q, want %q", got, tc.diff)
+		}
 	}
 }
 
@@ -358,53 +394,75 @@ func TestUnsafeFilesAndBackups(t *testing.T) {
 	}
 }
 func TestOpenCodeCapabilities(t *testing.T) {
-	for _, mode := range []string{"scriptable", "legacy", "failure", "unverified", "both files"} {
-		t.Run(mode, func(t *testing.T) {
-			a := openCodeAssistant{}
-			e, w, _, _ := clientFixture(t, a, true)
-			p, _ := a.path(e)
-			calls := 0
-			e.Look = func(n string) (string, error) {
-				if n == "opencode" {
-					return "fake-opencode", nil
-				}
-				return "", os.ErrNotExist
-			}
-			if mode == "both files" {
-				os.WriteFile(p, []byte(`{}`), 0600)
-				os.WriteFile(p+"c", []byte(`{}`), 0600)
-			}
-			e.OpenRun = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
-				if _, ok := ctx.Deadline(); !ok {
-					t.Fatal("no deadline")
-				}
-				calls++
-				if args[len(args)-1] == "--help" {
-					if mode == "legacy" {
-						return os.ReadFile("testdata/opencode-add-help.txt")
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			for _, mode := range []string{"scriptable", "legacy", "failure", "unverified", "both files"} {
+				t.Run(mode, func(t *testing.T) {
+					a := openCodeAssistant{}
+					e, w, _, _ := clientFixture(t, a, true)
+					e.GOOS = goos
+					p, _ := a.path(e)
+					calls := 0
+					e.Look = func(n string) (string, error) {
+						if (goos == "windows" && n == "opencode.exe") || (goos != "windows" && n == "opencode") {
+							return "fake-opencode", nil
+						}
+						return "", os.ErrNotExist
 					}
-					return []byte("--global --env"), nil
-				}
-				if mode == "failure" {
-					return nil, errors.New("private diagnostic")
-				}
-				if !sameEntry(args, openCodeArgs(w.Exe, w.Extra)) {
-					t.Fatal(args)
-				}
-				if mode != "unverified" {
-					b, _, _ := openCodeConfig(nil, openCodeEntry(w.Exe, w.Extra), true)
-					os.WriteFile(p, b, 0600)
-				}
-				return nil, nil
-			}
-			var out strings.Builder
-			configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
-			failure := mode == "failure" || mode == "unverified" || mode == "both files"
-			if strings.Contains(out.String(), "✗") != failure {
-				t.Fatal(out.String())
-			}
-			if mode == "both files" && calls != 0 {
-				t.Fatal("called CLI despite conflicting files")
+					if mode == "both files" {
+						os.WriteFile(p, []byte(`{}`), 0600)
+						os.WriteFile(p+"c", []byte(`{}`), 0600)
+					}
+					e.OpenRun = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+						if _, ok := ctx.Deadline(); !ok {
+							t.Fatal("no deadline")
+						}
+						calls++
+						if cli != "fake-opencode" {
+							t.Fatalf("unexpected CLI %q", cli)
+						}
+						if args[len(args)-1] == "--help" {
+							if mode == "legacy" {
+								return os.ReadFile("testdata/opencode-add-help.txt")
+							}
+							return []byte("--global\r\n--env\r\n"), nil
+						}
+						if mode == "failure" {
+							return nil, errors.New("private diagnostic")
+						}
+						if !sameEntry(args, openCodeArgs(w.Exe, w.Extra)) {
+							t.Fatal(args)
+						}
+						if mode != "unverified" {
+							b, _, _ := openCodeConfig(nil, openCodeEntry(w.Exe, w.Extra), true)
+							os.WriteFile(p, b, 0600)
+						}
+						return nil, nil
+					}
+					var out strings.Builder
+					configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
+					failure := mode == "failure" || mode == "unverified" || mode == "both files"
+					if strings.Contains(out.String(), "✗") != failure {
+						t.Fatal(out.String())
+					}
+					if mode == "both files" && calls != 0 {
+						t.Fatal("called CLI despite conflicting files")
+					}
+					if mode != "both files" {
+						wantCalls := 2 // Capability probe followed by registration.
+						if mode == "legacy" {
+							wantCalls = 1 // Unsupported CLI uses the config writer.
+						}
+						if calls != wantCalls {
+							t.Fatalf("CLI calls = %d, want %d", calls, wantCalls)
+						}
+					}
+					if mode == "failure" || mode == "unverified" {
+						if _, err := os.Stat(p); !os.IsNotExist(err) {
+							t.Fatalf("config fallback after CLI failure: %v", err)
+						}
+					}
+				})
 			}
 		})
 	}

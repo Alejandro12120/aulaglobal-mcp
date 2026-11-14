@@ -1,4 +1,5 @@
 *.go text eol=lf
 *.sh text eol=lf
 *.pdf binary
-internal/**/testdata/** -text
+**/testdata/** -text
+*.golden -text
