@@ -1,6 +1,6 @@
 # AulaGlobal para tu asistente de IA
 
-Este programa permite que tu asistente de IA (Claude, Codex, ChatGPT u OpenCode) entre en
+Este programa permite que tu asistente de IA (Claude, Codex, ChatGPT, OpenCode o Antigravity) entre en
 tu [AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M y te ayude con tus
 asignaturas. Puedes pedirle cosas como:
 
@@ -23,7 +23,7 @@ asistente la vea.
 ## Antes de empezar
 
 Necesitas un ordenador con Windows, Mac o Linux y un asistente compatible:
-Claude Code, Claude Desktop, Codex, ChatGPT de escritorio u OpenCode.
+Claude Code, Claude Desktop, Codex, ChatGPT de escritorio, OpenCode o Antigravity.
 
 ## 1. Descarga el programa para tu sistema
 
@@ -88,7 +88,7 @@ xattr -d com.apple.quarantine aulaglobal-mcp
 
 ## 3. setup lo añade por ti
 
-El programa busca Claude Code, Claude Desktop, Codex/ChatGPT de escritorio y OpenCode.
+El programa busca Claude Code, Claude Desktop, Codex/ChatGPT de escritorio, OpenCode y Antigravity.
 setup añade AulaGlobal a los que tengas instalados. Te pregunta antes
 de añadirlo a cada uno. Responde `s` si quieres; después reinicia el asistente.
 En Claude Desktop y Codex guarda una copia con el nombre terminado en `.bak`.
@@ -160,6 +160,32 @@ Esto es para ChatGPT de escritorio; la web se conecta de otra manera
 </details>
 
 Escribe `/mcp` en tu asistente para comprobar que aparece `aulaglobal`.
+
+<details>
+<summary>Antigravity: configuración manual si setup no lo encuentra</summary>
+
+En el panel del agente, abre **… → MCP Servers → Manage MCP Servers → View raw config**.
+Añade este bloque dentro de `mcpServers`, conservando los demás asistentes:
+
+```json
+{
+  "mcpServers": {
+    "aulaglobal": {
+      "command": "/ruta/al/aulaglobal-mcp",
+      "args": ["--transport", "stdio"]
+    }
+  }
+}
+```
+
+El archivo actual está en `~/.gemini/config/mcp_config.json` en Mac y Linux,
+y en `%USERPROFILE%\.gemini\config\mcp_config.json` en Windows.
+Usa la ruta completa del programa; en Windows puedes escribir barras `/`.
+Si elegiste otras carpetas, copia el bloque que imprime setup al fallar.
+Después vuelve a abrir Antigravity. En la aplicación puedes usar **Restart**
+en **Customizations → Installed → MCP Servers**; en el terminal, recarga desde `/mcp`.
+
+</details>
 
 ## 4. ¡A usarlo!
 

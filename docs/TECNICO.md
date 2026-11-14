@@ -426,3 +426,58 @@ Prueba real en Docker node:22: npm opencode-ai 1.19.5 ofrece --env pero no
 --global en mcp add --help. Las capturas están en cmd/aulaglobal-mcp/testdata.
 Por ello esa versión usa el fallback; no se presupone que npm y la
 documentación V2 estén sincronizados. No se contacta con UC3M.
+
+## Antigravity: registro de setup
+
+Investigación: 2026-11-14. La documentación actual sitúa la configuración global
+compartida por App, IDE y CLI en `~/.gemini/config/mcp_config.json` (macOS y Linux),
+es decir, `%USERPROFILE%\.gemini\config\mcp_config.json` en Windows. La ruta
+antigua `~/.gemini/antigravity/mcp_config.json` ya no es el destino de escritura.
+La equivalencia Windows se deriva del directorio de usuario; no se ejecutó la aplicación Windows.
+No se modifican archivos locales `.agents/mcp_config.json`.
+
+El esquema es un objeto `mcpServers` de entradas con `command`, `args` y `env`
+para stdio. También admite `serverUrl` (alias `url`) para Streamable HTTP,
+`cwd`, `headers`, `authProviderType`, `oauth`, `disabled`, `enabledTools`,
+`disabledTools`, `tools` y `timeoutSeconds`. No se generan opciones remotas.
+La documentación describe JSON, sin garantizar comentarios/JSONC: setup rechaza
+comentarios, comas finales, claves duplicadas, raíces no objeto y `mcpServers`
+no objeto. Imprime únicamente un ejemplo nuevo, nunca el contenido ni errores
+privados del archivo existente o del CLI.
+
+La detección usa lookup/stat inyectables: `agy` o `antigravity` en PATH,
+directorios `.gemini/antigravity` o `.gemini/config`, `/Applications/Antigravity.app`
+y `~/Applications/Antigravity.app`, instalaciones Linux `/usr/share/antigravity`
+y `/opt/Antigravity`, y `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`
+en Windows. Son heurísticas, no una garantía de descubrir instalaciones portables.
+También busca `~/.local/bin/agy` y `%LOCALAPPDATA%\agy\bin\agy.exe`.
+Los tests simulan metadatos, sin depender de permisos ejecutables del host.
+
+Se probó el binario oficial Linux `agy 1.5.9`, instalado con el instalador oficial
+en Docker: `--version`, `--help`, `mcp --help`, `mcp add --help` y un registro
+stdio con entorno. La ayuda real se conserva en
+`cmd/aulaglobal-mcp/testdata/agy-1.5.9-mcp-add-help.txt`.
+`agy mcp add` acepta `-e KEY=value` antes del nombre y genera `disabled: false`.
+Setup prueba esa ayuda y ejecuta argv sin shell en un HOME/USERPROFILE temporal;
+lee la entrada generada y hace la fusión final con los helpers existentes.
+Sin `agy`, genera directamente la entrada documentada. Un CLI incompatible o un
+fallo deja la configuración intacta y muestra la alternativa manual.
+
+La fusión conserva las demás claves y servidores mediante `json.RawMessage`
+(incluidos números grandes); puede cambiar el formato y el orden de claves.
+Antes de reemplazar `aulaglobal` pide confirmación. Antes de escribir guarda los
+bytes originales en `.bak` y escribe con temporal + rename. Solo añade `env`
+para las rutas que difieren de los valores predeterminados de setup.
+Tras guardar, recuerda recargar desde `/mcp` en CLI, Restart en
+Customizations → Installed → MCP Servers en App o reabrir/reiniciar IDE.
+No se probó el refresco visual en una aplicación real.
+
+Fuentes oficiales consultadas:
+
+- https://antigravity.google/docs/mcp — ruta actual, esquema, interfaz y recarga CLI/App.
+- https://antigravity.google/docs/getting-started — instalación oficial de `agy` y ubicaciones.
+- https://antigravity.google/docs/changelog — notas vigentes de App, CLI e IDE.
+- https://antigravity.google/cli/install.sh — instalador empleado en el contenedor.
+
+El esquema multiplataforma y la interfaz gráfica están verificados documentalmente;
+la generación de configuración y ayuda se verificaron también con el binario Linux.
