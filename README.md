@@ -4,10 +4,6 @@
 
 **Conecta tu asistente de IA con AulaGlobal (UC3M)**
 
-[![CI](https://github.com/Alejandro12120/aulaglobal-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Alejandro12120/aulaglobal-mcp/actions/workflows/ci.yml)
-[![Última versión](https://img.shields.io/github/v/release/Alejandro12120/aulaglobal-mcp?label=versi%C3%B3n)](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest)
-[![Licencia MIT](https://img.shields.io/github/license/Alejandro12120/aulaglobal-mcp?label=licencia)](LICENSE)
-
 [Instalación](#instalación) · [Uso](#uso) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Documentación técnica](docs/TECNICO.md)
 
 </div>
@@ -81,6 +77,23 @@ Abre una terminal en la carpeta del programa y ejecuta:
 En Windows también puede abrirse con doble clic. En macOS y Linux, si aparece un
 error de permisos, ejecuta antes `chmod +x aulaglobal-mcp`.
 
+<details>
+<summary><strong>Aviso del sistema al abrir el programa</strong></summary>
+
+Los ejecutables aún no están firmados digitalmente, por lo que el sistema puede
+mostrar un aviso la primera vez. Descarga el programa solo desde la página
+oficial del proyecto.
+
+- **Windows:** selecciona **Más información → Ejecutar de todas formas**.
+- **macOS:** haz clic derecho sobre el programa y elige **Abrir**. Si continúa
+  bloqueado, ejecuta en la carpeta del programa:
+
+  ```sh
+  xattr -d com.apple.quarantine aulaglobal-mcp
+  ```
+
+</details>
+
 El asistente de configuración realiza cuatro pasos:
 
 1. **Carpetas.** Indica dónde se guardarán la clave de acceso y los materiales.
@@ -115,23 +128,6 @@ Si la línea no funciona, el valor también puede copiarse desde
 > La cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
 > compartas ni la pegues en el chat del asistente: introdúcela únicamente en el
 > programa de configuración.
-
-<details>
-<summary><strong>Aviso del sistema al abrir el programa</strong></summary>
-
-Los ejecutables aún no están firmados digitalmente, por lo que el sistema puede
-mostrar un aviso la primera vez. Descarga el programa solo desde la página
-oficial del proyecto.
-
-- **Windows:** selecciona **Más información → Ejecutar de todas formas**.
-- **macOS:** haz clic derecho sobre el programa y elige **Abrir**. Si continúa
-  bloqueado, ejecuta en la carpeta del programa:
-
-  ```sh
-  xattr -d com.apple.quarantine aulaglobal-mcp
-  ```
-
-</details>
 
 ### 3. Conexión con los asistentes
 
