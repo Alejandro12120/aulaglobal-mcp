@@ -1,6 +1,6 @@
 # AulaGlobal MCP
 
-Conecta tu asistente de IA (Claude Code, Claude Desktop u otro cliente MCP) con
+Conecta tu asistente de IA (Claude Code, Claude Desktop, ChatGPT Work de escritorio u otro cliente MCP) con
 [AulaGlobal](https://aulaglobal.uc3m.es) de la UC3M. Con él, el asistente puede:
 
 - ver tus asignaturas,
@@ -156,6 +156,51 @@ codex mcp add aulaglobal \
 
 Comprueba el registro con `codex mcp list`. Abre Codex y usa `/mcp` para comprobar
 la conexión; si ya estaba abierto, reinícialo.
+
+### ChatGPT Work (aplicación de escritorio)
+
+La [documentación oficial de MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=app)
+confirma que el escritorio admite **stdio local**, comparte `~/.codex/config.toml`
+con Codex y admite HTTP con bearer u OAuth. No necesitas publicar este servidor.
+
+1. Abre **Settings → MCP servers → Add server**.
+2. Pon el nombre `aulaglobal`, elige **STDIO** y usa como comando la ruta
+   absoluta al ejecutable.
+3. Para configurar argumentos y variables sin depender de los campos de tu
+   versión, copia este bloque en `~/.codex/config.toml` (si ya seguiste la
+   sección Codex, no lo dupliques). Sustituye las rutas:
+
+   ```toml
+   [mcp_servers.aulaglobal]
+   command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
+   args = ["--transport", "stdio"]
+   env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
+   ```
+
+4. Guarda, selecciona **Restart** y comprueba la conexión con `/mcp`.
+
+También puedes elegir **Streamable HTTP** e introducir la URL local
+`http://127.0.0.1:8080/mcp`: utiliza el bloque HTTP de Codex de la sección Docker
+para enviar `MCP_HTTP_AUTH_TOKEN`. La configuración admite cabeceras estáticas;
+no requiere OAuth. La aplicación debe heredar la variable con el bearer.
+
+El [escritorio](https://learn.chatgpt.com/docs/app) se ofrece en macOS, Windows y
+Linux; este proyecto requiere Linux/macOS (en Windows usa WSL y rutas accesibles
+desde el entorno que ejecuta el comando). Los [planes y límites](https://learn.chatgpt.com/docs/pricing)
+incluyen Plus, Pro, Business y Enterprise/Edu; Free y Go tienen acceso de escritorio
+sujeto a despliegue. La guía MCP no publica una matriz específica por plan/OS:
+comprueba la disponibilidad de Work y las políticas de tu organización.
+
+**La conexión web es distinta.** Según el [Centro de ayuda de OpenAI](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt),
+las conexiones personalizadas web están disponibles en Business y Enterprise/Edu
+con permisos del administrador. Se añaden desde **Plugins → + → Add custom MCP
+server**, con nombre, descripción opcional, URL HTTPS pública (o Secure MCP
+Tunnel) y autenticación. Esa vía no lee tu configuración local. Para empezar,
+usa stdio en el escritorio: evita exponer tus archivos de cursos y el acceso a
+AulaGlobal a través de una URL pública. Nunca publiques este servidor con la
+autenticación HTTP desactivada.
+
+Fuentes consultadas el 14 de noviembre de 2026; los menús pueden cambiar.
 
 ### Claude Desktop u otros clientes
 

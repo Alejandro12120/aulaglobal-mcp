@@ -40,6 +40,16 @@ if [[ -e secrets/token ]]; then
         s|S|si|sí) set -- --force ;;
         *) say 'Conservamos tu token.'; exit 0 ;;
     esac
+else
+    # SaveSecret uses .token-* for atomic replacements; preserve other token.*.
+    leftovers=()
+    for path in secrets/token.meta.json secrets/token.private secrets/.token-*; do
+        if [[ -e "$path" || -L "$path" ]]; then leftovers+=("$path"); fi
+    done
+    if (( ${#leftovers[@]} )); then
+        say 'Se encontraron restos incompletos de un token anterior; se eliminarán para obtener uno nuevo.'
+        rm -- "${leftovers[@]}"
+    fi
 fi
 cat <<'STEPS'
 1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
@@ -78,7 +88,7 @@ if error=$(printf '%s' "$cookie" | "$bin" token-from-cookie --output secrets/tok
 else
     unset cookie
     case "$error" in
-        *'must not already exist'*) say 'Ya existe un archivo del token. Ejecuta otra vez y acepta reemplazarlo.' ;;
+        *'must not already exist'*) say 'Ya existe el token o uno de sus archivos auxiliares. Ejecuta otra vez: podrás reemplazar el token o se limpiarán los restos incompletos.' ;;
         *) say 'No se pudo obtener el token. Cierra sesión, vuelve a entrar en AulaGlobal y ejecuta ./obtener-token.sh otra vez.' ;;
     esac
     printf 'Detalle del programa:\n%s\n' "$error" >&2

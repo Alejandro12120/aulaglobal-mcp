@@ -4,7 +4,7 @@ from pathlib import Path
 
 SCRIPT = Path('obtener-token.sh').resolve()
 
-def run(name, replies, existing=False, fail='', verify='1', curl='', missing=False):
+def run(name, replies, existing=False, fail='', verify='1', curl='', missing=False, leftovers=()):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         shutil.copy(SCRIPT, root / SCRIPT.name)
@@ -15,7 +15,9 @@ value=$(cat)
 [[ "$value" == 'abc123' ]] || exit 9
 [[ "$*" == *'token-from-cookie --output secrets/token'* ]] || exit 8
 if [[ -n "${FAIL:-}" ]]; then echo "$FAIL" >&2; exit 1; fi
-if [[ -e secrets/token ]]; then [[ "$*" == *--force* ]] || exit 7; fi
+for path in secrets/token secrets/token.private secrets/token.meta.json; do
+    if [[ -e "$path" && "$*" != *--force* ]]; then echo 'must not already exist' >&2; exit 1; fi
+done
 printf fake > secrets/token
 printf private > secrets/token.private
 printf '{"obtained_at":"2026-11-14T12:00:00Z"}' > secrets/token.meta.json
@@ -26,6 +28,10 @@ chmod 600 secrets/token*
             (root / 'secrets').mkdir()
             (root / 'secrets/token').write_text('old')
             (root / 'secrets/token.meta.json').write_text('{"obtained_at":"2020-01-01"}')
+        for path in leftovers:
+            (root / 'secrets').mkdir(exist_ok=True)
+            (root / 'secrets' / path).write_text('keep' if path == 'token.notes' else 'stale')
+            (root / 'secrets' / path).chmod(0o600)
         if missing:
             docker = root / 'docker'
             docker.write_text('#!/bin/sh\ncp stub aulaglobal-mcp\nchmod 700 aulaglobal-mcp\n')
@@ -68,6 +74,12 @@ chmod 600 secrets/token*
         elif not fail and name not in ('empty', 'compile-decline'):
             for path in ['secrets', 'data']: assert (root/path).stat().st_mode & 0o777 == 0o700
             for path in (root/'secrets').iterdir(): assert path.stat().st_mode & 0o777 == 0o600
+        if leftovers:
+            assert 'restos incompletos' in text, text
+            assert not list((root/'secrets').glob('.token-*'))
+            if 'token.notes' in leftovers:
+                assert (root/'secrets/token.notes').read_text() == 'keep'
+        if name == 'collision': assert 'o uno de sus archivos auxiliares' in text
         if verify == '0': assert ('Token válido. Hola, Ana' if 'fullname' in curl else 'Aviso:') in text
         if fail: assert fail in text
         print('PASS', name)
@@ -85,3 +97,8 @@ run('verify-invalid', [(p,'abc123')], verify='0', curl='{"exception":"invalidtok
 
 run('compile', [('¿Quieres compilarlo con Docker? [s/N]', 's'), (p,'abc123')], missing=True)
 run('compile-decline', [('¿Quieres compilarlo con Docker? [s/N]', '')], missing=True)
+
+run('leftover-meta', [(p, 'abc123')], leftovers=('token.meta.json',))
+run('leftover-private', [(p, 'abc123')], leftovers=('token.private',))
+run('leftover-temp', [(p, 'abc123')], leftovers=('.token-12345',))
+run('leftover-all', [(p, 'abc123')], leftovers=('token.meta.json', 'token.private', '.token-12345', '.token-67890', 'token.notes'))
