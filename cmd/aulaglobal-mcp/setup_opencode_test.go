@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,15 +19,17 @@ func TestOpenCodeRegistration(t *testing.T) {
 		changed, backup  bool
 	}{
 		{"create", "", "\n", true, false},
+		{"empty object", `{}`, "\n", true, true},
+		{"whitespace", "  \n", "\n", true, true},
 		{"merge", `{"model":"example","mcp":{"other":{"type":"local","command":["other"]}}}`, "s\n", true, true},
-		{"replace no", `{"mcp":{"aulaglobal":{"command":["old"]}}}`, "s\nn\n", false, false},
-		{"replace yes", `{"mcp":{"aulaglobal":{"command":["old"]}}}`, "s\ns\n", true, true},
+		{"replace no", `{"mcp":{"aulaglobal":{"type":"local","command":["old"]}}}`, "s\nn\n", false, false},
+		{"replace yes", `{"mcp":{"aulaglobal":{"type":"local","command":["old"]}}}`, "s\ns\n", true, true},
 		{"decline", "", "n\n", false, false},
 		{"comments", "{ // private comment\n}", "\n", false, false},
 		{"trailing comma", `{"model":"example",}`, "\n", false, false},
 		{"null", `null`, "\n", false, false},
 		{"bad mcp", `{"mcp":null}`, "\n", false, false},
-		{"v2", `{"mcp":{"servers":{}}}`, "\n", false, false},
+		{"v2", `{"mcp":{"servers":{}}}`, "\n", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -36,7 +40,7 @@ func TestOpenCodeRegistration(t *testing.T) {
 				}
 			}
 			var out strings.Builder
-			registerOpenCode(setupUI{strings.NewReader(tc.input), &out, nil}, true, dir, "/abs/server", nil)
+			registerOpenCode(setupUI{strings.NewReader(tc.input), &out, nil}, "", dir, "/abs/server", nil, nil)
 			b, e := os.ReadFile(path)
 			if tc.changed {
 				if e != nil {
@@ -47,8 +51,12 @@ func TestOpenCodeRegistration(t *testing.T) {
 					t.Fatal(e)
 				}
 				m := root["mcp"].(map[string]any)
+				v1 := tc.name == "merge" || tc.name == "replace yes"
+				if !v1 {
+					m = m["servers"].(map[string]any)
+				}
 				entry := m["aulaglobal"].(map[string]any)
-				if entry["enabled"] != true || entry["environment"] != nil {
+				if (v1 && entry["enabled"] != true) || (!v1 && entry["enabled"] != nil) || entry["environment"] != nil {
 					t.Fatal(entry)
 				}
 				if tc.name == "merge" && (root["model"] != "example" || m["other"] == nil) {
@@ -86,7 +94,7 @@ func TestOpenCodeJSONCAndEnvironment(t *testing.T) {
 		t.Fatal(e)
 	}
 	var out strings.Builder
-	registerOpenCode(setupUI{strings.NewReader("\n"), &out, nil}, true, dir, "/server", nil)
+	registerOpenCode(setupUI{strings.NewReader("\n"), &out, nil}, "", dir, "/server", nil, nil)
 	b, _ := os.ReadFile(path)
 	if string(b) != string(old) || !strings.Contains(out.String(), "Alternativa manual") {
 		t.Fatal(out.String())
@@ -103,25 +111,11 @@ func TestFindOpenCode(t *testing.T) {
 	for _, goos := range []string{"linux", "darwin", "windows"} {
 		t.Run(goos, func(t *testing.T) {
 			// Fake metadata: simulated OS must never depend on host executable bits.
-			dir := t.TempDir()
-			f, e := os.Stat(dir)
-			if e != nil {
-				t.Fatal(e)
-			}
-			stat := func(p string) (os.FileInfo, error) {
-				if p == "config" {
-					return f, nil
-				}
-				return nil, os.ErrNotExist
-			}
-			if !findOpenCode(goos, "home", "config", missing, stat) {
-				t.Fatal("directory")
-			}
 			noStat := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-			if findOpenCode(goos, "home", "config", missing, noStat) {
+			if findOpenCode(goos, "home", "config", missing, noStat) != "" {
 				t.Fatal("missing")
 			}
-			if !findOpenCode(goos, "home", "config", func(string) (string, error) { return "binary", nil }, noStat) {
+			if findOpenCode(goos, "home", "config", func(string) (string, error) { return "binary", nil }, noStat) == "" {
 				t.Fatal("PATH")
 			}
 			name := "opencode"
@@ -137,7 +131,7 @@ func TestFindOpenCode(t *testing.T) {
 				}
 				return nil, os.ErrNotExist
 			}
-			if !findOpenCode(goos, "home", "config", missing, fake) {
+			if findOpenCode(goos, "home", "config", missing, fake) == "" {
 				t.Fatal("common install")
 			}
 		})
@@ -168,7 +162,7 @@ func TestOpenCodeFileSelection(t *testing.T) {
 				}
 			}
 			var out strings.Builder
-			registerOpenCode(setupUI{strings.NewReader("\n"), &out, nil}, true, dir, "/server", nil)
+			registerOpenCode(setupUI{strings.NewReader("\n"), &out, nil}, "", dir, "/server", nil, nil)
 			b, e := os.ReadFile(path)
 			if e != nil {
 				t.Fatal(e)
@@ -189,8 +183,91 @@ func TestOpenCodeFileSelection(t *testing.T) {
 		})
 	}
 	var out strings.Builder
-	registerOpenCode(setupUI{strings.NewReader(""), &out, nil}, false, t.TempDir(), "/server", nil)
+	registerOpenCode(setupUI{strings.NewReader(""), &out, nil}, "", filepath.Join(t.TempDir(), "missing"), "/server", nil, nil)
 	if out.String() != "! OpenCode: no detectado.\n" {
 		t.Fatal(out.String())
+	}
+}
+
+func TestOpenCodeCLI(t *testing.T) {
+	for _, mode := range []string{"success", "failure", "unverified", "legacy", "existing"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "opencode.json")
+			if mode == "existing" {
+				os.WriteFile(path, []byte(`{"mcp":{"servers":{"aulaglobal":{"type":"local","command":["old"]}}}}`), 0600)
+			}
+			var calls [][]string
+			run := func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("missing deadline")
+				}
+				calls = append(calls, append([]string{}, args...))
+				if reflect.DeepEqual(args, []string{"mcp", "add", "--help"}) {
+					if mode == "legacy" {
+						return os.ReadFile("testdata/opencode-add-help.txt")
+					}
+					return []byte("opencode mcp add [name]\nOptions:\n --global make available in every project [boolean]\n --env KEY=VALUE [array]"), nil
+				}
+				want := []string{"mcp", "add", "aulaglobal", "--global", "--env", "AULAGLOBAL_DOWNLOAD_DIR=/notes space", "--", "/abs/server space", "--transport", "stdio"}
+				if !reflect.DeepEqual(args, want) {
+					t.Fatalf("%q", args)
+				}
+				if mode == "failure" {
+					return nil, errors.New("failed")
+				}
+				if mode != "unverified" {
+					b, _, _ := openCodeConfig(nil, openCodeEntry("/abs/server space", nil), true)
+					os.WriteFile(path, b, 0600)
+				}
+				return []byte("✓ Added MCP server aulaglobal"), nil
+			}
+			var out strings.Builder
+			registerOpenCode(setupUI{strings.NewReader("s\ns\n"), &out, nil}, "opencode", dir, "/abs/server space", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes space"}, run)
+			if (mode == "legacy" || mode == "existing") && len(calls) != 1 {
+				t.Fatal(calls)
+			}
+			if mode == "success" && !strings.Contains(out.String(), "para todos tus proyectos") {
+				t.Fatal(out.String())
+			}
+			if mode == "unverified" && !strings.Contains(out.String(), "No se pudo verificar") {
+				t.Fatal(out.String())
+			}
+			if mode == "failure" {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatal("unexpected write")
+				}
+			}
+		})
+	}
+	args := openCodeArgs("/exe", []string{"-e", "SECRET=never", "-e", "AULAGLOBAL_TOKEN_FILE=/token"})
+	if strings.Contains(strings.Join(args, " "), "never") {
+		t.Fatal(args)
+	}
+}
+
+func TestOpenCodeV2PreservesContent(t *testing.T) {
+	old := []byte(`{"custom":{"keep":true},"mcp":{"settings":"keep","servers":{"other":{"type":"local","command":["other"]}}}}`)
+	b, _, err := openCodeConfig(old, openCodeEntry("/exe", nil), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	json.Unmarshal(b, &root)
+	m := root["mcp"].(map[string]any)
+	if root["custom"] == nil || m["settings"] != "keep" || m["servers"].(map[string]any)["other"] == nil || strings.Contains(string(b), "enabled") {
+		t.Fatal(string(b))
+	}
+}
+func TestOpenCodeWindowsNPM(t *testing.T) {
+	target := filepath.Join("profile", "npm", "opencode.cmd")
+	got := findOpenCode("windows", "home", "profile", func(string) (string, error) { return "", os.ErrNotExist }, func(p string) (os.FileInfo, error) {
+		if p == target {
+			return openCodeFileInfo{0600}, nil
+		}
+		return nil, os.ErrNotExist
+	})
+	if got != target {
+		t.Fatal(got)
 	}
 }

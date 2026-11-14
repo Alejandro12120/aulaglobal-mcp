@@ -452,7 +452,7 @@ func setup(args []string) (result error) {
 		extra = append(extra, "-e", "AULAGLOBAL_DOWNLOAD_DIR="+data)
 	}
 	openDir := userpaths.OpenCode(home, os.Getenv("XDG_CONFIG_HOME"))
-	registerOpenCode(u, findOpenCode(runtime.GOOS, home, openDir, exec.LookPath, os.Stat), openDir, exe, extra)
+	registerOpenCode(u, findOpenCode(runtime.GOOS, home, os.Getenv("APPDATA"), exec.LookPath, os.Stat), openDir, exe, extra, runOpenCode)
 	fallback := registerCode(u, cli, exe, extra, runClaude)
 	if e = register(u, exe, token, data, userpaths.Claude(runtime.GOOS, home, config), filepath.Join(home, ".codex", "config.toml")); e != nil {
 		return e

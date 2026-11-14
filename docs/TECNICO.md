@@ -394,35 +394,35 @@ Las pruebas usan un Moodle falso y un ejecutor simulado, sin servicios reales.
 
 ### Registro de OpenCode
 
-Verificado el 14-11-2026:
+Fuentes consultadas el 14-11-2026:
+- https://opencode.ai/docs/mcp-servers/
+- https://opencode.ai/docs/config/
 
-- https://opencode.ai/docs/config/ documenta JSON y JSONC y la ruta global
-  `~/.config/opencode/opencode.json(c)`. No se usa `os.UserConfigDir`:
-  también en macOS y Windows se usa `.config` bajo el home; un
-  `XDG_CONFIG_HOME` absoluto sustituye `.config`.
-- Fuente V1 de las rutas (xdg-basedir):
-  https://github.com/anomalyco/opencode/blob/v1.2.27/packages/opencode/src/global/index.ts
-- Fuente V1 del alta interactiva, sin argumentos de automatización:
-  https://github.com/anomalyco/opencode/blob/v1.2.27/packages/opencode/src/cli/cmd/mcp.ts
-- https://opencode.ai/docs/mcp-servers/ describe ahora V2: `mcp.servers`,
-  `disabled` en lugar de `enabled`, y alta scriptable con `--global`,
-  `--env KEY=VALUE` y comando tras `--`. No había un binario OpenCode
-  instalado en el entorno para ejecutar `opencode --help` o `opencode mcp --help`.
+V2 usa `mcp.servers.aulaglobal` sin `enabled` (para desactivar usa
+`disabled`). V1 usa `mcp.aulaglobal` con `enabled: true`.
+El fallback reconoce V1 por entradas con type; conserva V2 si existe servers.
+Los archivos nuevos o vacíos usan V2 y $schema. environment solo contiene
+rutas no predeterminadas; nunca se pasan cookies ni tokens en argv.
 
-El registro automático implementa el esquema V1: `mcp.aulaglobal` con
-`type: "local"`, `command: [exeAbsoluto, "--transport", "stdio"]`,
-`enabled: true`. `environment` aparece solo si las rutas difieren de los
-valores por defecto, igual que Claude Code; contiene rutas, nunca tokens.
-Se detecta por carpeta global, PATH o ejecutable en `~/.opencode/bin`,
-`~/.local/bin`, Homebrew o `/usr/local/bin` (los dos últimos solo en Unix).
+Se busca el ejecutable en PATH, ~/.opencode/bin, ~/.local/bin, npm global,
+Homebrew y las variantes .exe/.cmd de Windows. El shim npm .cmd se ejecuta
+con Node, sin shell. Cada llamada tiene un límite de 20 segundos.
+Primero se prueba `opencode mcp add --help`: solo si admite --global
+se ejecuta `opencode mcp add aulaglobal --global [--env K=V] -- EXE --transport stdio`.
+Se comprueba antes la configuración global y se verifica después leyendo el
+archivo global; una salida exitosa por sí sola no confirma el alta.
+Para reemplazar se pide permiso y se edita solo esa entrada mediante el merge
+seguro, sin quitarla antes ni depender de un comando remove.
 
-Se prefiere el archivo existente `.jsonc`; si existen ambos archivos se
-rechaza el cambio para evitar conflictos. Se permite JSON estricto dentro
-de `.jsonc`. Comentarios, comas finales, JSON inválido o estructuras ambiguas
-se rechazan sin escribir; se muestra un bloque manual. Una configuración con
-`mcp.servers` se deja intacta para que el usuario use el CLI V2 documentado.
-El merge preserva valores desconocidos y otros servidores (reformatea JSON).
-Pregunta antes de reemplazar `aulaglobal`. Un archivo nuevo incluye `$schema`.
-Antes de escribir se guarda el original exacto en `.bak`; ambas escrituras
-usan temporal en la misma carpeta y rename. No se muestran errores del parser
-ni contenido del archivo existente, que podrían contener secretos.
+La ruta global es ~/.config/opencode/opencode.json(c), con XDG_CONFIG_HOME
+absoluto como alternativa. Si no hay CLI scriptable, debe existir la carpeta.
+Se rechazan ambos archivos simultáneos, JSONC con comentarios/comas finales,
+JSON inválido y estructuras ambiguas. Se muestran bloques manuales V1 y V2.
+Se preservan valores desconocidos y servidores ajenos, reformateando JSON.
+El original exacto se guarda en .bak; la escritura usa temporal y rename.
+No se imprime la salida del CLI ni errores con posible contenido privado.
+
+Prueba real en Docker node:22: npm opencode-ai 1.19.5 ofrece --env pero no
+--global en mcp add --help. Las capturas están en cmd/aulaglobal-mcp/testdata.
+Por ello esa versión usa el fallback; no se presupone que npm y la
+documentación V2 estén sincronizados. No se contacta con UC3M.

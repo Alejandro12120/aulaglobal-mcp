@@ -91,7 +91,7 @@ xattr -d com.apple.quarantine aulaglobal-mcp
 El programa busca Claude Code, Claude Desktop, Codex/ChatGPT de escritorio y OpenCode.
 setup añade AulaGlobal a los que tengas instalados. Te pregunta antes
 de añadirlo a cada uno. Responde `s` si quieres; después reinicia el asistente.
-En Claude Desktop, Codex y OpenCode guarda una copia con el nombre terminado en `.bak`.
+En Claude Desktop y Codex guarda una copia con el nombre terminado en `.bak`.
 En Claude Code pide permiso antes de reemplazar un registro de usuario.
 Abre una sesión nueva y escribe `/mcp` para comprobarlo.
 
@@ -249,20 +249,26 @@ desarrollar y probar el proyecto.
 <details>
 <summary>OpenCode: configuración manual</summary>
 
-setup lo añade por ti en OpenCode V1. Si no puede hacerlo, te muestra un
+setup intenta usar el comando de OpenCode si permite añadirlo para todos tus proyectos.
+Si no, actualiza el archivo global y guarda una copia .bak antes de cambiarlo. Si no puede hacerlo, te muestra un
 bloque para copiar sin tocar tu configuración. Abre `opencode.json` o
 `opencode.jsonc` en la carpeta `.config/opencode` de tu usuario
 (también en Windows y Mac). Si ya tiene contenido, añade AulaGlobal dentro
-de `mcp`, conservando los demás servidores:
+de `mcp.servers` en V2, conservando los demás servidores:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "aulaglobal": {
-      "type": "local",
-      "command": ["/ruta/completa/aulaglobal-mcp", "--transport", "stdio"],
-      "enabled": true
+    "servers": {
+      "aulaglobal": {
+        "type": "local",
+        "command": [
+          "/ruta/completa/aulaglobal-mcp",
+          "--transport",
+          "stdio"
+        ]
+      }
     }
   }
 }
@@ -272,8 +278,9 @@ Cambia la ruta por la del programa descargado. En Windows usa barras `/`
 o duplica cada barra `\\` de la ruta. Si elegiste otras carpetas, usa el
 bloque que imprime setup. No pegues tu cookie ni tu token aquí.
 
-En OpenCode V2 puedes ejecutar `opencode mcp add aulaglobal --global -- /ruta/completa/aulaglobal-mcp --transport stdio`.
-Su configuración coloca los servidores dentro de `mcp.servers` y no usa `enabled`.
+Si tu versión admite `--global`, puedes ejecutar `opencode mcp add aulaglobal --global -- /ruta/completa/aulaglobal-mcp --transport stdio`.
+En V1 antiguo, coloca aulaglobal directamente dentro de mcp y añade enabled: true.
+En V2, la configuración coloca los servidores dentro de `mcp.servers` y no usa `enabled`.
 Reinicia OpenCode o abre una sesión nueva después de añadirlo.
 
 </details>
