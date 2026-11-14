@@ -2,7 +2,10 @@ module aulaglobal-mcp
 
 go 1.26.0
 
-require github.com/modelcontextprotocol/go-sdk v1.4.1
+require (
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
+	github.com/modelcontextprotocol/go-sdk v1.4.1
+)
 
 require (
 	github.com/google/jsonschema-go v0.4.2 // indirect

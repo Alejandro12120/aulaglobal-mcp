@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html"
 	"io"
 	"mime"
@@ -67,12 +66,9 @@ func Sanitize(s string) string {
 	}
 	return s
 }
-func Path(f aulaglobal.File) string {
-	// Handle suffix also distinguishes same-name files within one folder module.
-	return filepath.Join(fmt.Sprintf("course-%d", f.CourseID), Sanitize(f.Section), fmt.Sprintf("%s-%d", Sanitize(f.Module), f.ModuleID), f.Handle+"-"+Sanitize(f.Filename))
-}
 func valid(p string) error {
-	if p == "" || p == "." || !filepath.IsLocal(p) || strings.ContainsRune(p, 0) {
+	p = filepath.Clean(p)
+	if strings.HasPrefix(filepath.ToSlash(p), ".aulaglobal-cache/") || p == ".aulaglobal-cache" || p == "" || p == "." || !filepath.IsLocal(p) || strings.ContainsRune(p, 0) {
 		return errors.New("path must be relative to download root")
 	}
 	return nil
@@ -97,6 +93,14 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 		}
 		return out
 	}
+	paths, err := s.paths(files)
+	if err != nil {
+		out := make([]Result, len(files))
+		for i := range out {
+			out[i] = Result{Status: "error", Error: err.Error()}
+		}
+		return out
+	}
 	out := make([]Result, len(files))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -105,7 +109,7 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				out[i] = s.one(ctx, c, files[i])
+				out[i] = s.one(ctx, c, files[i], paths[files[i].Handle])
 			}
 		}()
 	}
@@ -116,8 +120,8 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 	wg.Wait()
 	return out
 }
-func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File) (res Result) {
-	res.Path = Path(f)
+func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, path string) (res Result) {
+	res.Path = path
 	res.Status = "error"
 	run := func() error {
 		if e := ctx.Err(); e != nil {
@@ -223,6 +227,11 @@ type ReadResult struct {
 }
 
 var tags = regexp.MustCompile(`(?s)<[^>]*>`)
+
+func PlainHTML(s string) string {
+	return html.UnescapeString(tags.ReplaceAllString(scripts.ReplaceAllString(s, " "), " "))
+}
+
 var scripts = regexp.MustCompile(`(?is)<(script|style)\b[^>]*>.*?</(?:script|style)>`)
 
 func textLike(p string) bool {
@@ -243,37 +252,25 @@ func (s *Store) Read(ctx context.Context, path string, offset, length int) (Read
 	if e := ctx.Err(); e != nil {
 		return r, e
 	}
-	f, e := s.Root.Open(path)
-	if e != nil {
-		return r, errors.New("cannot open file inside download root")
-	}
-	defer f.Close()
-	st, e := f.Stat()
-	if e != nil || !st.Mode().IsRegular() {
-		return r, errors.New("regular file required")
-	}
-	r.Size = st.Size()
-	if !textLike(path) {
-		r.Note = "binary metadata only; PDF extraction unsupported"
-		return r, nil
-	}
-	if st.Size() > 8<<20 {
-		r.Note = "text extraction limited to files <= 8 MiB"
-		return r, nil
-	}
-	b, e := io.ReadAll(io.LimitReader(f, 8<<20+1))
+	st, e := s.Root.Stat(path)
 	if e != nil {
 		return r, e
 	}
-	if !utf8.Valid(b) || strings.ContainsRune(string(b), 0) {
-		r.Note = "binary/non-UTF-8 metadata only"
+	r.Size = st.Size()
+	d, e := s.extract(ctx, path)
+	if e != nil {
+		if ctx.Err() != nil {
+			return r, ctx.Err()
+		}
+		r.Note = e.Error()
 		return r, nil
 	}
-	text := string(b)
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == ".html" || ext == ".htm" {
-		text = html.UnescapeString(tags.ReplaceAllString(scripts.ReplaceAllString(text, " "), " "))
+	text := d.text()
+	if text == "" {
+		r.Note = "no extractable text"
+		return r, nil
 	}
+	r.Note = "Untrusted course content"
 	if offset < len(text) && !utf8.RuneStart(text[offset]) {
 		return r, errors.New("offset must be a UTF-8 boundary")
 	}
@@ -297,10 +294,11 @@ func (s *Store) Read(ctx context.Context, path string, offset, length int) (Read
 type Match struct {
 	Path    string `json:"path"`
 	Offset  int    `json:"offset"`
+	Page    int    `json:"page,omitempty"`
 	Snippet string `json:"snippet"`
 }
 
-func (s *Store) Search(ctx context.Context, query string, regex bool, limit int) ([]Match, error) {
+func (s *Store) Search(ctx context.Context, query string, regex bool, limit int, prefixes ...string) ([]Match, error) {
 	if query == "" || len(query) > 1024 || limit < 1 || limit > 100 {
 		return nil, errors.New("query 1..1024 bytes, limit 1..100 required")
 	}
@@ -312,6 +310,21 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int)
 	if e != nil {
 		return nil, errors.New("invalid regex")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	prefix := ""
+	if len(prefixes) > 0 {
+		prefix = filepath.Clean(prefixes[0])
+		if prefixes[0] == "" {
+			prefix = ""
+		}
+	}
+	if prefix != "" {
+		if e := valid(prefix); e != nil {
+			return nil, e
+		}
+	}
+	scannedBytes := 0
 	out := []Match{}
 	count := 0
 	var walk func(string) error
@@ -327,6 +340,9 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int)
 		for {
 			entries, e := fd.ReadDir(128)
 			for _, entry := range entries {
+				if e := ctx.Err(); e != nil {
+					return e
+				}
 				if len(out) >= limit {
 					return nil
 				}
@@ -334,27 +350,45 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int)
 				if count > 10000 {
 					return errors.New("search scan limit: 10000 entries")
 				}
+				if entry.Name() == ".aulaglobal-cache" || strings.HasPrefix(entry.Name(), ".partial-") {
+					continue
+				}
 				p := filepath.Join(dir, entry.Name())
 				if entry.Type()&os.ModeSymlink != 0 {
 					continue
 				}
 				if entry.IsDir() {
+					if prefix != "" && p != prefix && !strings.HasPrefix(prefix, p+string(filepath.Separator)) && !strings.HasPrefix(p, prefix+string(filepath.Separator)) {
+						continue
+					}
 					if e := walk(p); e != nil {
 						return e
 					}
 					continue
 				}
-				if !textLike(p) {
+				if !supported(p) {
 					continue
 				}
-				r, e := s.Read(ctx, p, 0, 65536)
+				if prefix != "" && p != prefix && !strings.HasPrefix(p, prefix+string(filepath.Separator)) {
+					continue
+				}
+				d, e := s.extract(ctx, p)
 				if e != nil {
 					continue
 				}
-				for _, loc := range re.FindAllStringIndex(r.Text, limit-len(out)) {
-					start := max(0, loc[0]-80)
-					end := min(len(r.Text), start+240)
-					out = append(out, Match{p, loc[0], strings.ToValidUTF8(r.Text[start:end], "�")})
+				for _, page := range d.Pages {
+					if len(out) >= limit {
+						return nil
+					}
+					scannedBytes += len(page.Text)
+					if scannedBytes > 128<<20 {
+						return errors.New("search byte limit: 128 MiB")
+					}
+					for _, loc := range re.FindAllStringIndex(page.Text, limit-len(out)) {
+						start := max(0, loc[0]-80)
+						end := min(len(page.Text), start+240)
+						out = append(out, Match{p, loc[0], page.Number, strings.ToValidUTF8(page.Text[start:end], "�")})
+					}
 				}
 			}
 			if e == io.EOF {

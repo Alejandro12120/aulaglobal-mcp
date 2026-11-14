@@ -68,16 +68,17 @@ func (e *APIError) Error() string {
 }
 
 type Client struct {
-	Base   string
-	HTTP   *http.Client
-	Tokens TokenProvider
+	Base         string
+	HTTP         *http.Client
+	Tokens       TokenProvider
+	StallTimeout time.Duration
 }
 
 func New(base string, p TokenProvider) *Client {
 	u, _ := url.Parse(base)
-	return &Client{Base: strings.TrimRight(base, "/"), Tokens: p, HTTP: &http.Client{
+	return &Client{Base: strings.TrimRight(base, "/"), Tokens: p, StallTimeout: 60 * time.Second, HTTP: &http.Client{
 		Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second},
-		Timeout:   2 * time.Minute,
+
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(via) >= 5 || u == nil || r.URL.Host != u.Host || r.URL.Scheme != u.Scheme {
 				return errors.New("redirect refused")
@@ -87,6 +88,8 @@ func New(base string, p TokenProvider) *Client {
 	}}
 }
 func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	token, e := c.Tokens.Get(ctx)
 	if e != nil {
 		return e
@@ -133,18 +136,31 @@ func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) er
 }
 
 type Auth struct {
-	Fullname     string `json:"fullname"`
-	UserID       int64  `json:"userid"`
-	Sitename     string `json:"sitename"`
-	Release      string `json:"release"`
-	ExpiresAt    *int64 `json:"expires_at"`
-	ExpirySource string `json:"expiry_source"`
+	Fullname        string  `json:"fullname"`
+	UserID          int64   `json:"userid"`
+	Sitename        string  `json:"sitename"`
+	Release         string  `json:"release"`
+	ExpiresAt       *int64  `json:"expires_at"`
+	TokenObtainedAt *string `json:"token_obtained_at,omitempty"`
+	TokenAgeDays    *int    `json:"token_age_days,omitempty"`
+	ExpirySource    string  `json:"expiry_source"`
 }
 
 func (c *Client) Auth(ctx context.Context) (Auth, error) {
 	var a Auth
 	e := c.WS(ctx, "core_webservice_get_site_info", nil, &a)
 	a.ExpirySource = "unknown: get_site_info and mobile launch do not expose this token's validuntil; site duration policy is not an expiry timestamp"
+	if p, ok := c.Tokens.(StaticToken); ok && p.File != "" {
+		var meta struct {
+			ObtainedAt time.Time `json:"obtained_at"`
+		}
+		if b, err := os.ReadFile(p.File + ".meta.json"); err == nil && json.Unmarshal(b, &meta) == nil && !meta.ObtainedAt.IsZero() {
+			t := meta.ObtainedAt.Format(time.RFC3339)
+			age := max(0, int(time.Since(meta.ObtainedAt).Hours()/24))
+			a.TokenObtainedAt = &t
+			a.TokenAgeDays = &age
+		}
+	}
 	return a, e
 }
 
@@ -242,18 +258,21 @@ func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, err
 }
 
 type File struct {
-	Type     string `json:"type"`
-	Filename string `json:"filename"`
-	URL      string `json:"-"`
-	RawURL   string `json:"fileurl,omitempty"`
-	Size     *int64 `json:"filesize"`
-	Mimetype string `json:"mimetype"`
-	Modified int64  `json:"timemodified"`
-	Handle   string `json:"handle"`
-	Section  string `json:"section"`
-	Module   string `json:"module"`
-	CourseID int64  `json:"course_id"`
-	ModuleID int64  `json:"module_id"`
+	LocalSubdir string `json:"-"`
+	CourseName  string `json:"-"`
+	Filepath    string `json:"filepath"`
+	Type        string `json:"type"`
+	Filename    string `json:"filename"`
+	URL         string `json:"-"`
+	RawURL      string `json:"fileurl,omitempty"`
+	Size        *int64 `json:"filesize"`
+	Mimetype    string `json:"mimetype"`
+	Modified    int64  `json:"timemodified"`
+	Handle      string `json:"handle"`
+	Section     string `json:"section"`
+	Module      string `json:"module"`
+	CourseID    int64  `json:"course_id"`
+	ModuleID    int64  `json:"module_id"`
 }
 type Module struct {
 	ID    int64  `json:"id"`
@@ -282,6 +301,7 @@ func (c *Client) Files(ctx context.Context, id int64, include, exclude []string)
 	if id <= 0 {
 		return nil, errors.New("course_id must be positive")
 	}
+	name := c.CourseName(ctx, id, "es")
 	var ss []Section
 	if e := c.WS(ctx, "core_course_get_contents", url.Values{"courseid": {strconv.FormatInt(id, 10)}}, &ss); e != nil {
 		return nil, e
@@ -304,8 +324,8 @@ func (c *Client) Files(ctx context.Context, id int64, include, exclude []string)
 				u.RawQuery = q.Encode()
 				f.URL = u.String()
 				f.RawURL = ""
-				sum := sha256.Sum256([]byte(fmt.Sprintf("%d/%d/%s", id, m.ID, f.URL)))
-				f.Handle = hex.EncodeToString(sum[:16])
+				f.CourseName = name
+				f.Handle = StableHandle(id, m.ID, f.Filepath, f.Filename)
 				f.CourseID = id
 				f.ModuleID = m.ID
 				f.Section = ss[si].Name
@@ -358,7 +378,27 @@ func (c *Client) Download(ctx context.Context, f File) (*http.Response, error) {
 			resp.Body.Close()
 			return nil, fmt.Errorf("download HTTP status %d", resp.StatusCode)
 		}
+		idle := c.StallTimeout
+		if idle <= 0 {
+			idle = 60 * time.Second
+		}
+		resp.Body = newStallBody(resp.Body, idle)
 		return resp, nil
 	}
 	return nil, errors.New("download failed")
+}
+
+func StableHandle(course, module int64, path, name string) string {
+	b, _ := json.Marshal([]any{course, module, path, name})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:16])
+}
+func (c *Client) CourseName(ctx context.Context, id int64, lang string) string {
+	var res struct {
+		Courses []Course `json:"courses"`
+	}
+	if c.WS(ctx, "core_course_get_courses_by_field", url.Values{"field": {"id"}, "value": {strconv.FormatInt(id, 10)}}, &res) == nil && len(res.Courses) > 0 {
+		return CleanName(res.Courses[0].Fullname, lang)
+	}
+	return fmt.Sprintf("course-%d", id)
 }

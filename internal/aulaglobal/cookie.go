@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func ParseLaunch(location, site, passport string) (string, string, error) {
@@ -48,6 +49,8 @@ func ParseLaunch(location, site, passport string) (string, string, error) {
 	return parts[1], private, nil
 }
 func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	var nonce [24]byte
 	if _, e := rand.Read(nonce[:]); e != nil {
 		return "", "", e
@@ -92,4 +95,38 @@ func WriteSecret(path, value string) error {
 		return e
 	}
 	return ce
+}
+
+// SaveSecret uses an exclusive temporary file and an atomic replacement with --force.
+func SaveSecret(path, value string, force bool) error {
+	if !force {
+		return WriteSecret(path, value)
+	}
+	dir := filepath.Dir(path)
+	if e := os.MkdirAll(dir, 0700); e != nil {
+		return e
+	}
+	st, e := os.Lstat(dir)
+	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
+		return errors.New("secret directory must be private (0700)")
+	}
+	f, e := os.CreateTemp(dir, ".token-*")
+	if e != nil {
+		return errors.New("cannot create secret temporary file")
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if e = f.Chmod(0600); e != nil {
+		return e
+	}
+	if _, e = f.WriteString(value + "\n"); e != nil {
+		return e
+	}
+	if e = f.Sync(); e != nil {
+		return e
+	}
+	if e = f.Close(); e != nil {
+		return e
+	}
+	return os.Rename(f.Name(), path)
 }

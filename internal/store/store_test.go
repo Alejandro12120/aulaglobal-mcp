@@ -24,13 +24,13 @@ func TestSanitizeAndCollisions(t *testing.T) {
 	a := aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: "one"}
 	b := a
 	b.ModuleID = 2
-	if Path(a) == Path(b) {
-		t.Fatal("collision")
+	if Path(a) != Path(b) {
+		t.Fatal("base paths should be readable before manifest disambiguation")
 	}
 	b = a
 	b.Handle = "two"
-	if Path(a) == Path(b) {
-		t.Fatal("same-module collision")
+	if Path(a) != Path(b) {
+		t.Fatal("manifest must disambiguate")
 	}
 }
 func TestManyDownloads(t *testing.T) {

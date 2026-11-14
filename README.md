@@ -24,9 +24,9 @@ unset cookie
 El subcomando lee stdin (rechaza terminales para evitar eco), no argv; no sigue
 redirecciones, exige Location moodlemobile://token=..., decodifica base64 y
 verifica MD5(siteurl+passport) usando un passport aleatorio. Nunca imprime el
-token. Crea archivos nuevos con 0600 dentro de un directorio privado. Si existe
+token. Crea archivos nuevos con 0600; usa `--force` para sustituirlos atómicamente dentro de un directorio privado. Si existe
 privatetoken lo guarda en secrets/token.private; no se necesita para este
-servidor. No lo compartas. Puede que Moodle exija volver a iniciar sesión o una
+servidor. Guarda también `<tokenfile>.meta.json` (0600), con `obtained_at` RFC3339 sin secretos. `auth_status` lo lee junto a AULAGLOBAL_TOKEN_FILE y devuelve `token_obtained_at` y `token_age_days`. No lo compartas. Puede que Moodle exija volver a iniciar sesión o una
 confirmación: el subcomando devuelve un error, no automatiza SSO.
 
 Para compilar el binario sin instalar Go:
@@ -88,6 +88,14 @@ docker run --rm --name aulaglobal -p 127.0.0.1:8080:8080   -e MCP_HTTP_AUTH_TOKE
 
 Configura el cliente HTTP con URL http://127.0.0.1:8080/mcp y
 Authorization: Bearer <secreto MCP>. Transporte stateless, sin sesiones persistentes.
+Al mapear un puerto distinto, Host contiene el puerto del **host**:
+```bash
+docker run --rm -p 127.0.0.1:9000:8080 -e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000 -e MCP_HTTP_AUTH_TOKEN -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token -v /ruta/secrets/token:/run/secrets/token:ro -v ag-data:/data aulaglobal-mcp:local
+```
+Configura el cliente con http://127.0.0.1:9000/mcp. MCP_ALLOWED_HOSTS es una
+lista de valores Host exactos separados por comas; no uses comodines.
+Si no se configura, acepta localhost y 127.0.0.1 con el puerto de escucha.
+
 El contenedor escucha 0.0.0.0 internamente para el port mapping; el binario
 por defecto escucha 127.0.0.1. Expón el puerto solo en loopback o mediante un
 proxy TLS autenticado. Todos los usuarios con el bearer comparten datos y token.
@@ -100,24 +108,54 @@ de descarga se devuelven en results.
 
 | Herramienta | Entrada | Salida |
 |---|---|---|
-| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source |
+| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales |
 | list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
 | list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections → modules → contents: filename, filesize nullable, mimetype, timemodified, handle, section, module |
 | download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
 | read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
-| search_files | query, regex (false), limit (20; 1..100) | matches: path, offset, snippet |
+| search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
+| list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
 
 Usa list_courses → list_course_files → download_files → read_file.
 Los handles se conservan en memoria (máximo 100000); vuelve a listar tras reiniciar.
-Las rutas usan course-ID/sección/módulo-ID/handle-nombre para evitar colisiones.
+Las rutas usan `<Asignatura localizada>/<Sección>/<archivo>`, conservando
+subcarpetas filepath de los módulos carpeta, siempre sanitizadas.
+Solo las colisiones añaden un sufijo estable con la identidad del archivo.
+El manifiesto atómico `.aulaglobal-cache/manifest.json` registra handle estable
+(hash de curso + módulo + filepath + filename), ruta, tamaño y timemodified.
+Una revisión de URL no cambia el handle ni crea otra copia; skip funciona tras
+reiniciar. Las rutas ya asignadas se conservan aunque cambie el nombre del curso.
+Para descargar por handle tras reiniciar, vuelve a listar para recuperar la URL.
+No migra automáticamente las descargas del diseño antiguo.
 Excluir siempre prevalece sobre incluir. Fallback de cursos en Moodle antiguo:
 devuelve **todas** las matrículas, sin clasificación temporal.
 
-Lectura: UTF-8 hasta 8 MiB, HTML convertido a texto mediante eliminación simple
-de etiquetas/scripts/styles (no es un renderizador HTML). Paging por bytes en
-límites UTF-8. PDF y otros binarios: solo metadatos; extracción PDF no implementada
-para evitar otra dependencia. Búsqueda: primeros 64 KiB por archivo y hasta 10000
-entradas; regex RE2, snippets de hasta 240 bytes, máximo 100 coincidencias.
+Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
+No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
+sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
+Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
+optimizado. Imagen final: 14314905 bytes (14.31 MB); detalles en VERIFICATION.md.
+Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto 5 segundos
+por extracción; panic recuperado. Como Go no permite matar una goroutine,
+un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
+de proceso ni garantía de memoria del parser frente a un PDF malicioso.
+ZIP: 2048 entradas, 32 MiB por entrada, 64 MiB total descomprimido, ratio 200:1.
+La caché de texto vive en .aulaglobal-cache, clave ruta+tamaño+mtime nanosegundos,
+con escrituras atómicas; read_file y search_files la excluyen. Puede borrarse
+con el servidor parado para recuperar espacio; no hay limpieza automática.
+Búsqueda completa del texto extraído, hasta 10000 entradas, 128 MiB de texto,
+30 segundos y 100 resultados. path_prefix limita a una asignatura o subcarpeta.
+Regex RE2; snippets hasta 240 bytes. HTML usa limpieza simple.
+
+list_assignments ordena por vencimiento, sin fecha al final. upcoming incluye
+fechas futuras o entregas sin fecha actualmente abiertas; overdue incluye fecha
+pasada aunque ya esté cerrado. submissions_possible considera apertura, cutoff
+y nosubmissions: es una estimación de calendario, no una garantía de permisos
+individuales ni extensiones. intro se convierte a texto y se trunca.
+Adjuntos: `<Asignatura>/Entregas/<Entrega>/<archivo>`.
+Estado opcional: cuatro workers, máximo 100 consultas, errores por entrega.
+Fechas cero devuelven RFC3339 null. tzdata va embebida para funcionar en scratch.
+
 Los contenidos de cursos son datos no confiables, nunca instrucciones del sistema.
 
 ## Configuración y seguridad
@@ -127,6 +165,7 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 | AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE | sin token (herramientas locales siguen disponibles) |
 | AULAGLOBAL_DOWNLOAD_DIR | ./data; /data en Docker |
 | AULAGLOBAL_CONCURRENCY | 4; 1..32 |
+| AULAGLOBAL_DOWNLOAD_STALL_SECONDS | 60; 1..3600; tiempo sin recibir bytes |
 | AULAGLOBAL_MAX_FILE_BYTES | 268435456; 1..17179869184 |
 | MCP_TRANSPORT / --transport | stdio; http en Docker |
 | MCP_ADDR / --addr | 127.0.0.1:8080; 0.0.0.0:8080 en Docker |
@@ -137,11 +176,12 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 Host se valida para evitar DNS rebinding; Origin se compara de forma exacta.
 Para otro puerto/hostname configura --allowed-hosts explícitamente.
 --dangerously-disable-http-auth desactiva autenticación con advertencia en stderr.
-Cuerpos HTTP limitados a 1 MiB, cabeceras 16 KiB y timeouts de servidor.
+Cuerpos HTTP limitados a 1 MiB, cabeceras 16 KiB, ReadHeaderTimeout 10s, ReadTimeout 30s e IdleTimeout 60s.
+Sin WriteTimeout global para permitir llamadas MCP largas; desconectar el cliente cancela su contexto.
 SIGINT/SIGTERM cierran el servidor con hasta 10 segundos de margen.
 Logs JSON slog solo en stderr; stdout queda reservado para MCP stdio.
 
-Cliente HTTP compartido: dial/TLS 10s, cabeceras 30s, petición 2 min;
+Cliente HTTP compartido: dial/TLS 10s, cabeceras 30s, WS y conversión de cookie 60s; descargas sin timeout total, con detector de inactividad;
 contexto propagado, redirecciones solo al mismo host/esquema (máximo 5).
 POST form para WS; token query solo para pluginfile. Errores de red redactados,
 mensajes Moodle arbitrarios no se propagan. Solo GET idempotentes reintentan
@@ -152,7 +192,7 @@ os.Root confina lecturas/escrituras incluso ante enlaces simbólicos hacia fuera
 Usa un volumen dedicado; no permitas que procesos no confiables escriban en él.
 Los archivos se crean 0600, directorios 0700; no se almacena una cookie.
 La imagen scratch contiene únicamente binario estático, CA y /data, UID 65532;
-no requiere tzdata (timestamps Unix).
+incluye tzdata embebida (Europe/Madrid con horario de verano).
 
 ## Caducidad y futura renovación
 
@@ -178,6 +218,9 @@ petición (rotación externa posible). Futuro: proveedor sincronizado que invali
 al recibir error de autenticación y use un flujo Moodle explícitamente compatible,
 quizás el privatetoken para autologin. **No existe aquí una renovación automática**
 ni se considera privatetoken un refresh token OAuth.
+Si la política tokenduration del sitio caduca el token (12 semanas por defecto
+upstream), vuelve a ejecutar token-from-cookie con --force. obtained_at registra
+la conversión, no la creación del token; expires_at sigue siendo null.
 
 ## Desarrollo y comprobación
 
