@@ -10,7 +10,7 @@ asignaturas. Puedes pedirle cosas como:
 >
 > «Busca en mis apuntes dónde explican el algoritmo de Dijkstra.»
 
-Los apuntes se guardan en tu ordenador, en la carpeta `data`. Tu contraseña no
+Los apuntes se guardan en tu ordenador, en la carpeta `AulaGlobal` de tu usuario. Tu contraseña no
 se usa nunca y tu clave de acceso se queda guardada en tu ordenador, sin que el
 asistente la vea.
 
@@ -18,142 +18,141 @@ asistente la vea.
 
 ## Antes de empezar
 
-Necesitas tres cosas:
+Necesitas un ordenador con Windows, Mac o Linux y un asistente compatible:
+Claude Code, Claude Desktop, Codex o ChatGPT de escritorio.
 
-1. **Un ordenador con Linux o Mac.** En Windows funciona dentro de
-   [WSL](https://learn.microsoft.com/es-es/windows/wsl/install).
-2. **[Docker](https://docs.docker.com/get-docker/)** instalado. Solo hace falta
-   la primera vez, para preparar el programa.
-3. **Un asistente** compatible: [Claude Code](https://claude.com/claude-code),
-   Claude Desktop, Codex o la aplicación de escritorio de ChatGPT.
+## 1. Descarga el programa para tu sistema
 
----
+Abre la [página de descargas](https://github.com/<usuario>/aulaglobal-mcp/releases/latest)
+y elige el archivo de tu ordenador:
 
-## 1. Descarga el proyecto
+| Tu ordenador | Archivo que termina en… |
+|---|---|
+| Windows habitual | `windows_x64.zip` |
+| Windows con ARM | `windows_arm64.zip` |
+| Mac con chip Apple (M1–M4) | `macos_apple-silicon.tar.gz` |
+| Mac Intel | `macos_intel.tar.gz` |
+| Linux habitual | `linux_x64.tar.gz` |
+| Linux con ARM | `linux_arm64.tar.gz` |
 
-Abre una terminal y escribe:
-
-```bash
-git clone <url-de-este-repositorio> aulaglobal-mcp
-cd aulaglobal-mcp
-```
+Para saber qué Mac tienes: **menú Apple → Acerca de este Mac**.
+Descomprime el archivo y guarda el programa en una carpeta que no vayas a mover
+después. No necesitas instalar Go, Docker, WSL ni bash.
 
 ## 2. Conecta tu cuenta de AulaGlobal
 
-En la misma terminal, escribe:
+Abre una terminal en esa carpeta y escribe:
 
-```bash
-./obtener-token.sh
+**Windows (PowerShell):**
+
+```powershell
+.\aulaglobal-mcp.exe setup
 ```
 
-El programa te va guiando paso a paso. La primera vez te preguntará si quieres
-prepararlo con Docker: responde `s`.
+También puedes abrir el programa con doble clic en Windows.
 
-Después te pedirá un dato de tu sesión de AulaGlobal (la *cookie*). Para
-conseguirlo:
+**Mac y Linux:**
 
-1. Entra en <https://aulaglobal.uc3m.es> con tu usuario, como siempre.
-2. Pulsa **F12** (en Mac, `Cmd + Option + I`). Se abre un panel lateral.
-3. Haz clic en la pestaña **Consola**.
-4. Copia esta línea, pégala ahí y pulsa **Enter**:
+```sh
+./aulaglobal-mcp setup
+```
 
-   ```js
-   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
-   ```
+Si dice que no tienes permiso, escribe primero `chmod +x aulaglobal-mcp`.
 
-   No verás nada especial (como mucho la palabra `undefined`). El dato ya está
-   copiado.
-5. Vuelve a la terminal, pégalo y pulsa **Enter**. Por seguridad, lo que pegas
-   no se ve en pantalla.
-
-Si todo ha ido bien, verás **«Token válido. Hola, *tu nombre*»**. Listo.
+El programa te guía: abre AulaGlobal, entra con tu cuenta y sigue las
+instrucciones para copiar un dato de tu sesión (la *cookie*). Pégalo solo cuando
+el programa lo pida. No se ve mientras escribes. Tu contraseña no hace falta.
+Al terminar verás **«Token válido. Hola, tu nombre»** si ha podido comprobarlo.
 
 <details>
-<summary>¿Chrome no te deja pegar en la consola?</summary>
+<summary>El ordenador avisa de que no conoce el programa</summary>
 
-La primera vez, Chrome lo bloquea por seguridad. Escribe `allow pasting` (o
-`permitir pegar`), pulsa Enter y vuelve a pegar la línea.
+Todavía no tiene firma digital. Descárgalo solo desde la página del proyecto.
+
+En Windows: **Más información → Ejecutar de todas formas**.
+
+En Mac: prueba **clic derecho → Abrir**. Si sigue bloqueado, puedes quitar la
+marca de descarga desde la terminal, en la carpeta del programa:
+
+```sh
+xattr -d com.apple.quarantine aulaglobal-mcp
+```
 
 </details>
 
+> Ese dato da acceso a tu cuenta. No lo compartas con nadie, tampoco con el
+> asistente de IA: pégalo solo en el programa cuando te lo pida.
+
+## 3. setup lo añade por ti
+
+El programa busca Claude Desktop y Codex/ChatGPT de escritorio. Te pregunta antes
+de añadirlo a cada uno. Responde `s` si quieres; después reinicia el asistente.
+Si ya había configuración, guarda una copia con el nombre terminado en `.bak`.
+
+Si no encuentra tu asistente, puedes hacerlo a mano. Donde pone
+`/ruta/al/aulaglobal-mcp`, usa la ruta completa del programa que descargaste.
+En Windows termina en `aulaglobal-mcp.exe`.
+
 <details>
-<summary>¿No funciona la línea de la consola?</summary>
+<summary>Claude Code: configuración manual</summary>
 
-Puedes copiar el dato a mano. En el mismo panel, ve a **Aplicación → Cookies →
-https://aulaglobal.uc3m.es** (en Firefox: **Almacenamiento → Cookies**), busca la
-fila `MoodleSessionag` y copia lo que pone en **Valor**.
+Ejecuta el comando que imprime setup, por ejemplo:
 
-</details>
+```sh
+claude mcp add aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
+```
 
-> ⚠️ Ese dato da acceso a tu cuenta. No se lo pases a nadie, ni tampoco al
-> asistente de IA: pégalo solo en la terminal cuando el programa te lo pida.
-
-## 3. Añádelo a tu asistente
-
-En todos los casos tienes que poner la ruta de la carpeta del proyecto. Para
-saberla, escribe `pwd` en la terminal dentro de la carpeta. Te saldrá algo como
-`/home/ana/aulaglobal-mcp`; úsalo donde pone `/ruta/a/aulaglobal-mcp`.
-
-### Claude Code
-
-Crea un archivo llamado `.mcp.json` dentro de la carpeta del proyecto con este
-contenido (cambia las rutas):
+También puedes guardar este contenido en `.mcp.json`, en tu proyecto:
 
 ```json
 {
   "mcpServers": {
     "aulaglobal": {
-      "command": "/ruta/a/aulaglobal-mcp/aulaglobal-mcp",
-      "args": ["--transport", "stdio"],
-      "env": {
-        "AULAGLOBAL_TOKEN_FILE": "/ruta/a/aulaglobal-mcp/secrets/token",
-        "AULAGLOBAL_DOWNLOAD_DIR": "/ruta/a/aulaglobal-mcp/data"
-      }
+      "command": "/ruta/al/aulaglobal-mcp",
+      "args": ["--transport", "stdio"]
     }
   }
 }
 ```
 
-Abre Claude Code en esa carpeta (escribe `claude`) y acepta cuando te pregunte
-por `aulaglobal`.
+En Windows, escribe las barras de las rutas como `/` (por ejemplo,
+`C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
+Si elegiste otras carpetas en setup, usa el contenido que imprime al final.
 
-### Claude Desktop
+</details>
 
-Ve a **Ajustes → Desarrollador → Editar configuración**, pega el mismo contenido
-de arriba (o añade el bloque `"aulaglobal"` si ya tenías otros) y reinicia la
-aplicación.
+<details>
+<summary>Claude Desktop: configuración manual</summary>
 
-### Codex y ChatGPT (aplicación de escritorio)
+Ve a **Ajustes → Desarrollador → Editar configuración** y añade el bloque
+`aulaglobal` del ejemplo anterior dentro de `mcpServers`, conservando los demás.
+El archivo está en:
 
-Los dos comparten la misma configuración, así que solo tienes que hacerlo una
-vez. Escribe en la terminal (cambia las rutas):
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`.
+- Mac: `~/Library/Application Support/Claude/claude_desktop_config.json`.
+- Linux: `~/.config/Claude/claude_desktop_config.json`.
 
-```bash
-codex mcp add aulaglobal \
-  --env AULAGLOBAL_TOKEN_FILE=/ruta/a/aulaglobal-mcp/secrets/token \
-  --env AULAGLOBAL_DOWNLOAD_DIR=/ruta/a/aulaglobal-mcp/data \
-  -- /ruta/a/aulaglobal-mcp/aulaglobal-mcp --transport stdio
-```
+</details>
 
-Si no tienes Codex instalado, abre el archivo `~/.codex/config.toml` (créalo si no
-existe) y añade esto:
+<details>
+<summary>Codex / ChatGPT de escritorio: configuración manual</summary>
+
+Abre `~/.codex/config.toml` (en Windows, `%USERPROFILE%\.codex\config.toml`)
+y añade:
 
 ```toml
 [mcp_servers.aulaglobal]
-command = "/ruta/a/aulaglobal-mcp/aulaglobal-mcp"
+command = "/ruta/al/aulaglobal-mcp"
 args = ["--transport", "stdio"]
-env = { AULAGLOBAL_TOKEN_FILE = "/ruta/a/aulaglobal-mcp/secrets/token", AULAGLOBAL_DOWNLOAD_DIR = "/ruta/a/aulaglobal-mcp/data" }
 ```
 
-Después reinicia Codex o ChatGPT. En ChatGPT puedes comprobarlo en **Settings →
-MCP servers**; si no aparece, pulsa **Restart**.
+Usa barras `/` en Windows. Después reinicia la aplicación.
+Esto es para ChatGPT de escritorio; la web se conecta de otra manera
+([detalles técnicos](docs/TECNICO.md#chatgpt-en-la-web)).
 
-> Esto funciona en la **aplicación de escritorio** de ChatGPT, no en la web.
-> ([Documentación de OpenAI](https://learn.chatgpt.com/docs/extend/mcp?surface=app))
+</details>
 
-### Comprobar que funciona
-
-Escribe `/mcp` en tu asistente: debería aparecer `aulaglobal` como conectado.
+Escribe `/mcp` en tu asistente para comprobar que aparece `aulaglobal`.
 
 ## 4. ¡A usarlo!
 
@@ -165,10 +164,10 @@ Pídele las cosas con tus palabras. Para empezar, prueba:
 - «Descárgate los PDF de *Cálculo* y explícame el primero.»
 - «¿Qué entregas tengo pendientes? ¿Cuáles he entregado ya?»
 
-Lo que descargues queda en la carpeta `data`, ordenado por asignatura y tema:
+Lo que descargues queda en la carpeta `AulaGlobal` de tu usuario, ordenado por asignatura y tema:
 
 ```
-data/
+AulaGlobal/
 └── Cálculo/
     ├── Tema 1/
     │   └── apuntes.pdf
@@ -186,12 +185,12 @@ cambiado.
 
 **Dice «token invalid or expired».**
 Tu acceso ha caducado (AulaGlobal lo hace cada cierto tiempo). Vuelve a
-ejecutar `./obtener-token.sh` y responde `s` cuando pregunte si quieres
+ejecutar el comando del paso 2 y responde `s` cuando pregunte si quieres
 reemplazarlo.
 
 **Dice «cannot read token file».**
-Falta el paso 2, o la ruta que pusiste en el paso 3 está mal. Revisa que empiece
-por `/` y que coincida con lo que te dice `pwd`.
+Vuelve a ejecutar el paso 2. Si elegiste otra carpeta, usa la configuración
+que imprime setup al terminar.
 
 **El asistente no encuentra `aulaglobal`.**
 Revisa las rutas del paso 3 y reinicia el asistente.
@@ -200,7 +199,7 @@ Revisa las rutas del paso 3 y reinicia el asistente.
 Si el PDF es un escaneo (fotos de páginas), no tiene texto que leer. Si es muy
 largo, puede tardar: pídeselo otra vez pasados unos segundos.
 
-**`obtener-token.sh` dice que no ha podido obtener el token.**
+**`setup` dice que no ha podido obtener el token.**
 Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con un dato
 nuevo.
 
@@ -208,10 +207,10 @@ nuevo.
 
 ## ¿Es seguro?
 
-- Tu clave de acceso se guarda en la carpeta `secrets`, y solo tu usuario puede
-  leerla. No la compartas ni la subas a internet.
+- Tu clave se guarda en la carpeta privada de configuración de tu usuario
+  (el programa te indica las rutas). No la compartas ni la subas a internet.
 - El asistente no ve nunca esa clave: el programa la usa por dentro.
-- El programa solo guarda y lee archivos dentro de la carpeta `data`.
+- El programa solo guarda y lee archivos dentro de la carpeta `AulaGlobal` de tu usuario.
 - Todo funciona en tu ordenador: no hay servidores intermedios.
 
 ---

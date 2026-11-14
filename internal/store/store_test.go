@@ -110,7 +110,9 @@ func TestRootConfinement(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0600)
-	os.Symlink(outside, filepath.Join(root, "escape"))
+	if e := os.Symlink(outside, filepath.Join(root, "escape")); e != nil {
+		t.Skipf("symlink unavailable: %v", e)
+	}
 	s, e := Open(root, 1024, 1)
 	if e != nil {
 		t.Fatal(e)
@@ -170,5 +172,26 @@ func TestReadingPagingAndSearchLimits(t *testing.T) {
 		if len(m.Snippet) > 240 {
 			t.Fatal("unbounded snippet")
 		}
+	}
+}
+
+// A manifest written by an older Windows build must also work on Unix.
+func TestManifestPortablePaths(t *testing.T) {
+	dir := t.TempDir()
+	s, e := Open(dir, 1024, 1)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Root.Close()
+	if e = s.atomic(".aulaglobal-cache/manifest.json", []byte(`{"h":{"path":"Course\\Section\\notes.txt","size":null,"timemodified":0}}`)); e != nil {
+		t.Fatal(e)
+	}
+	paths, e := s.paths([]aulaglobal.File{{Handle: "h", CourseID: 1, Filename: "notes.txt"}})
+	if e != nil || paths["h"] != "Course/Section/notes.txt" {
+		t.Fatal(paths, e)
+	}
+	b, e := s.cacheRead(".aulaglobal-cache/manifest.json")
+	if e != nil || strings.Contains(string(b), `\\`) {
+		t.Fatal(string(b), e)
 	}
 }

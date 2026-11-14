@@ -163,8 +163,8 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 
 | Variable / flag | Predeterminado |
 |---|---|
-| AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE | sin token (herramientas locales siguen disponibles) |
-| AULAGLOBAL_DOWNLOAD_DIR | ./data; /data en Docker |
+| AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE | archivo por usuario si existe; si no, sin token |
+| AULAGLOBAL_DOWNLOAD_DIR | ~/AulaGlobal; /data en Docker |
 | AULAGLOBAL_CONCURRENCY | 4; 1..32 |
 | AULAGLOBAL_DOWNLOAD_STALL_SECONDS | 60; 1..3600; tiempo sin recibir bytes |
 | AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS | 60; 1..600; espera de extracción |
@@ -299,3 +299,75 @@ AulaGlobal a través de una URL pública. Nunca publiques este servidor con la
 autenticación HTTP desactivada.
 
 Fuentes consultadas el 14 de noviembre de 2026; los menús pueden cambiar.
+
+
+## Instalación nativa y compatibilidad
+
+`aulaglobal-mcp setup [--secrets-dir RUTA] [--data-dir RUTA] [--no-pause]`
+usa entrada oculta con x/term y verifica con Auth, sin curl. Espera Enter al
+terminar si stdin es terminal; --no-pause lo evita. En Windows, sin argumentos
+y con terminal, abre setup para permitir doble clic.
+
+Secretos predeterminados (os.UserConfigDir()/aulaglobal-mcp/token):
+- Linux: $XDG_CONFIG_HOME/aulaglobal-mcp/token o ~/.config/aulaglobal-mcp/token.
+- macOS: ~/Library/Application Support/aulaglobal-mcp/token.
+- Windows: %APPDATA%/aulaglobal-mcp/token.
+
+Apuntes: os.UserHomeDir()/AulaGlobal en los tres sistemas. No depende del cwd.
+AULAGLOBAL_TOKEN_FILE y AULAGLOBAL_DOWNLOAD_DIR conservan prioridad sobre estos
+valores. En setup los flags tienen prioridad sobre las variables.
+AULAGLOBAL_TOKEN sigue funcionando en el servidor; setup obtiene un token nuevo
+a partir de una cookie, no usa esa variable. token-from-cookie mantiene su salida
+histórica secrets/token. Para conservar instalaciones antiguas configura
+explícitamente AULAGLOBAL_TOKEN_FILE=/ruta/secrets/token y
+AULAGLOBAL_DOWNLOAD_DIR=/ruta/data. No se trasladan archivos automáticamente.
+
+Unix exige directorio privado 0700 y archivos 0600. Windows omite la comprobación
+de bits POSIX; depende de las ACL privadas del perfil. No elijas carpetas
+compartidas. SaveSecret y las configuraciones usan temporal, Sync, Close y Rename.
+Go en Windows usa MoveFileEx con REPLACE_EXISTING; sustituye destinos existentes,
+pero la documentación de os.Rename no garantiza atomicidad en sistemas no Unix.
+No se promete una transacción entre token, metadatos y token privado.
+Solo se limpian token.meta.json, token.private y .token-* si falta token.
+
+Claude JSON se combina conservando valores ajenos (incluso números grandes).
+TOML usa github.com/pelletier/go-toml/v2 solo para validar y serializar el bloque
+nuevo: el resto se conserva al añadir. Se pide confirmación antes de sustituir.
+La sustitución conservadora rechaza texto multilínea o tablas inline ambiguas;
+en esos casos se edita a mano. Se usa el parser pequeño para no aceptar TOML
+inválido ni duplicar tablas con claves entrecomilladas. Copia .bak antes de
+sustituir; escritura con temporal en el mismo directorio.
+Detección de clientes por sus carpetas de configuración; si todavía no existen,
+abre primero la aplicación o usa los ejemplos manuales. No detecta cada variante
+de empaquetado (por ejemplo, instalaciones sandbox).
+
+Manifiestos nuevos guardan rutas con /; también se normalizan separadores de
+manifiestos antiguos al leer. os.Root mantiene el confinamiento en cada OS.
+Sanitize elimina caracteres reservados, puntos/espacios extremos y nombres DOS.
+Skip compara segundos Unix exactos: en FAT con resolución de dos segundos puede
+volver a descargar un archivo con fecha impar; es conservador y evita omitir
+cambios. NTFS/APFS no necesitan tolerancia. Entradas interactivas aceptan CRLF.
+SIGINT/SIGTERM compilan en Windows; el cierre por señal Unix requiere CI/host Unix.
+
+## Compilar tú mismo y publicar versiones
+
+El helper opcional ./obtener-token.sh ofrece compilar con Docker y ejecuta setup;
+ya no gestiona cookies. Para compilar directamente usa el comando de la sección
+Token. El usuario de las Releases no necesita Docker.
+
+La CI ejecuta vet y pruebas nativas en Ubuntu, macOS y Windows; race en Unix.
+Para publicar, configura primero el remoto de GitHub y sustituye el usuario de
+los enlaces README. Después, desde una rama comprobada y con todos los cambios
+confirmados:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt.
+Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versión.
+No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
+firma: quedan pendientes Authenticode, firma/notarización de Apple y provenance.
+No hay LICENSE propio: el mantenedor debe elegir una licencia antes de distribuir
+el proyecto. AGDownloader, acreditado en README, usa MIT.

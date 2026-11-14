@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -151,11 +152,11 @@ func TestWriteSecret(t *testing.T) {
 		t.Fatal(e)
 	}
 	st, e := os.Stat(path)
-	if e != nil || st.Mode().Perm() != 0600 {
+	if e != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0600) {
 		t.Fatal("secret permissions", e)
 	}
 	st, e = os.Stat(filepath.Dir(path))
-	if e != nil || st.Mode().Perm() != 0700 {
+	if e != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0700) {
 		t.Fatal("directory permissions", e)
 	}
 	if e = WriteSecret(path, "overwrite"); e == nil {

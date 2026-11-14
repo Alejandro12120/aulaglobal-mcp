@@ -4,6 +4,7 @@ import (
 	"aulaglobal-mcp/internal/aulaglobal"
 	"aulaglobal-mcp/internal/mcpserver"
 	"aulaglobal-mcp/internal/store"
+	"aulaglobal-mcp/internal/userpaths"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,12 +16,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/term"
 )
 
 func env(k, d string) string {
@@ -40,10 +43,36 @@ func number(k string, d int64) (int64, error) {
 	}
 	return n, nil
 }
+
+var version = "dev"
+
 func run() error {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println(version)
+		return nil
+	}
+	if runtime.GOOS == "windows" && len(os.Args) == 1 && term.IsTerminal(int(os.Stdin.Fd())) {
+		return setup(nil)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		return setup(os.Args[2:])
+	}
+	defaultToken, defaultData, err := userpaths.Defaults()
+	if err != nil {
+		if os.Getenv("AULAGLOBAL_DOWNLOAD_DIR") == "" {
+			return err
+		}
+	}
+	tokenFile := os.Getenv("AULAGLOBAL_TOKEN_FILE")
+	if tokenFile == "" && os.Getenv("AULAGLOBAL_TOKEN") == "" {
+		if _, e := os.Stat(defaultToken); e == nil {
+			tokenFile = defaultToken
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	api := aulaglobal.New(aulaglobal.Site, aulaglobal.StaticToken{Value: os.Getenv("AULAGLOBAL_TOKEN"), File: os.Getenv("AULAGLOBAL_TOKEN_FILE")})
+	api := aulaglobal.New(aulaglobal.Site, aulaglobal.StaticToken{Value: os.Getenv("AULAGLOBAL_TOKEN"), File: tokenFile})
 	if len(os.Args) > 1 && os.Args[1] == "token-from-cookie" {
 		flags := flag.NewFlagSet("token-from-cookie", flag.ContinueOnError)
 		force := flags.Bool("force", false, "Atomically replace existing token files")
@@ -52,11 +81,11 @@ func run() error {
 			return e
 		}
 		// Refuse a terminal to prevent echo and accidental paste into shell history.
-		st, e := os.Stdin.Stat()
+		_, e := os.Stdin.Stat()
 		if e != nil {
 			return e
 		}
-		if st.Mode()&os.ModeCharDevice != 0 {
+		if term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("pipe cookie on stdin using a no-echo shell read; see README")
 		}
 		b, e := io.ReadAll(io.LimitReader(os.Stdin, 8193))
@@ -104,7 +133,7 @@ func run() error {
 		return errors.New("stall seconds must be 1..3600")
 	}
 	api.StallTimeout = time.Duration(stall) * time.Second
-	st, e := store.Open(env("AULAGLOBAL_DOWNLOAD_DIR", "./data"), max, int(workers))
+	st, e := store.Open(env("AULAGLOBAL_DOWNLOAD_DIR", defaultData), max, int(workers))
 	if e != nil {
 		return e
 	}

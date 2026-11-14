@@ -91,9 +91,11 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 	}
 	used := map[string]string{}
 	for id, v := range m {
+		v.Path = filepath.ToSlash(strings.ReplaceAll(v.Path, "\\", "/"))
 		if valid(v.Path) != nil {
 			return nil, errors.New("invalid manifest path")
 		}
+		m[id] = v
 		used[v.Path] = id
 	}
 	sorted := append([]aulaglobal.File(nil), files...)
@@ -120,7 +122,7 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 		f.CourseName = folders[f.CourseID]
 		p := m[id].Path
 		if p == "" {
-			p = Path(f)
+			p = filepath.ToSlash(Path(f))
 
 			base := p
 			for n := 0; ; n++ {

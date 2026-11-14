@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +119,7 @@ func TestSecretReplaceMetadata(t *testing.T) {
 	}
 	st, _ := os.Stat(p)
 	b, _ := os.ReadFile(p)
-	if st.Mode().Perm() != 0600 || string(b) != "two\n" {
+	if (runtime.GOOS != "windows" && st.Mode().Perm() != 0600) || string(b) != "two\n" {
 		t.Fatal("incorrect secret")
 	}
 	meta, _ := json.Marshal(map[string]string{"obtained_at": time.Now().Add(-48 * time.Hour).Format(time.RFC3339)})

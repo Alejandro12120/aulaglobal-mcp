@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -79,7 +80,7 @@ func WriteSecret(path, value string) error {
 		return errors.New("cannot create secret directory")
 	}
 	st, e := os.Lstat(dir)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
+	if e != nil || !st.IsDir() || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
 		return errors.New("secret directory must be private (0700)")
 	}
 	f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -107,7 +108,7 @@ func SaveSecret(path, value string, force bool) error {
 		return e
 	}
 	st, e := os.Lstat(dir)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
+	if e != nil || !st.IsDir() || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
 		return errors.New("secret directory must be private (0700)")
 	}
 	f, e := os.CreateTemp(dir, ".token-*")

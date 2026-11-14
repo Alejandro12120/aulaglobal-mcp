@@ -1,0 +1,26 @@
+// Package userpaths defines locations independent of the working directory.
+package userpaths
+
+import (
+	"os"
+	"path/filepath"
+)
+
+func Defaults() (token, data string, err error) {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return "", "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Join(config, "aulaglobal-mcp", "token"), filepath.Join(home, "AulaGlobal"), nil
+}
+
+func Claude(goos, home, config string) string {
+	if goos == "darwin" {
+		return filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+	}
+	return filepath.Join(config, "Claude", "claude_desktop_config.json")
+}
