@@ -68,6 +68,8 @@ instrucciones para copiar un dato de tu sesión (la *cookie*). Pégalo solo cuan
 el programa lo pida. No se ve mientras escribes. Tu contraseña no hace falta.
 Al terminar verás **«Token válido. Hola, tu nombre»** si ha podido comprobarlo.
 
+> Ese dato da acceso a tu cuenta. No lo compartas con nadie, tampoco con el
+> asistente de IA: pégalo solo en el programa cuando te lo pida.
 <details>
 <summary>El ordenador avisa de que no conoce el programa</summary>
 
@@ -83,9 +85,6 @@ xattr -d com.apple.quarantine aulaglobal-mcp
 ```
 
 </details>
-
-> Ese dato da acceso a tu cuenta. No lo compartas con nadie, tampoco con el
-> asistente de IA: pégalo solo en el programa cuando te lo pida.
 
 ## 3. setup lo añade por ti
 
