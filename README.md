@@ -14,6 +14,10 @@ Los apuntes se guardan en tu ordenador, en la carpeta `AulaGlobal` de tu usuario
 se usa nunca y tu clave de acceso se queda guardada en tu ordenador, sin que el
 asistente la vea.
 
+> **Proyecto no oficial**, sin relación con la Universidad Carlos III de Madrid.
+> Úsalo solo con tu propia cuenta y respetando la normativa de la universidad y
+> los derechos de autor de los materiales.
+
 ---
 
 ## Antes de empezar
@@ -223,6 +227,13 @@ Este proyecto se basa en
 AulaGlobal para la terminal publicado con licencia MIT. De él vienen la idea de
 obtener el acceso a partir de la sesión del navegador, la línea para la consola y
 la forma de limpiar los nombres de las asignaturas. ¡Gracias por compartirlo!
+
+---
+
+## Licencia
+
+Publicado con licencia [MIT](LICENSE). El programa se ofrece **tal cual, sin
+ninguna garantía**: úsalo bajo tu propia responsabilidad.
 
 ---
 

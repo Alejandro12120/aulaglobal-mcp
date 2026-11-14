@@ -369,5 +369,4 @@ release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt.
 Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versión.
 No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
 firma: quedan pendientes Authenticode, firma/notarización de Apple y provenance.
-No hay LICENSE propio: el mantenedor debe elegir una licencia antes de distribuir
-el proyecto. AGDownloader, acreditado en README, usa MIT.
+El proyecto usa licencia MIT (archivo LICENSE, incluido en cada archivo de release).
