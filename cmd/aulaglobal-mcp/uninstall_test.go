@@ -543,10 +543,11 @@ func TestUninstallAllDeleteDataRemovesOnlyTheMarkedFolder(t *testing.T) {
 
 func TestUninstallAllAsksAboutMaterialsDefaultingToKeep(t *testing.T) {
 	for _, tc := range []struct {
+		name   string // ASCII: it becomes part of a temp directory name
 		answer string
 		gone   bool
-	}{{"\n", false}, {"n\n", false}, {"s\n", true}, {"sí\n", true}, {"quizá\n", false}} {
-		t.Run(strings.TrimSpace(tc.answer), func(t *testing.T) {
+	}{{"enter", "\n", false}, {"n", "n\n", false}, {"s", "s\n", true}, {"si-accent", "sí\n", true}, {"other", "quizá\n", false}} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newUFix(t)
 			f.claude.scope = ""
 			out, err := f.run(uninstallOpts{all: true}, tc.answer+"s\n")

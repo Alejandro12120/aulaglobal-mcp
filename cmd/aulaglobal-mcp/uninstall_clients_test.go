@@ -292,9 +292,7 @@ func TestSymlinkedConfigIsNotReplaced(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, filepath.Join(dir, "config.toml")); err != nil {
-		t.Skip("symlinks unavailable:", err)
-	}
+	symlinkOrSkip(t, real, filepath.Join(dir, "config.toml"))
 	if err := a.Remove(e); err == nil {
 		t.Fatal("a symlinked config was rewritten")
 	}
@@ -455,5 +453,18 @@ func TestPointsToProgram(t *testing.T) {
 		if got := pointsToProgram(tc.cmd, exe, false); got != tc.want {
 			t.Errorf("%q = %v", tc.cmd, got)
 		}
+	}
+}
+
+// symlinkOrSkip creates link -> target, skipping the test where the platform
+// cannot create symlinks (Windows without the privilege) or does not report them
+// as symlinks (Wine), since the code under test relies on Lstat telling them apart.
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Skip("this platform does not report symlinks to Lstat")
 	}
 }

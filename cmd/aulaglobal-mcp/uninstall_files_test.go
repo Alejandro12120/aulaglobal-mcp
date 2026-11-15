@@ -33,7 +33,7 @@ func TestMarkedPathLineIsExactlyWhatInstallShWrites(t *testing.T) {
 
 func TestRemoveMarkedPathLines(t *testing.T) {
 	home := "/home/ana"
-	match := func(d string) bool { return d == "/home/ana/.local/bin" }
+	match := func(d string) bool { return filepath.Clean(d) == filepath.Clean("/home/ana/.local/bin") } // expandHome joins with the OS separator
 	// install.sh appends "\n<line>\n" to whatever was there.
 	in := "alias ll='ls -l'\n\nexport PATH=\"$HOME/.local/bin:$PATH\" # aulaglobal-mcp\n"
 	out, n, others := removeMarkedPathLines(in, home, match)
@@ -73,9 +73,7 @@ func TestRewriteProfileKeepsModeAndBacksUp(t *testing.T) {
 	target := filepath.Join(dir, "dotfiles", "zshrc")
 	link := filepath.Join(dir, ".zshrc")
 	writeFile(t, target, "old\n")
-	if err := os.Symlink(target, link); err != nil {
-		t.Skip(err)
-	}
+	symlinkOrSkip(t, target, link)
 	if err := rewriteProfile(link, []byte("new\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -205,11 +203,12 @@ func TestCheckDataDir(t *testing.T) {
 	}
 	target := mk(filepath.Join(root, "target"), true)
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(target, link); err == nil {
+	t.Run("symlink", func(t *testing.T) {
+		symlinkOrSkip(t, target, link)
 		if v := check(link); v.ok || !strings.Contains(v.reason, "enlace") {
 			t.Errorf("symlink accepted: %+v", v)
 		}
-	}
+	})
 	// The marker must be a directory: a plain file with that name proves nothing.
 	fake := mk(filepath.Join(root, "fake"), false)
 	writeFile(t, filepath.Join(fake, dataMarker), "x")
