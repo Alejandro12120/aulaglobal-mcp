@@ -157,6 +157,8 @@ type Client struct {
 	courseNames  map[int64]string
 	probeMu      sync.Mutex
 	validUntil   time.Time
+	politeOnce   sync.Once
+	pol          *polite
 }
 
 func New(base string, p TokenProvider) *Client {
@@ -183,47 +185,95 @@ func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) er
 
 // ws performs one web service call; Moodle errors come back unclassified.
 func (c *Client) ws(ctx context.Context, fn string, args url.Values, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
 	token, e := c.Tokens.Get(ctx)
 	if e != nil {
 		return e
 	}
-	if args == nil {
-		args = url.Values{}
-	}
-	args.Set("wstoken", token)
-	args.Set("wsfunction", fn)
-	args.Set("moodlewsrestformat", "json")
-	req, e := http.NewRequestWithContext(ctx, "POST", c.Base+"/webservice/rest/server.php", strings.NewReader(args.Encode()))
+	b, e := c.wsBody(ctx, token, fn, args)
 	if e != nil {
-		return errors.New("invalid site configuration")
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, e := c.HTTP.Do(req)
-	if e != nil {
-		return errors.New(Redact(e.Error(), token))
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("Moodle HTTP status %d", resp.StatusCode)
-	}
-	b, e := io.ReadAll(io.LimitReader(resp.Body, 32<<20+1))
-	if e != nil {
-		return errors.New("reading Moodle response failed")
-	}
-	if len(b) > 32<<20 {
-		return errors.New("Moodle response too large")
-	}
-	var problem struct{ Exception, Errorcode string }
-	_ = json.Unmarshal(b, &problem)
-	if problem.Exception != "" || problem.Errorcode != "" {
-		return &APIError{Code: problem.Errorcode}
+		return e
 	}
 	if json.Unmarshal(b, out) != nil {
 		return errors.New("invalid Moodle JSON response")
 	}
 	return nil
+}
+
+// wsBody returns the raw JSON of a successful call. Read-only functions are
+// deduplicated while in flight (listings are also cached for cacheTTL); only
+// successful responses are ever kept, so a dead token is noticed immediately.
+func (c *Client) wsBody(ctx context.Context, token, fn string, args url.Values) ([]byte, error) {
+	if !readOnlyFns[fn] {
+		return c.wsFetch(ctx, token, fn, args, false)
+	}
+	p := c.polite()
+	key := cacheKey(token, fn, args)
+	if cacheable[fn] {
+		if b, ok := p.cached(key); ok {
+			return b, nil
+		}
+	}
+	return p.shared(ctx, key, func(ctx context.Context) ([]byte, error) {
+		b, e := c.wsFetch(ctx, token, fn, args, true)
+		if e == nil && cacheable[fn] && json.Valid(b) {
+			p.store(key, b)
+		}
+		return b, e
+	})
+}
+
+// wsFetch performs the HTTP exchange. retry allows repeating after 429/503 (only
+// for read-only functions). Each attempt has its own 60 s budget; time spent
+// waiting for the rate limiter or a server-requested pause does not count.
+func (c *Client) wsFetch(ctx context.Context, token, fn string, args url.Values, retry bool) ([]byte, error) {
+	form := url.Values{}
+	for k, v := range args {
+		form[k] = v
+	}
+	form.Set("wstoken", token)
+	form.Set("wsfunction", fn)
+	form.Set("moodlewsrestformat", "json")
+	body := form.Encode()
+	var out []byte
+	e := c.politely(ctx, retry, func() (*throttle, error) {
+		actx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		req, e := http.NewRequestWithContext(actx, "POST", c.Base+"/webservice/rest/server.php", strings.NewReader(body))
+		if e != nil {
+			return nil, errors.New("invalid site configuration")
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, e := c.HTTP.Do(req)
+		if e != nil {
+			if ce := ctx.Err(); ce != nil {
+				return nil, ce // the caller's own cancellation or deadline, not a network failure
+			}
+			return nil, errors.New(Redact(e.Error(), token))
+		}
+		defer resp.Body.Close()
+		if th := throttleOf(resp); th != nil {
+			return th, nil
+		}
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("Moodle HTTP status %d", resp.StatusCode)
+		}
+		b, e := io.ReadAll(io.LimitReader(resp.Body, 32<<20+1))
+		if e != nil {
+			return nil, errors.New("reading Moodle response failed")
+		}
+		if len(b) > 32<<20 {
+			return nil, errors.New("Moodle response too large")
+		}
+		// Moodle reports its own errors as JSON with HTTP 200; those are not rate limits.
+		var problem struct{ Exception, Errorcode string }
+		_ = json.Unmarshal(b, &problem)
+		if problem.Exception != "" || problem.Errorcode != "" {
+			return nil, &APIError{Code: problem.Errorcode}
+		}
+		out = b
+		return nil, nil
+	})
+	return out, e
 }
 
 type Auth struct {
@@ -446,8 +496,21 @@ func (c *Client) Download(ctx context.Context, f File) (*http.Response, error) {
 	q.Set("token", token)
 	u.RawQuery = q.Encode()
 	for attempt := 0; attempt < 3; attempt++ {
-		req, _ := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
-		resp, err := c.HTTP.Do(req)
+		var resp *http.Response
+		var err error
+		// GET is idempotent: a 429/503 pauses every request and is retried by politely.
+		if e = c.politely(ctx, true, func() (*throttle, error) {
+			req, _ := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+			resp, err = c.HTTP.Do(req)
+			if th := throttleOf(resp); th != nil {
+				resp.Body.Close()
+				resp = nil
+				return th, nil
+			}
+			return nil, nil
+		}); e != nil {
+			return nil, e
+		}
 		transient := false
 		if err != nil {
 			var ne net.Error

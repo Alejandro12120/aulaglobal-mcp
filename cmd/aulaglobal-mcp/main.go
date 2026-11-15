@@ -137,6 +137,15 @@ func run() error {
 		return errors.New("stall seconds must be 1..3600")
 	}
 	api.StallTimeout = time.Duration(stall) * time.Second
+	if v := os.Getenv("AULAGLOBAL_MAX_RPS"); v != "" {
+		rps, e := aulaglobal.ParseMaxRPS(v)
+		if e != nil {
+			return e
+		}
+		if e = api.SetMaxRPS(rps); e != nil {
+			return e
+		}
+	}
 	st, e := store.Open(env("AULAGLOBAL_DOWNLOAD_DIR", defaultData), max, int(workers))
 	if e != nil {
 		return e

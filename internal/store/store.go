@@ -93,9 +93,10 @@ type Result struct {
 }
 
 // Download fetches files with bounded workers. If Moodle rejects the token (confirmed
-// dead), dispatching stops and the returned error satisfies errors.Is(err,
-// aulaglobal.ErrTokenExpired); the per-file results are then incomplete and
-// should be discarded in favour of the single error.
+// dead) or keeps throttling us after retries, dispatching stops and the returned
+// error satisfies errors.Is(err, aulaglobal.ErrTokenExpired) or ErrRateLimited; the
+// per-file results are then incomplete and should be discarded in favour of the
+// single error (files already on disk are skipped on the next attempt).
 func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) ([]Result, error) {
 	// Serialize batches so concurrent tools cannot replace the same destination.
 	select {
@@ -148,7 +149,8 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 	return out, dead
 }
 
-// one downloads a single file. The error is non-nil only when the token is dead.
+// one downloads a single file. The error is non-nil only when the token is dead or
+// AulaGlobal is rate limiting us.
 func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, path string) (res Result, fatal error) {
 	res.Path = path
 	res.Status = "error"
@@ -169,6 +171,9 @@ func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File
 		}
 		resp, e := c.Download(ctx, f)
 		if e != nil {
+			if errors.Is(e, aulaglobal.ErrRateLimited) {
+				fatal = e
+			}
 			return e
 		}
 		defer resp.Body.Close()

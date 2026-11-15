@@ -172,7 +172,8 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 		return b == 0 || a < b
 	})
 	if in.IncludeSubmissionStatus {
-		// A dead token fails every call the same way: stop and report it once.
+		// A dead token (or AulaGlobal throttling us after retries) fails every call the
+		// same way: stop and report it once.
 		jobs := make(chan int)
 		stop := make(chan struct{})
 		var once sync.Once
@@ -205,7 +206,7 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 					}
 					e := c.WS(ctx, "mod_assign_get_submission_status", url.Values{"assignid": {strconv.FormatInt(a.ID, 10)}}, &res)
 					a.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: res.Feedback.Grade.Grade}
-					if errors.Is(e, ErrTokenExpired) {
+					if errors.Is(e, ErrTokenExpired) || errors.Is(e, ErrRateLimited) {
 						once.Do(func() { dead = e; close(stop) })
 						continue
 					}

@@ -194,6 +194,9 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 	}
 	tokenValue, private, e := api.TokenFromCookie(ctx, cookie)
 	cookie = ""
+	if errors.Is(e, aulaglobal.ErrRateLimited) {
+		return false, e
+	}
 	if e != nil {
 		return false, errors.New("No se pudo obtener el token. Cierra sesión, vuelve a entrar en AulaGlobal y repite setup.")
 	}
