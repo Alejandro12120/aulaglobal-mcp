@@ -4,7 +4,8 @@
 · Privacidad: este programa solo envía tus datos a AulaGlobal. Pero lo que
   devuelvan las herramientas (listas, apuntes, entregas) lo recibe el asistente
   que conectes y puede llegar a su proveedor de IA, según sus condiciones.
-  Las restricciones de carpeta solo afectan a AulaGlobal MCP, no al asistente.
+  Los límites de carpeta solo se aplican a las herramientas de AulaGlobal MCP;
+  el asistente puede tener otros permisos propios.
 
 Asistentes encontrados en este ordenador:
   ✓ Claude Code
