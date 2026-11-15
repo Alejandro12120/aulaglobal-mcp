@@ -439,7 +439,6 @@ func setup(args []string) (result error) {
 	if e != nil {
 		return e
 	}
-	u.step(4, "Conectar con tus asistentes")
 	dt, dd, e := userpaths.Defaults()
 	if e != nil {
 		return e
@@ -448,11 +447,27 @@ func setup(args []string) (result error) {
 	if e != nil {
 		return e
 	}
-	if configureClients(u, realClientEnv(runtime.GOOS, home, config), want, selected, *yes) {
+	if connectAssistants(u, realClientEnv(runtime.GOOS, home, config), want, selected, *yes) {
 		return errors.New("Algunos asistentes no se pudieron configurar; consulta las instrucciones anteriores")
 	}
 
 	return nil
+}
+
+// privacyNotice is shown before the assistants are connected: what leaves this
+// computer, and what the folder restrictions do and do not cover.
+const privacyNotice = `· Privacidad: este programa solo envía tus datos a AulaGlobal. Pero lo que
+  devuelvan las herramientas (listas, apuntes, entregas) lo recibe el asistente
+  que conectes y puede llegar a su proveedor de IA, según sus condiciones.
+  Las restricciones de carpeta solo afectan a AulaGlobal MCP, no al asistente.
+`
+
+// connectAssistants is step 4: privacy notice, then detection and configuration.
+// It reports whether any assistant failed.
+func connectAssistants(u setupUI, e clientEnv, want desiredEntry, selected []assistant, yes bool) bool {
+	u.step(4, "Conectar con tus asistentes")
+	fmt.Fprint(u.out, privacyNotice+"\n")
+	return configureClients(u, e, want, selected, yes)
 }
 
 func decodeTOML(b []byte, root *map[string]any) error { return toml.Unmarshal(b, root) }

@@ -268,8 +268,11 @@ func TestClientTranscripts(t *testing.T) {
 				input = "s\n"
 			}
 			var out strings.Builder
-			configureClients(setupUI{strings.NewReader(input), &out, nil}, e, w, list, false)
+			connectAssistants(setupUI{strings.NewReader(input), &out, nil}, e, w, list, false)
 			got := strings.ReplaceAll(out.String(), "\r\n", "\n")
+			if !strings.Contains(got, "── Paso 4 de 4 · Conectar con tus asistentes ──\n\n"+privacyNotice+"\nAsistentes encontrados") {
+				t.Fatalf("step 4 must show the privacy notice before the assistants:\n%s", got)
+			}
 			lines := strings.Split(got, "\n")
 			for i := range lines {
 				lines[i] = strings.TrimRight(lines[i], " \t")
@@ -585,5 +588,25 @@ func TestClaudeUnknownInspection(t *testing.T) {
 		if calls != 1 || !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
 			t.Fatal(out.String(), calls)
 		}
+	}
+}
+
+func TestPrivacyNotice(t *testing.T) {
+	lines := strings.Split(strings.TrimRight(privacyNotice, "\n"), "\n")
+	if len(lines) < 2 || len(lines) > 4 {
+		t.Fatalf("notice must stay at 2-4 lines, has %d", len(lines))
+	}
+	for _, l := range lines {
+		if n := len([]rune(l)); n > 80 {
+			t.Errorf("line of %d columns: %q", n, l)
+		}
+	}
+	for _, want := range []string{"Privacidad", "AulaGlobal", "asistente", "proveedor de IA", "restricciones de carpeta"} {
+		if !strings.Contains(privacyNotice, want) {
+			t.Errorf("notice lacks %q", want)
+		}
+	}
+	if !strings.HasPrefix(privacyNotice, "· ") {
+		t.Error("notice must use the neutral · marker")
 	}
 }
