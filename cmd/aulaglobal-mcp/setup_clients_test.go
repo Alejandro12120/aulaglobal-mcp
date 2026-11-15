@@ -593,15 +593,15 @@ func TestClaudeUnknownInspection(t *testing.T) {
 
 func TestPrivacyNotice(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(privacyNotice, "\n"), "\n")
-	if len(lines) < 2 || len(lines) > 5 {
-		t.Fatalf("notice must stay at 2-5 lines, has %d", len(lines))
+	if len(lines) < 2 || len(lines) > 7 {
+		t.Fatalf("notice must stay at 2-7 lines, has %d", len(lines))
 	}
 	for _, l := range lines {
 		if n := len([]rune(l)); n > 80 {
 			t.Errorf("line of %d columns: %q", n, l)
 		}
 	}
-	for _, want := range []string{"Privacidad", "AulaGlobal", "asistente", "proveedor de IA", "límites de carpeta", "otros permisos propios"} {
+	for _, want := range []string{"Privacidad", "AulaGlobal", "el autor no recibe nada", "empresa del asistente", "otros archivos de tu ordenador"} {
 		if !strings.Contains(privacyNotice, want) {
 			t.Errorf("notice lacks %q", want)
 		}

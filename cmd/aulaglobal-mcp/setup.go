@@ -455,12 +455,14 @@ func setup(args []string) (result error) {
 }
 
 // privacyNotice is shown before the assistants are connected: what leaves this
-// computer, and what the folder restrictions do and do not cover.
-const privacyNotice = `· Privacidad: este programa solo envía tus datos a AulaGlobal. Pero lo que
-  devuelvan las herramientas (listas, apuntes, entregas) lo recibe el asistente
-  que conectes y puede llegar a su proveedor de IA, según sus condiciones.
-  Los límites de carpeta solo se aplican a las herramientas de AulaGlobal MCP;
-  el asistente puede tener otros permisos propios.
+// computer, where tool results end up, and that the assistant may reach other files.
+const privacyNotice = `· Privacidad:
+  - Este programa solo envía tus datos a AulaGlobal; el autor no recibe nada.
+  - Lo que el asistente consulte (asignaturas, apuntes, entregas) pasa a formar
+    parte de la conversación y llega a la empresa del asistente (Anthropic,
+    OpenAI, Google...), igual que tus mensajes.
+  - Este programa solo usa la carpeta AulaGlobal, pero el asistente puede tener
+    permiso para abrir otros archivos de tu ordenador.
 `
 
 // connectAssistants is step 4: privacy notice, then detection and configuration.
