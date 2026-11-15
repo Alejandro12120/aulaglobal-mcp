@@ -891,3 +891,119 @@ usan carpetas temporales, sin credenciales ni conexiones a UC3M.
 La prueba real con rutas con espacios confirma que el nombre debe ir antes de
 las opciones -e: el parser variádico de Claude puede consumir aulaglobal como
 una variable si se coloca después de -e. El separador -- precede al ejecutable.
+
+## Desinstalación (`aulaglobal-mcp uninstall`)
+
+Implementada en cmd/aulaglobal-mcp (`uninstall.go` flujo, menú y plan;
+`uninstall_clients.go` quitar la entrada de cada asistente; `uninstall_files.go`
+perfiles, PATH, carpeta de apuntes y binario; `uninstall_windows.go` /
+`uninstall_other.go` registro y proceso auxiliar de Windows). Texto en español y
+mismo estilo visual que setup (✓ ! ✗ ·, `[s/N]`).
+
+### Opciones y flags
+
+Sin flags y con terminal abre el menú: 1 desconectar asistentes (predeterminada),
+2 cerrar la sesión (borrar la clave de acceso), 3 desinstalar todo. En todos los
+casos se imprime el **plan** exacto y se pide `¿Continuar? [s/N]` (Enter = no);
+después se imprime el resultado con ✓/·/!/✗ por elemento. Cualquier ✗ da salida
+distinta de 0.
+
+| Flag | Efecto |
+|---|---|
+| `--clients ids` | opción 1 para esos asistentes (IDs de setup), sin menú |
+| `--logout` | opción 2 |
+| `--all` | opción 3 (conserva la carpeta de apuntes) |
+| `--delete-data` | con `--all`, permite borrar la carpeta de apuntes (reglas abajo) |
+| `--yes` | omite las confirmaciones; **no** implica `--delete-data` ni quita entradas ajenas |
+| `--dry-run` | imprime el plan y no cambia nada |
+| `--secrets-dir`, `--data-dir` | rutas personalizadas, como en setup (`AULAGLOBAL_TOKEN_FILE` y `AULAGLOBAL_DOWNLOAD_DIR` también se respetan) |
+| `--help` | uso, salida 0 |
+
+Combinaciones inválidas (mensaje claro, sin cambios): más de una de `--clients`,
+`--logout`, `--all`; `--delete-data` sin `--all`; `--clients` vacío o con ID
+desconocido; argumentos sobrantes. Sin terminal y sin flags se imprime la ayuda y
+sale con error; con flags pero sin terminal exige `--yes` (o `--dry-run`).
+
+### Opción 1: desconectar asistentes
+
+La interfaz `assistant` tiene tres métodos nuevos: `Find` (qué hay bajo
+`aulaglobal`: comando y env), `Remove` (quita solo esa entrada) y `ManualRemove`
+(instrucciones manuales). Solo se quitan entradas cuyo comando es **este**
+ejecutable o un binario llamado `aulaglobal-mcp`; si la entrada difiere se
+muestra y se pregunta (`[s/N]`). Con `--yes` o sin terminal las ajenas no se
+tocan nunca (aviso `!`).
+
+- Claude Code: `claude mcp remove --scope user aulaglobal` y comprobación
+  posterior con `mcp get`. Los ámbitos local y proyecto se detectan y se
+  explican (con el comando para quitar el local en su carpeta); **no** se tocan
+  ni `.mcp.json` ni el ámbito local. Limitación: `mcp get` solo muestra el
+  ámbito de mayor prioridad, de modo que una entrada de usuario tapada por una
+  local no se ve desde esa carpeta. La salida del CLI nunca se imprime.
+- Claude Desktop y Antigravity (`mcpServers`) y OpenCode (V2 `mcp.servers`, V1
+  `mcp`): la entrada se corta **por bytes** (se localiza con el decodificador JSON
+  y se elimina solo ese miembro y su coma), así que orden de claves, sangría y
+  números grandes del resto del archivo quedan idénticos. JSON inválido, claves
+  duplicadas, JSONC con comentarios y formatos ambiguos se rechazan.
+- Codex: se elimina línea a línea la tabla `[mcp_servers.aulaglobal]` y sus
+  subtablas; se rechazan tablas en línea, claves con puntos y cadenas multilínea.
+- Los archivos se escriben con el mismo `atomicConfig` que setup (temporal +
+  rename, original en `.bak`); archivos no regulares (enlaces) se rechazan.
+- Si algo no se puede cambiar con seguridad: ✗ con la ruta y los pasos manuales,
+  sin tocar el archivo.
+
+### Opción 2: cerrar sesión
+
+Borra el token y sus acompañantes (`.private`, `.meta.json`, temporales
+`.token-*`) y su carpeta si queda vacía. La ruta sale de `--secrets-dir`, luego
+`AULAGLOBAL_TOKEN_FILE`, luego el valor por defecto; además se borran las rutas
+`AULAGLOBAL_TOKEN_FILE` que figuren en entradas de asistentes propias, solo si
+son archivos regulares de hasta 64 KiB. Programa y asistentes no cambian; se
+indica que `aulaglobal-mcp setup` reconecta.
+
+### Opción 3: desinstalar todo
+
+Por este orden: asistentes (opción 1 para todos), token y carpeta de
+configuración `<UserConfigDir>/aulaglobal-mcp`, caché de avisos
+`<UserCacheDir>/aulaglobal-mcp`, PATH, carpeta de apuntes (si procede) y por
+último el programa. Las carpetas propias solo se borran con `RemoveAll` si se
+llaman exactamente `aulaglobal-mcp`.
+
+| Sistema | PATH | Programa |
+|---|---|---|
+| Linux / macOS | Se buscan, en todos los perfiles que escribe install.sh (`~/.zshrc` o `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.bash_profile`, `$XDG_CONFIG_HOME/fish/config.fish`, `~/.profile`), las líneas con la forma exacta del instalador y terminadas en `# aulaglobal-mcp`. Solo se quita la que añade la carpeta de **este** ejecutable (las de otra carpeta se dejan y se avisa). Copia en `<perfil>.bak`; se conservan permisos y enlaces simbólicos; idempotente | `os.Remove` del ejecutable (resuelto con EvalSymlinks); su carpeta solo si se llama `aulaglobal-mcp` y está vacía. La carpeta típica `~/.local/bin` nunca se borra |
+| Windows | Se quita solo la entrada igual (expandida, sin barra final, sin distinguir mayúsculas, como install.ps1) del valor `Path` de `HKCU\Environment` con `golang.org/x/sys/windows/registry` (ahora dependencia directa; ya estaba enlazada, THIRD_PARTY_NOTICES.md no cambia), conservando el tipo REG_SZ/REG_EXPAND_SZ y el resto del valor; después `WM_SETTINGCHANGE`. No se guarda copia del valor | Un ejecutable en uso no se puede borrar: `selfupdate.MoveAside` lo renombra a `<exe>.old` y se lanza `cmd.exe /d /s /c "ping -n 3 127.0.0.1 >nul & del /f /q "<exe>.old" & rmdir "<carpeta>""` sin ventana (`CREATE_NO_WINDOW`, grupo de procesos nuevo) que sobrevive a este proceso; `rmdir` solo vacía y solo si la carpeta se llama `aulaglobal-mcp`. Rutas con `% & ^ \| < > " !` no se programan. Si falla, se dice el archivo exacto que borrar (la limpieza de `.old` al arrancar de selfupdate sigue de respaldo si se reinstala) |
+
+En un contenedor (`selfupdate.InContainer`) no se borran el binario ni el PATH
+(se explica); el resto sí.
+
+### Carpeta de apuntes (solo opción 3)
+
+Candidatas: el `AULAGLOBAL_DOWNLOAD_DIR` de cada entrada propia (o la
+predeterminada `~/AulaGlobal` si no lo tiene), `--data-dir` /
+`AULAGLOBAL_DOWNLOAD_DIR` del entorno, o la predeterminada si no hay ninguna.
+Si difieren se pregunta por cada una:
+`¿Borrar también la carpeta AulaGlobal con tus materiales (<ruta>)? [s/N]`
+(Enter = conservar). Con `--yes` o sin terminal se conserva salvo `--delete-data`.
+Nunca se borra fuera de esa carpeta. **Se rechaza** (aviso y se deja a mano) si:
+la ruta está vacía o no es absoluta, es la raíz, es la carpeta personal o la
+contiene, contiene el programa/configuración/caché/token, es un enlace simbólico
+o no es una carpeta, se llama como una carpeta personal del sistema (Documents,
+Descargas, Dropbox...), o no contiene el directorio marca `.aulaglobal-cache` (una
+carpeta vacía sí se puede quitar). Una carpeta que no es la predeterminada solo se
+borra respondiendo `s` en una terminal, con un aviso extra (`--delete-data` no
+basta). La comprobación se repite justo antes de borrar.
+
+### Pruebas
+
+`uninstall_*_test.go`: plantilla de instalación falsa en directorio temporal
+(HOME, config, caché, perfiles, ejecutable, asistentes y registro inyectados; nunca
+se tocan los archivos, PATH, registro ni ejecutable reales y no se contacta con
+AulaGlobal), pruebas por asistente (incluido OpenCode V1/V2, TOML con otros
+servidores, JSON/TOML malformados, enlaces), Claude Code con un ejecutable falso
+real (el propio binario de pruebas reutilizado vía `TestMain`, `claude`/`claude.exe`)
+y con un ejecutor simulado, lógica de PATH de Windows con un almacén simulado,
+extremo a extremo de la opción 3, `--dry-run` comprobado con hash del
+directorio, y transcripciones doradas (`testdata/uninstall-*.golden`,
+`UPDATE_GOLDEN=1` las regenera). El código específico de Windows se compila en los
+seis destinos; su parte pura se prueba en todos los sistemas, pero el registro y el
+proceso auxiliar solo se han podido verificar compilando.

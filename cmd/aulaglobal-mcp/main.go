@@ -61,6 +61,9 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "update" {
 		return update(os.Args[2:])
 	}
+	if len(os.Args) > 1 && os.Args[1] == "uninstall" {
+		return uninstall(os.Args[2:])
+	}
 	defaultToken, defaultData, err := userpaths.Defaults()
 	if err != nil {
 		if os.Getenv("AULAGLOBAL_DOWNLOAD_DIR") == "" {

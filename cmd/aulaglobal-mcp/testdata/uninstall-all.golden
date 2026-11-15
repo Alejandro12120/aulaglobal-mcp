@@ -1,0 +1,39 @@
+¿Qué quieres hacer?
+  1. Desconectar AulaGlobal de algunos asistentes
+  2. Cerrar la sesión de AulaGlobal (borrar la clave de acceso)
+  3. Desinstalar todo
+Opción [1]:
+› Claude Desktop: la entrada «aulaglobal» apunta a «/usr/bin/node», no a este programa. ¿Quitarla igualmente? [s/N]
+› ¿Borrar también la carpeta AulaGlobal con tus materiales (<tmp>/home/AulaGlobal)? [s/N]
+Plan:
+  · Claude Code: ejecutar `claude mcp remove --scope user aulaglobal`
+  · Codex / ChatGPT: quitar la entrada «aulaglobal» de <tmp>/home/.codex/config.toml (copia de seguridad: <tmp>/home/.codex/config.toml.bak)
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.private
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.meta.json
+  · Borrar la carpeta de configuración <tmp>/home/config/aulaglobal-mcp
+  · Borrar la caché de avisos de versión <tmp>/home/cache/aulaglobal-mcp
+  · Quitar de <tmp>/home/.zshrc la línea que añade <tmp>/Programs/aulaglobal-mcp al PATH (copia de seguridad: <tmp>/home/.zshrc.bak)
+  · Quitar de <tmp>/home/.bashrc la línea que añade <tmp>/Programs/aulaglobal-mcp al PATH (copia de seguridad: <tmp>/home/.bashrc.bak)
+  · Borrar el programa <tmp>/Programs/aulaglobal-mcp/aulaglobal-mcp y su carpeta <tmp>/Programs/aulaglobal-mcp si queda vacía
+
+Se conservará: tu carpeta AulaGlobal con tus materiales (<tmp>/home/AulaGlobal).
+
+Avisos:
+  ! Claude Desktop: la entrada apunta a «/usr/bin/node», no a este programa; no se toca.
+
+› ¿Continuar? [s/N]
+Resultado:
+  ✓ Claude Code: desconectado.
+  ✓ Codex / ChatGPT: desconectado.
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token.private
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token.meta.json
+  ✓ Borrada la carpeta de configuración: <tmp>/home/config/aulaglobal-mcp
+  ✓ Borrada la caché: <tmp>/home/cache/aulaglobal-mcp
+  ✓ PATH: línea quitada de <tmp>/home/.zshrc (copia en <tmp>/home/.zshrc.bak)
+  ✓ PATH: línea quitada de <tmp>/home/.bashrc (copia en <tmp>/home/.bashrc.bak)
+  ✓ Programa borrado: <tmp>/Programs/aulaglobal-mcp/aulaglobal-mcp (y su carpeta, que quedó vacía)
+
+AulaGlobal MCP se ha desinstalado de este ordenador.
+Abre una terminal nueva para que el PATH se actualice.

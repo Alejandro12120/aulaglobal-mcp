@@ -481,6 +481,30 @@ By using this program you agree to the following:
 
 ## Uninstalling
 
+Open a terminal and run:
+
+```sh
+aulaglobal-mcp uninstall
+```
+
+The program asks what you want to do:
+
+| Option | What it does |
+|---|---|
+| 1. Disconnect AulaGlobal from some assistants | Lets you choose which assistants to remove it from. The program stays installed. |
+| 2. Sign out of AulaGlobal | Deletes the access key from your computer. To use it again, run `aulaglobal-mcp setup`. |
+| 3. Uninstall everything | Disconnects every assistant and deletes the access key, the program and the line the installer added to your PATH. |
+
+Before changing anything, it shows exactly what it will do and asks for
+confirmation. Your downloaded materials are not deleted unless you say so: in
+option 3 it asks separately, and the default answer is "No".
+
+`aulaglobal-mcp uninstall --dry-run` shows what would be done without changing
+anything. The other options are listed by `aulaglobal-mcp uninstall --help`.
+
+<details>
+<summary><strong>Uninstalling by hand</strong> (for example, if you already deleted the program)</summary>
+
 1. Disconnect the program from your assistants. In Claude Code:
    `claude mcp remove aulaglobal --scope user`. In the others, delete the
    `aulaglobal` entry from their configuration (see
@@ -495,6 +519,8 @@ By using this program you agree to the following:
    similar). On Windows, remove the folder from your user PATH variable.
 5. If you no longer want the downloaded materials, delete the `AulaGlobal`
    folder.
+
+</details>
 
 ---
 

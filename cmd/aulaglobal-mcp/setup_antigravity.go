@@ -184,7 +184,7 @@ func antigravityAssistant() assistant {
 	return fileAssistant{id: "antigravity", name: "Antigravity", reload: "Recarga /mcp en CLI; usa Restart en Customizations → Installed → MCP Servers, o reinicia el IDE.", path: func(e clientEnv) (string, error) { return userpaths.Antigravity(e.Home), nil }, detect: func(e clientEnv) bool {
 		_, ok := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
 		return ok
-	}, merge: antigravityConfig, generate: func(e clientEnv, w desiredEntry) (map[string]any, error) {
+	}, merge: antigravityConfig, entryOf: desktopEntry, removeFrom: desktopRemove, generate: func(e clientEnv, w desiredEntry) (map[string]any, error) {
 		cli, _ := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
 		if cli != "" {
 			return e.GenerateAG(cli, w.Exe, w.Extra)
