@@ -49,6 +49,10 @@ func ParseLaunch(location, site, passport string) (string, string, error) {
 	}
 	return parts[1], private, nil
 }
+
+// TokenFromCookie exchanges the browser session cookie for a mobile token through
+// launch.php (moodle_mobile_app service, passport signed with MD5(site+passport)).
+// The flow is based on AGDownloader (MIT, see THIRD_PARTY_NOTICES.md).
 func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

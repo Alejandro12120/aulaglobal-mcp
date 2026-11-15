@@ -265,6 +265,9 @@ type Course struct {
 
 var year = regexp.MustCompile(`\s+2\d(?:\d\d)?/\d{2,4}(?:-[12][CS]|-S[12])?`)
 
+// CleanName picks the Spanish or English part of a bilingual UC3M course name and
+// strips the academic year. Adapted from extractCourseNameByLanguage in AGDownloader
+// (MIT, Copyright (c) 2024 Eduardo Alarcón; see THIRD_PARTY_NOTICES.md).
 func CleanName(s, lang string) string {
 	loc := year.FindStringIndex(s)
 	if loc == nil {

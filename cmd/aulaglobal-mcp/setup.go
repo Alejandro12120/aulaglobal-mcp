@@ -152,6 +152,8 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 			return false, e
 		}
 	}
+	// The DevTools console line that reads the MoodleSessionag cookie is based on
+	// AGDownloader (MIT, see THIRD_PARTY_NOTICES.md).
 	fmt.Fprintln(u.out, `1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
 
 2. Pulsa F12 (Mac: Cmd + Option + I).

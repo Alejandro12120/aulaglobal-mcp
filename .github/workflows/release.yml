@@ -25,7 +25,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: |
           shellcheck -s sh install.sh
-          shellcheck scripts/test-install.sh scripts/test-install/inner.sh
+          shellcheck scripts/test-install.sh scripts/test-install/inner.sh scripts/gen-third-party-notices.sh
       # install.ps1 se sirve con "irm | iex": se comprueba con el analizador de
       # Windows PowerShell 5.1 (el que usa la mayoría de usuarios) y con PSScriptAnalyzer.
       - name: Lint install.ps1 (PowerShell 5.1)

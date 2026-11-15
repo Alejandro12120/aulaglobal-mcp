@@ -79,9 +79,10 @@ esac
 		sums[name] = hex.EncodeToString(h[:])
 	}
 	files := map[string][]byte{
-		"README.md":        []byte("readme\n"),
-		"LICENSE":          []byte("licence\n"),
-		"docs/TECNICO.md": []byte("tecnico\n"),
+		"README.md":              []byte("readme\n"),
+		"LICENSE":                []byte("licence\n"),
+		"THIRD_PARTY_NOTICES.md": []byte("notices\n"),
+		"docs/TECNICO.md":        []byte("tecnico\n"),
 	}
 	for _, l := range labels {
 		bin := payload[l]
