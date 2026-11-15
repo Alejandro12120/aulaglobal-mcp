@@ -108,7 +108,7 @@ de descarga se devuelven en results.
 
 | Herramienta | Entrada | Salida |
 |---|---|---|
-| auth_status | {} | fullname, userid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional |
+| auth_status | {} | token_valid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional. **No** devuelve nombre ni ID de usuario (ver Privacidad y minimización de datos) |
 | list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
 | list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections → modules → contents: filename, filesize nullable, mimetype, timemodified, handle, section, module |
 | download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
@@ -166,6 +166,7 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 | AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE | archivo por usuario si existe; si no, sin token |
 | AULAGLOBAL_DOWNLOAD_DIR | ~/AulaGlobal; /data en Docker |
 | AULAGLOBAL_CONCURRENCY | 4; 1..32 |
+| AULAGLOBAL_MAX_RPS | 4; 0.1..100; peticiones por segundo a AulaGlobal (ráfaga = el doble) |
 | AULAGLOBAL_DOWNLOAD_STALL_SECONDS | 60; 1..3600; tiempo sin recibir bytes |
 | AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS | 60; 1..600; espera de extracción |
 | AULAGLOBAL_MAX_FILE_BYTES | 268435456; 1..17179869184 |
@@ -189,15 +190,107 @@ Logs JSON slog solo en stderr; stdout queda reservado para MCP stdio.
 Cliente HTTP compartido: dial/TLS 10s, cabeceras 30s, WS y conversión de cookie 60s; descargas sin timeout total, con detector de inactividad;
 contexto propagado, redirecciones solo al mismo host/esquema (máximo 5).
 POST form para WS; token query solo para pluginfile. Errores de red redactados,
-mensajes Moodle arbitrarios no se propagan. Solo GET idempotentes reintentan
-timeouts/5xx (3 intentos, backoff cancelable); no se reintenta POST.
+mensajes Moodle arbitrarios no se propagan. Las descargas (GET idempotentes) reintentan
+timeouts/5xx (3 intentos, backoff cancelable). Los POST de WS solo se repiten tras 429/503 y solo si la función es de solo lectura (ver Acceso respetuoso a AulaGlobal).
 Descargas verifican status, rechazan HTML inesperado y errores JSON, tamaño,
 y escriben temporal exclusivo → fsync → rename. Skip compara tamaño y mtime.
 os.Root confina lecturas/escrituras incluso ante enlaces simbólicos hacia fuera.
 Usa un volumen dedicado; no permitas que procesos no confiables escriban en él.
 Los archivos se crean 0600, directorios 0700; no se almacena una cookie.
-La imagen scratch contiene únicamente binario estático, CA y /data, UID 65532;
+La imagen scratch contiene únicamente binario estático, CA, /data y /licenses (LICENSE y THIRD_PARTY_NOTICES.md), UID 65532;
 incluye tzdata embebida (Europe/Madrid con horario de verano).
+
+## Acceso respetuoso a AulaGlobal
+
+Todo el tráfico saliente hacia AulaGlobal (llamadas WS, descargas pluginfile y
+launch.php) pasa por una única puerta por proceso
+(`internal/aulaglobal/polite.go`). Complementa la concurrencia ya limitada
+(AULAGLOBAL_CONCURRENCY) y no sustituye al respeto de las normas de uso de la
+universidad.
+
+**Limitador de ritmo.** Cubo de fichas (token bucket) con la reserva de hueco
+futuro, de modo que los hilos esperan en orden. Por defecto 4 peticiones/s con
+ráfaga de 8: una consulta interactiva (cursos, contenidos, tareas) no espera
+nunca, y una descarga masiva o la consulta de estado de entregas queda en
+240 peticiones por minuto, del orden de lo que genera un navegador, muy lejos de
+una carga abusiva. Se configura con `AULAGLOBAL_MAX_RPS` (número decimal entre
+0.1 y 100; la ráfaga es el doble, mínimo 1); un valor no válido impide arrancar.
+Un curso de 200 archivos tarda unos 50 s con el valor por defecto. La espera
+respeta la cancelación del contexto. Las redirecciones del mismo host (máximo 5)
+no consumen ficha propia.
+
+**429 y 503.** Se lee `Retry-After` (segundos o fecha HTTP); sin cabecera, 5 s
+duplicando por intento con ±25 % de jitter; siempre se limita a 120 s (mínimo 1 s
+si el servidor indica 0). La pausa es **global**: la fijan y la respetan todas
+las goroutines (también las peticiones que ya estaban en cola), no solo la que
+recibió el error. Se reintenta como máximo 2 veces (3 intentos) y solo si la
+petición es de solo lectura: GET de descarga y launch.php, y funciones WS de la
+lista cerrada `readOnlyFns` (todas las que usa el cliente leen; ninguna escribe
+en Moodle). Una función WS que no esté en esa lista nunca se reintenta, ni se
+deduplica ni se cachea. Si la pausa es mayor que el tiempo que le queda al
+llamante, o se agotan los reintentos, la herramienta devuelve «AulaGlobal está
+limitando las peticiones; vuelve a intentarlo en N s.» (`errors.Is(err,
+aulaglobal.ErrRateLimited)`). Una descarga por lotes o el estado de entregas
+se detiene entera con ese único error en vez de seguir golpeando; lo ya
+descargado se omite al repetir. Los errores JSON con HTTP 200 (errorcode de
+Moodle) **no** son límites de ritmo y no se reintentan.
+
+**Deduplicación.** Las llamadas WS de solo lectura idénticas (misma función,
+mismos parámetros, mismo token) que coinciden en vuelo comparten una sola
+petición (implementación propia estilo singleflight). La petición compartida no
+depende de que un llamante cancele: se cancela solo cuando se van todos, y un
+llamante vivo reintenta si la compartida murió por el plazo de otro.
+
+**Caché breve.** Respuestas correctas de los listados `core_course_get_enrolled_courses_by_timeline_classification`,
+`core_enrol_get_users_courses`, `core_course_get_contents`,
+`core_course_get_courses_by_field` y `mod_assign_get_assignments`, 45 s de TTL,
+máximo 32 entradas, 32 MiB en total y 8 MiB por entrada, solo en memoria. No se
+cachean: `core_webservice_get_site_info` (auth_status y setup deben ver un token
+muerto al instante), el estado de entrega (cambia al entregar), los errores de
+cualquier tipo, las descargas ni la conversión de cookie en token. La clave es un
+SHA-256 de token+función+parámetros: el token nunca aparece en claro en la
+clave ni en logs, y cambiar de token cambia de clave.
+
+## Privacidad y minimización de datos
+
+Este programa solo habla con AulaGlobal (y, para la comprobación diaria de
+versiones, con GitHub, sin datos del usuario ni del curso). Lo que devuelven las
+herramientas MCP se entrega al asistente conectado, que puede enviarlo a su
+proveedor de IA según sus condiciones; ni este programa ni sus restricciones
+controlan eso. Las restricciones de carpeta (os.Root, rutas relativas) solo se
+aplican a las herramientas de AulaGlobal MCP: un asistente con acceso propio al
+sistema de archivos tiene los permisos que él mismo se conceda. `setup` muestra
+este aviso antes de conectar asistentes.
+
+Minimización: `auth_status` no devuelve el nombre completo ni el ID de usuario
+(tipo `AuthOutput` propio en `internal/mcpserver`, separado de `aulaglobal.Auth`,
+que sí los decodifica para uso local: el saludo de `setup` y el userid del
+respaldo de matrículas en Moodle antiguo). Ninguna otra herramienta devuelve datos
+de la cuenta; las notas/calificaciones solo salen si se pide
+`include_submission_status`. El servidor MCP no define `instructions`, por lo que
+no se añade texto de privacidad al prompt del asistente.
+
+## Avisos de terceros
+
+`THIRD_PARTY_NOTICES.md` (raíz; incluido en cada archivo de release y en
+`/licenses` de la imagen Docker) contiene la licencia MIT de AGDownloader (partes
+en las que se basa este proyecto), la de la biblioteca estándar de Go y el texto
+completo de la licencia de cada módulo Go enlazado en el binario de las seis
+plataformas. Se regenera con Docker (sin instalar nada en el host):
+
+```sh
+scripts/gen-third-party-notices.sh
+```
+
+El generador (`scripts/gen-notices`) lista los módulos con `go list -deps` para
+linux, darwin y windows en amd64 y arm64, lee los LICENSE del caché de módulos y
+comprueba que cada uno contiene el texto esperado para su SPDX; un módulo nuevo
+sin SPDX registrado en `spdxOf` detiene la ejecución para que alguien lea su
+licencia. La sección de AGDownloader se edita a mano en
+`scripts/gen-notices/preamble.md`. El test `scripts/gen-notices` (parte de `go
+test ./...`, solo en Linux; el resultado no depende del sistema operativo) falla
+si un módulo compilado falta, sobra o cambió de versión respecto al archivo.
+Verificación cruzada puntual: `go-licenses report` coincide con los SPDX.
 
 ## Caducidad y futura renovación
 
@@ -619,7 +712,7 @@ release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt 
 Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versión.
 No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
 firma de sistema operativo (la firma de checksums.txt solo protege la actualización): quedan pendientes Authenticode, firma/notarización de Apple y provenance.
-El proyecto usa licencia MIT (archivo LICENSE, incluido en cada archivo de release).
+El proyecto usa licencia MIT (archivo LICENSE). Cada archivo de release y la imagen Docker incluyen también THIRD_PARTY_NOTICES.md (ver Avisos de terceros).
 
 
 
