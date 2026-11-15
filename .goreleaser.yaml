@@ -17,6 +17,7 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_{{ if eq .Os "darwin" }}{{ if eq .Arch "arm64" }}apple-silicon{{ else }}intel{{ end }}{{ else }}{{ if eq .Arch "amd64" }}x64{{ else }}arm64{{ end }}{{ end }}
     files:
       - README.md
+      - README.en.md
       - LICENSE
       - docs/TECNICO.md
 checksum:

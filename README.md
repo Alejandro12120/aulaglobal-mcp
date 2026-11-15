@@ -4,7 +4,9 @@
 
 **Conecta tu asistente de IA con AulaGlobal (UC3M)**
 
-[Instalación](#instalación) · [Uso](#uso) · [Actualización](#actualización) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Documentación técnica](docs/TECNICO.md)
+Español · [English](README.en.md)
+
+[Instalación](#instalación) · [Uso](#uso) · [Actualización](#actualización) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Desinstalación](#desinstalación)
 
 </div>
 
@@ -15,14 +17,14 @@ AulaGlobal MCP permite que tu asistente de IA consulte tus asignaturas de
 ellos. Funciona con Claude Code, Claude Desktop, Codex, ChatGPT (aplicación de
 escritorio), OpenCode y Antigravity.
 
-| Función | Descripción |
+| Función | Qué hace |
 |---|---|
-| Asignaturas | Lista las asignaturas actuales, pasadas o futuras. |
+| Asignaturas | Lista tus asignaturas actuales, pasadas o futuras. |
 | Materiales | Muestra y descarga los archivos de cada asignatura, organizados por tema. |
 | Lectura y búsqueda | Lee PDF, Word, PowerPoint y texto, y busca en todo lo descargado. |
-| Entregas | Muestra fechas, enunciados y, si se solicita, el estado y la calificación. |
+| Entregas | Muestra fechas, enunciados y, si lo pides, el estado y la calificación. |
 
-Algunos ejemplos de peticiones:
+Algunos ejemplos de lo que puedes pedir:
 
 > ¿Qué entregas tengo pendientes esta semana?
 >
@@ -39,16 +41,79 @@ Algunos ejemplos de peticiones:
 
 ## Instalación
 
-### Requisitos
+Necesitas un ordenador con Windows, macOS o Linux y uno de los asistentes
+compatibles. No hace falta instalar nada más.
 
-- Windows, macOS o Linux.
-- Uno de los asistentes compatibles indicados arriba.
+Hay dos formas de instalarlo. La **instalación automática** es la más sencilla y
+se recomienda en la mayoría de los casos.
 
-No es necesario instalar Go, Docker ni WSL.
+### Opción A: instalación automática (recomendada)
 
-### 1. Descarga
+Abre una terminal, copia el comando de tu sistema, pégalo y pulsa **Enter**.
 
-Descarga el archivo correspondiente a tu equipo desde la
+**macOS y Linux** (aplicación **Terminal**):
+
+```sh
+curl -fsSL https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.sh | sh
+```
+
+**Windows** (busca **PowerShell** en el menú Inicio y ábrelo):
+
+```powershell
+irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
+```
+
+El instalador hace lo siguiente, pidiendo confirmación cuando hace falta:
+
+1. Detecta tu sistema y descarga la última versión.
+2. Comprueba la firma digital y la integridad de la descarga. Si algo no
+   coincide, se detiene sin instalar nada.
+3. Te pregunta dónde instalar el programa y te propone una carpeta. Pulsa
+   **Enter** para aceptarla:
+   - macOS y Linux: `~/.local/bin`
+   - Windows: `%LOCALAPPDATA%\Programs\aulaglobal-mcp`
+4. Te ofrece añadir esa carpeta al PATH, para que puedas usar el comando
+   `aulaglobal-mcp` desde cualquier terminal.
+5. Abre el [programa de configuración](#configuración), que conecta tu cuenta y
+   tus asistentes.
+
+Si el programa ya estaba instalado, el instalador lo detecta y lo sustituye por
+la versión nueva.
+
+<details>
+<summary><strong>Opciones avanzadas</strong></summary>
+
+El instalador acepta estas variables de entorno:
+
+| Variable | Efecto |
+|---|---|
+| `AULAGLOBAL_VERSION=v0.1.5` | Instala esa versión en lugar de la última. |
+| `AULAGLOBAL_INSTALL_DIR=/ruta` | Instala en esa carpeta sin preguntar. |
+| `AULAGLOBAL_YES=1` | Acepta todas las opciones propuestas sin preguntar. |
+
+Ejemplo en macOS y Linux:
+
+```sh
+curl -fsSL https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.sh | AULAGLOBAL_VERSION=v0.1.5 sh
+```
+
+Ejemplo en Windows:
+
+```powershell
+$env:AULAGLOBAL_VERSION = "v0.1.5"; irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
+```
+
+La firma se comprueba con `ssh-keygen`, que viene incluido en macOS, en la
+mayoría de distribuciones Linux y en Windows 10 y 11. Si tu equipo no lo tiene,
+el instalador explica cómo añadirlo; también puedes usar la instalación manual.
+
+</details>
+
+### Opción B: instalación manual
+
+Si prefieres no ejecutar un script, puedes descargar el programa tú mismo.
+
+**1. Descarga** el archivo de tu equipo desde la
 [página de versiones](https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest):
 
 | Equipo | Archivo |
@@ -62,30 +127,29 @@ Descarga el archivo correspondiente a tu equipo desde la
 
 En Mac, el tipo de procesador aparece en **menú Apple → Acerca de este Mac**.
 
-Descomprime el archivo y guarda el programa en una carpeta definitiva: la
-configuración de los asistentes apuntará a esa ubicación.
+**2. Descomprime** el archivo y guarda el programa en una carpeta donde vaya a
+quedarse; los asistentes buscarán el programa en esa ubicación.
 
-### 2. Configuración
-
-Abre una terminal en la carpeta del programa y ejecuta:
+**3. Abre una terminal en esa carpeta** y ejecuta el programa de configuración:
 
 | Sistema | Comando |
 |---|---|
 | Windows (PowerShell) | `.\aulaglobal-mcp.exe setup` |
 | macOS y Linux | `./aulaglobal-mcp setup` |
 
-En Windows también puede abrirse con doble clic. En macOS y Linux, si aparece un
+En Windows también puedes abrirlo con doble clic. En macOS y Linux, si aparece un
 error de permisos, ejecuta antes `chmod +x aulaglobal-mcp`.
 
 <details>
-<summary><strong>Aviso del sistema al abrir el programa</strong></summary>
+<summary><strong>Si el sistema muestra un aviso al abrir el programa</strong></summary>
 
-Los ejecutables aún no están firmados digitalmente, por lo que el sistema puede
-mostrar un aviso la primera vez. Descarga el programa solo desde la página
-oficial del proyecto.
+El programa todavía no está firmado por Apple ni por Microsoft, así que al
+descargarlo con el navegador el sistema puede mostrar un aviso la primera vez.
+Descárgalo solo desde la página oficial del proyecto. La instalación automática
+no muestra este aviso.
 
 - **Windows:** selecciona **Más información → Ejecutar de todas formas**.
-- **macOS:** haz clic derecho sobre el programa y elige **Abrir**. Si continúa
+- **macOS:** haz clic derecho sobre el programa y elige **Abrir**. Si sigue
   bloqueado, ejecuta en la carpeta del programa:
 
   ```sh
@@ -94,13 +158,17 @@ oficial del proyecto.
 
 </details>
 
-El asistente de configuración realiza cuatro pasos:
+### Configuración
+
+El programa de configuración se abre solo al terminar la instalación automática.
+Puedes volver a abrirlo en cualquier momento con `aulaglobal-mcp setup`. Tiene
+cuatro pasos:
 
 1. **Carpetas.** Indica dónde se guardarán la clave de acceso y los materiales.
-2. **Cuenta de AulaGlobal.** Solicita la cookie de sesión del navegador y la
-   convierte en una clave de acceso. Las instrucciones se muestran en pantalla.
-3. **Comprobación.** Verifica la clave y muestra el nombre del titular de la cuenta.
-4. **Asistentes.** Detecta los asistentes instalados y los configura (ver abajo).
+2. **Cuenta de AulaGlobal.** Te pide la cookie de sesión del navegador y la
+   convierte en una clave de acceso. Las instrucciones aparecen en pantalla.
+3. **Comprobación.** Verifica la clave y muestra el nombre de la cuenta.
+4. **Asistentes.** Detecta los asistentes instalados y te ofrece conectarlos.
 
 <details>
 <summary><strong>Cómo obtener la cookie de sesión</strong> (el programa de configuración te guía en este paso; estas instrucciones son solo de referencia)</summary>
@@ -108,17 +176,17 @@ El asistente de configuración realiza cuatro pasos:
 1. Inicia sesión en <https://aulaglobal.uc3m.es>.
 2. Abre las herramientas de desarrollador con **F12** (en Mac,
    **Cmd + Option + I**) y selecciona la pestaña **Consola**.
-3. Pega la siguiente línea y pulsa **Enter**. El valor se copia al portapapeles:
+3. Pega esta línea y pulsa **Enter**. El valor se copia al portapapeles:
 
    ```js
    copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
    ```
 
-4. Vuelve a la terminal y pégalo cuando se solicite. Por seguridad, el texto no
-   se muestra mientras se escribe.
+4. Vuelve a la terminal y pégalo cuando se te pida. Por seguridad, el texto no
+   se ve mientras lo pegas.
 
-Si Chrome impide pegar en la consola, escribe `allow pasting` y pulsa Enter.
-Si la línea no funciona, el valor también puede copiarse desde
+Si Chrome no te deja pegar en la consola, escribe `allow pasting` y pulsa Enter.
+Si la línea no funciona, también puedes copiar el valor desde
 **Aplicación → Cookies → https://aulaglobal.uc3m.es → `MoodleSessionag`**
 (en Firefox, **Almacenamiento → Cookies**).
 
@@ -126,45 +194,44 @@ Si la línea no funciona, el valor también puede copiarse desde
 
 > [!WARNING]
 > La cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
-> compartas ni la pegues en el chat del asistente: introdúcela únicamente en el
+> compartas ni la pegues en el chat del asistente: introdúcela solo en el
 > programa de configuración.
 
-### 3. Conexión con los asistentes
+En el paso 4, el programa revisa cada asistente que encuentra:
 
-Durante el paso 4, el programa muestra los asistentes encontrados y comprueba la
-configuración de cada uno:
-
-| Situación | Acción |
+| Situación | Qué hace |
 |---|---|
-| AulaGlobal no está configurado | Pregunta si se debe añadir. |
-| Ya está configurado correctamente | No realiza cambios. |
-| Existe una configuración distinta | Muestra la diferencia y pregunta si se debe actualizar. |
-| El archivo no puede modificarse con seguridad | Muestra las instrucciones para hacerlo manualmente. |
+| AulaGlobal no está conectado | Pregunta si quieres añadirlo. |
+| Ya está conectado correctamente | No cambia nada. |
+| Hay una configuración distinta | Muestra la diferencia y pregunta si quieres actualizarla. |
+| El archivo no se puede modificar con seguridad | Muestra cómo hacerlo a mano. |
 
-Antes de modificar un archivo se guarda una copia con extensión `.bak`. Al
-finalizar se muestra un resumen por asistente y, para los que han cambiado, cómo
-recargarlos.
+Antes de modificar un archivo, guarda una copia con extensión `.bak`. Al
+terminar, muestra un resumen y explica cómo recargar cada asistente.
 
-Para comprobar la conexión, escribe `/mcp` en el asistente: debe aparecer
+Para comprobar que funciona, escribe `/mcp` en el asistente: debería aparecer
 `aulaglobal`.
 
-**Opciones adicionales**
+<details>
+<summary><strong>Opciones del programa de configuración</strong></summary>
 
 | Opción | Efecto |
 |---|---|
 | `--only-clients` | Configura solo los asistentes, sin repetir los pasos de la cuenta. |
-| `--clients claude-code,codex` | Limita la configuración a los asistentes indicados. |
+| `--clients claude-code,codex` | Configura solo los asistentes indicados. |
 | `--yes` | Acepta los cambios propuestos sin preguntar. |
-| `--help` | Muestra la ayuda y los identificadores de asistentes disponibles. |
+| `--help` | Muestra la ayuda y los nombres de los asistentes disponibles. |
 
-Ejemplo: `./aulaglobal-mcp setup --only-clients --clients claude-code --yes`
+Ejemplo: `aulaglobal-mcp setup --only-clients --clients claude-code --yes`
+
+</details>
 
 ---
 
 ## Uso
 
-Basta con hacer las peticiones en lenguaje natural. Para comprobar que todo
-funciona:
+Pídele las cosas a tu asistente con tus propias palabras. Para comprobar que todo
+funciona, prueba con:
 
 1. «Comprueba mi conexión con AulaGlobal.»
 2. «¿Qué asignaturas tengo este cuatrimestre?»
@@ -185,42 +252,42 @@ AulaGlobal/
             └── enunciado.pdf
 ```
 
-En descargas posteriores solo se obtienen los archivos nuevos o modificados.
+Cuando vuelvas a descargar, solo se bajan los archivos nuevos o modificados.
 
 ---
 
 ## Actualización
 
-Para instalar la última versión publicada, abre una terminal en la carpeta del
-programa y ejecuta:
+Para instalar la última versión, abre una terminal y ejecuta:
 
-| Sistema | Comando |
-|---|---|
-| Windows (PowerShell) | `.\aulaglobal-mcp.exe update` |
-| macOS y Linux | `./aulaglobal-mcp update` |
+```sh
+aulaglobal-mcp update
+```
 
-El programa indica la versión instalada y la disponible, pide confirmación y se
-sustituye a sí mismo. Con la opción `--check` solo comprueba si hay una versión
-nueva, sin instalar nada. Después de actualizar, reinicia el asistente.
+Si instalaste el programa a mano y no está en el PATH, ejecútalo desde su carpeta
+(`./aulaglobal-mcp update` o `.\aulaglobal-mcp.exe update` en Windows).
 
-Antes de instalar, el programa verifica la firma digital de la versión y la
-integridad del archivo descargado; si alguna comprobación falla, no cambia nada.
-Las compilaciones propias (versión `dev`) solo se actualizan con `--force`.
+El programa muestra la versión instalada y la nueva, te pide confirmación y se
+actualiza solo. Antes de instalar, comprueba la firma digital y la integridad de
+la descarga; si algo falla, no cambia nada. Cuando termine, reinicia el
+asistente.
 
-Al iniciarse, el programa consulta como máximo una vez al día si existe una
-versión nueva, y en ese caso el asistente puede sugerirte actualizar. Para
-desactivar esta consulta, define la variable de entorno
-`AULAGLOBAL_UPDATE_CHECK=0` en la configuración del servidor. La actualización
-nunca la realiza el asistente: solo la ejecutas tú desde la terminal.
+- `aulaglobal-mcp update --check` solo comprueba si hay una versión nueva, sin
+  instalarla.
+- Una vez al día como máximo, el programa comprueba si hay una versión nueva; si
+  la hay, el asistente te lo dirá. El asistente nunca actualiza por su cuenta:
+  la actualización siempre la haces tú desde la terminal.
+- Para desactivar esa comprobación, añade la variable de entorno
+  `AULAGLOBAL_UPDATE_CHECK=0` a la configuración del servidor en tu asistente.
 
 ---
 
-## Configuración manual
+## Configuración manual de los asistentes
 
-Solo es necesaria si el programa de configuración no detecta tu asistente. En los
-ejemplos, sustituye `/ruta/al/aulaglobal-mcp` por la ruta completa del programa
-(en Windows termina en `aulaglobal-mcp.exe` y pueden usarse barras `/`, por
-ejemplo `C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
+Solo hace falta si el programa de configuración no detecta tu asistente. En los
+ejemplos, sustituye `/ruta/al/aulaglobal-mcp` por la ruta completa del programa.
+En Windows termina en `aulaglobal-mcp.exe` y puedes usar barras `/`, por
+ejemplo `C:/Users/Ana/AppData/Local/Programs/aulaglobal-mcp/aulaglobal-mcp.exe`.
 
 <details>
 <summary><strong>Claude Code</strong></summary>
@@ -229,8 +296,7 @@ ejemplo `C:/Users/Ana/Programas/aulaglobal-mcp.exe`).
 claude mcp add --scope user aulaglobal -- "/ruta/al/aulaglobal-mcp" --transport stdio
 ```
 
-Como alternativa, para un único proyecto, crea un archivo `.mcp.json` en su
-carpeta:
+Si solo lo quieres para un proyecto, crea un archivo `.mcp.json` en su carpeta:
 
 ```json
 {
@@ -249,8 +315,8 @@ carpeta:
 <summary><strong>Claude Desktop</strong></summary>
 
 Abre **Ajustes → Desarrollador → Editar configuración** y añade el bloque
-`aulaglobal` del ejemplo de Claude Code dentro de `mcpServers`, conservando el
-resto. Ubicación del archivo:
+`aulaglobal` del ejemplo de Claude Code dentro de `mcpServers`, sin borrar lo
+demás. El archivo está en:
 
 | Sistema | Ruta |
 |---|---|
@@ -265,7 +331,7 @@ Reinicia la aplicación después de guardar.
 <details>
 <summary><strong>Codex y ChatGPT (aplicación de escritorio)</strong></summary>
 
-Ambos comparten la configuración. Añade lo siguiente a `~/.codex/config.toml`
+Los dos usan la misma configuración. Añade esto a `~/.codex/config.toml`
 (en Windows, `%USERPROFILE%\.codex\config.toml`):
 
 ```toml
@@ -274,7 +340,7 @@ command = "/ruta/al/aulaglobal-mcp"
 args = ["--transport", "stdio"]
 ```
 
-Reinicia la aplicación. Esta configuración no se aplica a ChatGPT en el
+Reinicia la aplicación. Esta configuración no sirve para ChatGPT en el
 navegador ([más información](docs/TECNICO.md#chatgpt-en-la-web)).
 
 </details>
@@ -282,15 +348,15 @@ navegador ([más información](docs/TECNICO.md#chatgpt-en-la-web)).
 <details>
 <summary><strong>OpenCode</strong></summary>
 
-Si la versión instalada lo admite:
+Si tu versión lo admite:
 
 ```sh
 opencode mcp add aulaglobal --global -- /ruta/al/aulaglobal-mcp --transport stdio
 ```
 
-En caso contrario, edita `~/.config/opencode/opencode.json` (o `opencode.jsonc`;
-la ruta es la misma en Windows y macOS) y añade la entrada dentro de
-`mcp.servers`, conservando los demás servidores:
+Si no, edita `~/.config/opencode/opencode.json` (o `opencode.jsonc`; la ruta es
+la misma en Windows y macOS) y añade la entrada dentro de `mcp.servers`, sin
+borrar los demás servidores:
 
 ```json
 {
@@ -328,41 +394,63 @@ config** y añade la entrada dentro de `mcpServers`:
 }
 ```
 
-El archivo se encuentra en `~/.gemini/config/mcp_config.json` (en Windows,
+El archivo está en `~/.gemini/config/mcp_config.json` (en Windows,
 `%USERPROFILE%\.gemini\config\mcp_config.json`). Para aplicar el cambio, usa
 **Restart** en **Customizations → Installed → MCP Servers**, o recarga desde
 `/mcp` en el terminal.
 
 </details>
 
-Si en la configuración elegiste carpetas distintas de las predeterminadas, utiliza
-el bloque que muestra el programa al finalizar, ya que incluye esas rutas.
+Si en la configuración elegiste carpetas distintas de las propuestas, usa el
+bloque que muestra el programa al terminar, porque ya incluye esas rutas.
 
 ---
 
 ## Problemas frecuentes
 
-| Mensaje o síntoma | Solución |
+| Mensaje o síntoma | Qué hacer |
 |---|---|
-| «La sesión de AulaGlobal ha caducado…» | El token ha caducado (Moodle los caduca periódicamente). Inicia sesión en AulaGlobal en el navegador y ejecuta de nuevo `aulaglobal-mcp setup`: detecta el token caducado y te pide una cookie nueva. No hace falta reiniciar el asistente. |
-| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» | No es una caducidad: Moodle no permite esa función con tu cuenta o servicio. No hace falta renovar el token. |
-| `cannot read token file` | Ejecuta de nuevo `setup`. Si usaste otras carpetas, revisa la configuración manual. |
-| El asistente no muestra `aulaglobal` | Reinicia el asistente y, si persiste, ejecuta `setup --only-clients`. |
-| No se puede obtener la clave | Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso 2 con una cookie nueva. |
-| Un PDF no se puede leer | Los PDF escaneados no contienen texto. Los muy extensos pueden tardar: repite la petición pasados unos segundos. |
+| `aulaglobal-mcp: command not found` o «no se reconoce como comando» | Abre una terminal nueva para que se aplique el PATH. Si sigue sin funcionar, ejecuta el programa con su ruta completa. |
+| El instalador dice que falta `ssh-keygen` | Sigue las instrucciones que muestra o usa la [instalación manual](#opción-b-instalación-manual). En Windows, se activa en **Configuración → Aplicaciones → Características opcionales → Cliente OpenSSH**. |
+| «La sesión de AulaGlobal ha caducado…» | AulaGlobal caduca las claves de acceso cada cierto tiempo. Inicia sesión en AulaGlobal en el navegador y ejecuta `aulaglobal-mcp setup`: te pedirá una cookie nueva. No hace falta reiniciar el asistente. |
+| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» | No es una caducidad: AulaGlobal no permite esa función con tu cuenta. No hace falta renovar nada. |
+| `cannot read token file` | Ejecuta `aulaglobal-mcp setup` de nuevo. Si usaste otras carpetas, revisa la configuración manual. |
+| El asistente no muestra `aulaglobal` | Reinicia el asistente. Si sigue sin aparecer, ejecuta `aulaglobal-mcp setup --only-clients`. |
+| No se puede obtener la clave de acceso | Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso con una cookie nueva. |
+| Un PDF no se puede leer | Los PDF escaneados no contienen texto. Los muy largos pueden tardar: repite la petición unos segundos después. |
 
 ---
 
 ## Seguridad y privacidad
 
-- **Tu contraseña no se utiliza.** El acceso se obtiene a partir de la sesión del
+- **No se usa tu contraseña.** El acceso se obtiene a partir de tu sesión del
   navegador.
-- **La clave de acceso permanece en tu equipo**, en la carpeta de configuración
+- **La clave de acceso se queda en tu equipo**, en la carpeta de configuración
   de tu usuario y con permisos restringidos. El asistente de IA nunca la recibe.
-- **Acceso limitado a tus archivos.** Las herramientas que usa el asistente solo
-  pueden leer y escribir dentro de la carpeta `AulaGlobal`.
-- **Sin intermediarios.** El programa se comunica directamente con AulaGlobal
-  desde tu equipo.
+- **Acceso limitado a tus archivos.** El asistente solo puede leer y escribir
+  dentro de la carpeta `AulaGlobal`.
+- **Sin intermediarios.** El programa se conecta directamente a AulaGlobal desde
+  tu equipo.
+- **Descargas verificadas.** El instalador y el comando `update` comprueban la
+  firma digital de cada versión antes de instalarla.
+
+---
+
+## Desinstalación
+
+1. Desconecta el programa de tus asistentes. En Claude Code:
+   `claude mcp remove aulaglobal --scope user`. En los demás, borra la entrada
+   `aulaglobal` de su configuración (ver
+   [Configuración manual de los asistentes](#configuración-manual-de-los-asistentes)).
+2. Borra el programa de la carpeta donde lo instalaste.
+3. Borra la clave de acceso:
+   - Windows: `%APPDATA%\aulaglobal-mcp`
+   - macOS: `~/Library/Application Support/aulaglobal-mcp`
+   - Linux: `~/.config/aulaglobal-mcp`
+4. Si el instalador añadió la carpeta al PATH, quita la línea marcada con
+   `# aulaglobal-mcp` de tu perfil de terminal (`~/.zshrc`, `~/.bashrc` o
+   similar). En Windows, quita la carpeta de la variable PATH de tu usuario.
+5. Si ya no quieres los materiales descargados, borra la carpeta `AulaGlobal`.
 
 ---
 
@@ -371,9 +459,9 @@ el bloque que muestra el programa al finalizar, ya que incluye esas rutas.
 Este proyecto parte de
 [AGDownloader](https://github.com/Astrak00/AGDownloader), de
 [Eduardo Alarcón (Astrak00)](https://github.com/Astrak00), un descargador de
-AulaGlobal para terminal publicado con licencia MIT. De él proceden el método de
-obtención del acceso a partir de la sesión del navegador, la línea para la
-consola y el tratamiento de los nombres de las asignaturas.
+AulaGlobal para terminal publicado con licencia MIT. De él vienen el método para
+obtener el acceso a partir de la sesión del navegador, la línea para la consola y
+el tratamiento de los nombres de las asignaturas.
 
 ## Licencia
 
@@ -382,7 +470,6 @@ Distribuido bajo la [licencia MIT](LICENSE). El software se proporciona
 
 ## Documentación técnica
 
-El documento [docs/TECNICO.md](docs/TECNICO.md) describe el modo servidor HTTP
-con Docker, las opciones de configuración, el modelo de seguridad, la
-arquitectura del programa de configuración y el proceso de desarrollo y
-publicación.
+[docs/TECNICO.md](docs/TECNICO.md) explica el modo servidor HTTP con Docker, las
+opciones de configuración, el modelo de seguridad, los instaladores, las
+actualizaciones y el proceso de desarrollo y publicación.
