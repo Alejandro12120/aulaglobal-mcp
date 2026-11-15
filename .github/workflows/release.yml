@@ -23,7 +23,19 @@ jobs:
       - if: runner.os == 'Windows'
         run: go test ./...
       - if: runner.os == 'Linux'
-        run: shellcheck obtener-token.sh
+        run: |
+          shellcheck -s sh install.sh
+          shellcheck scripts/test-install.sh scripts/test-install/inner.sh
+      # install.ps1 se sirve con "irm | iex": se comprueba con el analizador de
+      # Windows PowerShell 5.1 (el que usa la mayoría de usuarios) y con PSScriptAnalyzer.
+      - name: Lint install.ps1 (PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/lint-install-ps1.ps1
+      - name: Lint install.ps1 (PSScriptAnalyzer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/lint-install-ps1.ps1 -Analyze
   release:
     needs: test
     runs-on: ubuntu-latest
