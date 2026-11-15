@@ -480,6 +480,30 @@ Al usar este programa aceptas lo siguiente:
 
 ## Desinstalación
 
+Abre una terminal y ejecuta:
+
+```sh
+aulaglobal-mcp uninstall
+```
+
+El programa te pregunta qué quieres hacer:
+
+| Opción | Qué hace |
+|---|---|
+| 1. Desconectar AulaGlobal de algunos asistentes | Te deja elegir de qué asistentes quitarlo. El programa sigue instalado. |
+| 2. Cerrar la sesión de AulaGlobal | Borra la clave de acceso de tu equipo. Para volver a usarlo, ejecuta `aulaglobal-mcp setup`. |
+| 3. Desinstalar todo | Desconecta todos los asistentes y borra la clave, el programa y la línea que el instalador añadió al PATH. |
+
+Antes de cambiar nada, muestra la lista exacta de lo que va a hacer y te pide
+confirmación. Tus materiales descargados no se borran salvo que lo indiques: en
+la opción 3 se pregunta aparte, y la respuesta por defecto es «No».
+
+Con `aulaglobal-mcp uninstall --dry-run` puedes ver lo que se haría sin cambiar
+nada. Las demás opciones se muestran con `aulaglobal-mcp uninstall --help`.
+
+<details>
+<summary><strong>Desinstalar a mano</strong> (por ejemplo, si ya borraste el programa)</summary>
+
 1. Desconecta el programa de tus asistentes. En Claude Code:
    `claude mcp remove aulaglobal --scope user`. En los demás, borra la entrada
    `aulaglobal` de su configuración (ver
@@ -493,6 +517,8 @@ Al usar este programa aceptas lo siguiente:
    `# aulaglobal-mcp` de tu perfil de terminal (`~/.zshrc`, `~/.bashrc` o
    similar). En Windows, quita la carpeta de la variable PATH de tu usuario.
 5. Si ya no quieres los materiales descargados, borra la carpeta `AulaGlobal`.
+
+</details>
 
 ---
 
