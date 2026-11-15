@@ -58,12 +58,54 @@ type SearchOutput struct {
 	Matches []store.Match `json:"matches"`
 }
 
-func New(api *aulaglobal.Client, st *store.Store) *mcp.Server {
+// Updates reports a newer release found by the background check. Both methods
+// must return immediately; implementations are read from tool calls.
+type Updates interface {
+	// Available returns the newer version ("vX.Y.Z"), or "" when none is known.
+	Available() string
+	// TakeNotice returns the one-time notice text, or "" when there is nothing to say.
+	TakeNotice() string
+}
+
+// AuthOutput is the auth_status result.
+type AuthOutput struct {
+	aulaglobal.Auth
+	UpdateAvailable string `json:"update_available,omitempty" jsonschema:"Newer aulaglobal-mcp version available, when known"`
+}
+
+// noticeMiddleware appends the one-time update notice to the first successful
+// tool result. It never waits: if the check has not finished, nothing is added.
+func noticeMiddleware(u Updates) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			if err != nil || method != "tools/call" {
+				return res, err
+			}
+			if r, ok := res.(*mcp.CallToolResult); ok && r != nil && !r.IsError {
+				if text := u.TakeNotice(); text != "" {
+					r.Content = append(r.Content, &mcp.TextContent{Text: text})
+				}
+			}
+			return res, err
+		}
+	}
+}
+
+// New builds the MCP server. updates may be nil to disable update notices.
+func New(api *aulaglobal.Client, st *store.Store, updates Updates) *mcp.Server {
 	s := &Service{API: api, Store: st, files: map[string]aulaglobal.File{}}
 	server := mcp.NewServer(&mcp.Implementation{Name: "aulaglobal-mcp", Version: "0.1.0"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "auth_status", Description: "Validate configured Moodle mobile token and report user/site and known expiry. Moodle site policy may expire tokens (upstream default 12 weeks); when the token is dead the error says so and the user must run `aulaglobal-mcp setup` in a terminal (no assistant restart needed). Never accepts credentials."}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, aulaglobal.Auth, error) {
+	if updates != nil {
+		server.AddReceivingMiddleware(noticeMiddleware(updates))
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: "auth_status", Description: "Validate configured Moodle mobile token and report user/site and known expiry. Moodle site policy may expire tokens (upstream default 12 weeks); when the token is dead the error says so and the user must run `aulaglobal-mcp setup` in a terminal (no assistant restart needed). Never accepts credentials. update_available, when present, is a newer aulaglobal-mcp version the user can install with `aulaglobal-mcp update`."}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, AuthOutput, error) {
 		a, e := api.Auth(ctx)
-		return nil, a, e
+		out := AuthOutput{Auth: a}
+		if updates != nil {
+			out.UpdateAvailable = updates.Available()
+		}
+		return nil, out, e
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "list_courses", Description: "List enrolled courses by timeline. On older Moodle fallback returns all enrollments. Use IDs for list_course_files."}, func(ctx context.Context, _ *mcp.CallToolRequest, in CoursesInput) (*mcp.CallToolResult, CoursesOutput, error) {
 		a, e := api.Courses(ctx, in.Classification, in.Language)

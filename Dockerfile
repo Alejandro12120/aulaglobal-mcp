@@ -9,7 +9,7 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /server /aulaglobal-mcp
 COPY --from=build --chown=65532:65532 /data /data
 USER 65532:65532
-ENV AULAGLOBAL_DOWNLOAD_DIR=/data MCP_TRANSPORT=http MCP_ADDR=0.0.0.0:8080
+ENV AULAGLOBAL_DOWNLOAD_DIR=/data MCP_TRANSPORT=http MCP_ADDR=0.0.0.0:8080 AULAGLOBAL_IN_CONTAINER=1
 VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["/aulaglobal-mcp"]

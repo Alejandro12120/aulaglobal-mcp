@@ -37,3 +37,12 @@ func OpenCode(home, xdg string) string {
 func Antigravity(home string) string {
 	return filepath.Join(home, ".gemini", "config", "mcp_config.json")
 }
+
+// UpdateCache is where the background update check remembers its last result.
+func UpdateCache() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "aulaglobal-mcp", "update-check.json"), nil
+}

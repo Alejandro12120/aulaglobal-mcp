@@ -21,6 +21,23 @@ archives:
       - docs/TECNICO.md
 checksum:
   name_template: checksums.txt
+# Signs checksums.txt with the maintainer's OpenSSH ed25519 key; the binary
+# verifies this signature (internal/selfupdate) before installing an update.
+# ssh-keygen writes <file>.sig by itself, which is exactly `signature` below.
+# Local snapshots without the key: goreleaser release --snapshot --clean --skip=sign
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: ssh-keygen
+    args:
+      - -Y
+      - sign
+      - -f
+      - "{{ .Env.UPDATE_SIGNING_KEY_FILE }}"
+      - -n
+      - aulaglobal-mcp-update
+      - "${artifact}"
+    signature: "${artifact}.sig"
 changelog:
   sort: asc
 release:
