@@ -6,7 +6,7 @@
 
 [Español](README.md) · English
 
-[Installation](#installation) · [Usage](#usage) · [Updating](#updating) · [Troubleshooting](#troubleshooting) · [Security and privacy](#security-and-privacy) · [Uninstalling](#uninstalling)
+[Installation](#installation) · [Usage](#usage) · [Updating](#updating) · [Troubleshooting](#troubleshooting) · [Security and privacy](#security-and-privacy) · [Terms of use](#terms-of-use) · [Uninstalling](#uninstalling)
 
 </div>
 
@@ -428,15 +428,54 @@ appear, with a translation where useful.
 
 ## Security and privacy
 
+**What this program does with your data**
+
 - **Your password is not used.** Access is obtained from your browser session.
 - **The access key stays on your computer**, in your user's configuration
   folder with restricted permissions. The AI assistant never receives it.
-- **Limited access to your files.** The assistant can only read and write inside
-  the `AulaGlobal` folder.
 - **No intermediaries.** The program connects directly to AulaGlobal from your
-  computer.
+  computer. The project's author does not receive your documents, your
+  credentials or any other data. The only other connection is the daily check
+  for new versions on GitHub, which you can turn off (see
+  [Updating](#updating)).
+- **Minimal personal data.** When checking the connection, the assistant does
+  not receive your name or user ID. Grades and submission status are only
+  requested if you ask for them.
+- **Light use of AulaGlobal.** The program limits the number of requests per
+  second, reuses recent responses for a few seconds and, if AulaGlobal asks it
+  to wait, pauses for the time requested.
 - **Verified downloads.** The installer and the `update` command check each
   version's digital signature before installing it.
+
+**What the assistant does with the results**
+
+- **The assistant receives whatever the tools return**: course lists, the text
+  of your notes, assignment instructions and so on. Depending on the assistant
+  you use, that content is sent to its AI provider (Anthropic, OpenAI,
+  Google…) and handled under its terms and privacy policy. Review them before
+  using it with material you do not want to share.
+- **Folder limits only apply to this program.** AulaGlobal MCP's tools can only
+  read and write inside the `AulaGlobal` folder, but the assistant may have its
+  own permissions (for example, to read other files or run commands), which
+  depend on how you have configured it.
+
+---
+
+## Terms of use
+
+By using this program you agree to the following:
+
+1. **Independent project.** It is not developed, endorsed or supervised by
+   Universidad Carlos III de Madrid.
+2. **Authorised access only.** Use it only with your own AulaGlobal account and
+   for content you already have access to, in line with the university's rules.
+3. **You decide what you share.** You are responsible for checking that you may
+   share the content you ask the assistant to process with the assistant and its
+   AI provider, taking into account the copyright of the materials and any
+   personal data they contain.
+4. **No warranty.** The software is provided as is, without warranty of any
+   kind. To the extent permitted by law, the authors are not liable for any
+   damage arising from its use, as stated in the [licence](LICENSE).
 
 ---
 
@@ -472,6 +511,11 @@ names come from it.
 
 Released under the [MIT licence](LICENSE). The software is provided
 **as is, without warranty of any kind**.
+
+The program includes parts based on AGDownloader and third-party libraries,
+each under its own licence. Their notices and licence texts are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which is also included in every
+release.
 
 ## Technical documentation
 
