@@ -77,6 +77,11 @@ type assistant interface {
 	Apply(clientEnv, desiredEntry, bool) error
 	Manual(desiredEntry) string
 	Reload() string
+	// Find, Remove and ManualRemove serve `uninstall`: they look for the entry
+	// named aulaglobal and remove only that entry, never anything else.
+	Find(clientEnv) link
+	Remove(clientEnv) error
+	ManualRemove(clientEnv) string
 }
 
 // Ordered once, used by selection, help and contract tests.
@@ -249,6 +254,8 @@ type fileAssistant struct {
 	merge            func([]byte, map[string]any, bool) ([]byte, bool, error)
 	toml             bool
 	generate         func(clientEnv, desiredEntry) (map[string]any, error)
+	entryOf          func([]byte) (map[string]any, bool, error)
+	removeFrom       func([]byte) ([]byte, bool, error)
 }
 
 func (a fileAssistant) ID() string              { return a.id }

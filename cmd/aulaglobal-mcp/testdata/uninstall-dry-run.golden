@@ -1,0 +1,20 @@
+
+› Claude Desktop: la entrada «aulaglobal» apunta a «/usr/bin/node», no a este programa. ¿Quitarla igualmente? [s/N]
+› ¿Borrar también la carpeta AulaGlobal con tus materiales (<tmp>/home/AulaGlobal)? [s/N]
+Plan:
+  · Claude Code: ejecutar `claude mcp remove --scope user aulaglobal`
+  · Codex / ChatGPT: quitar la entrada «aulaglobal» de <tmp>/home/.codex/config.toml (copia de seguridad: <tmp>/home/.codex/config.toml.bak)
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.private
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.meta.json
+  · Borrar la carpeta de configuración <tmp>/home/config/aulaglobal-mcp
+  · Borrar la caché de avisos de versión <tmp>/home/cache/aulaglobal-mcp
+  · Quitar de <tmp>/home/.zshrc la línea que añade <tmp>/Programs/aulaglobal-mcp al PATH (copia de seguridad: <tmp>/home/.zshrc.bak)
+  · Quitar de <tmp>/home/.bashrc la línea que añade <tmp>/Programs/aulaglobal-mcp al PATH (copia de seguridad: <tmp>/home/.bashrc.bak)
+  · Borrar la carpeta de apuntes <tmp>/home/AulaGlobal y todo lo que contiene
+  · Borrar el programa <tmp>/Programs/aulaglobal-mcp/aulaglobal-mcp y su carpeta <tmp>/Programs/aulaglobal-mcp si queda vacía
+
+Avisos:
+  ! Claude Desktop: la entrada apunta a «/usr/bin/node», no a este programa; no se toca.
+
+Simulación (--dry-run): no se ha cambiado nada.

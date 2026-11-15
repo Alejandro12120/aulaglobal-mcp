@@ -17,23 +17,14 @@ func (claudeAssistant) cli(e clientEnv) string {
 	return findClaude(e.GOOS, e.Home, e.AppData, e.Look, e.Stat)
 }
 func (a claudeAssistant) Detect(e clientEnv) bool { return a.cli(e) != "" }
-func (a claudeAssistant) Inspect(e clientEnv, w desiredEntry) inspection {
-	cli := a.cli(e)
-	if cli == "" {
-		return inspection{state: notInstalledHere}
-	}
-	b, err := e.call(e.Run, cli, "mcp", "get", "aulaglobal")
-	if err != nil {
-		lower := strings.ToLower(string(b))
-		if strings.Contains(lower, "no mcp server named") || strings.Contains(lower, "no mcp server found") {
-			return inspection{state: missing}
-		}
-		return inspection{err: errors.New("cannot inspect Claude")}
-	}
-	lines := map[string]string{}
-	env := map[string]string{}
+
+// parseClaudeGet reads `claude mcp get` output: its key/value lines, the
+// Environment block and the scope ("local", "project", "user" or "").
+func parseClaudeGet(output string) (lines, env map[string]string, scope string) {
+	lines = map[string]string{}
+	env = map[string]string{}
 	inEnv := false
-	for _, line := range strings.Split(string(b), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		s := strings.TrimSpace(line)
 		if strings.HasPrefix(s, "To remove") {
 			break
@@ -53,12 +44,27 @@ func (a claudeAssistant) Inspect(e clientEnv, w desiredEntry) inspection {
 			inEnv = true
 		}
 	}
-	scope := ""
 	for _, v := range []struct{ prefix, scope string }{{"Local config", "local"}, {"Project config", "project"}, {"User config", "user"}, {"User scope", "user"}} {
 		if strings.HasPrefix(lines["Scope"], v.prefix) {
 			scope = v.scope
 		}
 	}
+	return lines, env, scope
+}
+func (a claudeAssistant) Inspect(e clientEnv, w desiredEntry) inspection {
+	cli := a.cli(e)
+	if cli == "" {
+		return inspection{state: notInstalledHere}
+	}
+	b, err := e.call(e.Run, cli, "mcp", "get", "aulaglobal")
+	if err != nil {
+		lower := strings.ToLower(string(b))
+		if strings.Contains(lower, "no mcp server named") || strings.Contains(lower, "no mcp server found") {
+			return inspection{state: missing}
+		}
+		return inspection{err: errors.New("cannot inspect Claude")}
+	}
+	lines, env, scope := parseClaudeGet(string(b))
 	if scope == "" {
 		return inspection{err: errors.New("unknown Claude scope")}
 	}

@@ -1,0 +1,21 @@
+¿Qué quieres hacer?
+  1. Desconectar AulaGlobal de algunos asistentes
+  2. Cerrar la sesión de AulaGlobal (borrar la clave de acceso)
+  3. Desinstalar todo
+Opción [1]:
+Plan:
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.private
+  · Borrar <tmp>/home/config/aulaglobal-mcp/token.meta.json
+  · Borrar la carpeta <tmp>/home/config/aulaglobal-mcp si queda vacía
+
+Se conservará: el programa, las conexiones con tus asistentes y tu carpeta AulaGlobal.
+
+› ¿Continuar? [s/N]
+Resultado:
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token.private
+  ✓ Borrado: <tmp>/home/config/aulaglobal-mcp/token.meta.json
+  ✓ Carpeta borrada: <tmp>/home/config/aulaglobal-mcp
+
+Para volver a conectarte, ejecuta `aulaglobal-mcp setup`.
