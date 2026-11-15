@@ -19,6 +19,7 @@ archives:
       - README.md
       - README.en.md
       - LICENSE
+      - THIRD_PARTY_NOTICES.md
       - docs/TECNICO.md
 checksum:
   name_template: checksums.txt

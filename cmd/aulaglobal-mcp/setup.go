@@ -152,6 +152,8 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 			return false, e
 		}
 	}
+	// The DevTools console line that reads the MoodleSessionag cookie is based on
+	// AGDownloader (MIT, see THIRD_PARTY_NOTICES.md).
 	fmt.Fprintln(u.out, `1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
 
 2. Pulsa F12 (Mac: Cmd + Option + I).
@@ -192,6 +194,9 @@ func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, u 
 	}
 	tokenValue, private, e := api.TokenFromCookie(ctx, cookie)
 	cookie = ""
+	if errors.Is(e, aulaglobal.ErrRateLimited) {
+		return false, e
+	}
 	if e != nil {
 		return false, errors.New("No se pudo obtener el token. Cierra sesión, vuelve a entrar en AulaGlobal y repite setup.")
 	}
@@ -434,7 +439,6 @@ func setup(args []string) (result error) {
 	if e != nil {
 		return e
 	}
-	u.step(4, "Conectar con tus asistentes")
 	dt, dd, e := userpaths.Defaults()
 	if e != nil {
 		return e
@@ -443,11 +447,30 @@ func setup(args []string) (result error) {
 	if e != nil {
 		return e
 	}
-	if configureClients(u, realClientEnv(runtime.GOOS, home, config), want, selected, *yes) {
+	if connectAssistants(u, realClientEnv(runtime.GOOS, home, config), want, selected, *yes) {
 		return errors.New("Algunos asistentes no se pudieron configurar; consulta las instrucciones anteriores")
 	}
 
 	return nil
+}
+
+// privacyNotice is shown before the assistants are connected: what leaves this
+// computer, where tool results end up, and that the assistant may reach other files.
+const privacyNotice = `· Privacidad:
+  - Este programa solo envía tus datos a AulaGlobal; el autor no recibe nada.
+  - Lo que el asistente consulte (asignaturas, apuntes, entregas) pasa a formar
+    parte de la conversación y llega a la empresa del asistente (Anthropic,
+    OpenAI, Google...), igual que tus mensajes.
+  - Este programa solo usa la carpeta AulaGlobal, pero el asistente puede tener
+    permiso para abrir otros archivos de tu ordenador.
+`
+
+// connectAssistants is step 4: privacy notice, then detection and configuration.
+// It reports whether any assistant failed.
+func connectAssistants(u setupUI, e clientEnv, want desiredEntry, selected []assistant, yes bool) bool {
+	u.step(4, "Conectar con tus asistentes")
+	fmt.Fprint(u.out, privacyNotice+"\n")
+	return configureClients(u, e, want, selected, yes)
 }
 
 func decodeTOML(b []byte, root *map[string]any) error { return toml.Unmarshal(b, root) }

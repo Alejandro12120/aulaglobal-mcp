@@ -55,6 +55,9 @@ func TestManyDownloads(t *testing.T) {
 	}
 	defer s.Root.Close()
 	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
+	if e := c.SetMaxRPS(aulaglobal.MaxMaxRPS); e != nil { // 200 files must not wait on the default politeness limit
+		t.Fatal(e)
+	}
 	files := []aulaglobal.File{}
 	size := int64(5)
 	for i := 0; i < 200; i++ {
@@ -273,6 +276,7 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 				files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/pluginfile.php/f"})
 			}
 			c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
+			_ = c.SetMaxRPS(aulaglobal.MaxMaxRPS) // 40 files: do not wait on the default politeness limit
 			res, e := s.Download(context.Background(), c, files)
 			if !tc.abort {
 				if e != nil || len(res) != len(files) || fileCalls.Load() != int32(len(files)) {
@@ -292,5 +296,34 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 				t.Fatalf("batch not short-circuited: %d file requests", n)
 			}
 		})
+	}
+}
+
+// Persistent 429s end the batch with the single user-facing error instead of
+// grinding through every remaining file.
+func TestDownloadAbortsWhenRateLimited(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "1") // real time: two 1 s pauses before giving up
+		w.WriteHeader(429)
+	}))
+	defer ts.Close()
+	s, e := Open(t.TempDir(), 1024, 2)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Root.Close()
+	files := []aulaglobal.File{}
+	for i := 0; i < 20; i++ {
+		files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/pluginfile.php/f"})
+	}
+	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
+	_, e = s.Download(context.Background(), c, files)
+	if !errors.Is(e, aulaglobal.ErrRateLimited) || !strings.Contains(e.Error(), "AulaGlobal está limitando las peticiones") || strings.Contains(e.Error(), "secret") {
+		t.Fatalf("got %v", e)
+	}
+	if n := calls.Load(); n > 6 {
+		t.Fatalf("%d requests: the batch kept going after being throttled", n)
 	}
 }

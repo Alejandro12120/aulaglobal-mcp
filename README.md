@@ -6,7 +6,7 @@
 
 Español · [English](README.en.md)
 
-[Instalación](#instalación) · [Uso](#uso) · [Actualización](#actualización) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Desinstalación](#desinstalación)
+[Instalación](#instalación) · [Uso](#uso) · [Actualización](#actualización) · [Problemas frecuentes](#problemas-frecuentes) · [Seguridad y privacidad](#seguridad-y-privacidad) · [Condiciones de uso](#condiciones-de-uso) · [Desinstalación](#desinstalación)
 
 </div>
 
@@ -423,16 +423,58 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
 
 ## Seguridad y privacidad
 
+**Qué hace este programa con tus datos**
+
 - **No se usa tu contraseña.** El acceso se obtiene a partir de tu sesión del
   navegador.
 - **La clave de acceso se queda en tu equipo**, en la carpeta de configuración
   de tu usuario y con permisos restringidos. El asistente de IA nunca la recibe.
-- **Acceso limitado a tus archivos.** El asistente solo puede leer y escribir
-  dentro de la carpeta `AulaGlobal`.
 - **Sin intermediarios.** El programa se conecta directamente a AulaGlobal desde
-  tu equipo.
+  tu equipo. El autor del proyecto no recibe tus documentos, tus credenciales
+  ni ningún otro dato. La única conexión adicional es la comprobación diaria de
+  versiones nuevas en GitHub, que puedes desactivar (ver
+  [Actualización](#actualización)).
+- **Datos personales mínimos.** Al comprobar la conexión, el asistente no recibe
+  tu nombre ni tu identificador de usuario. Las calificaciones y el estado de
+  las entregas solo se consultan si lo pides.
+- **Uso moderado de AulaGlobal.** El programa limita el número de peticiones por
+  segundo, reutiliza durante unos segundos las respuestas recientes y, si
+  AulaGlobal pide esperar, se detiene el tiempo indicado.
 - **Descargas verificadas.** El instalador y el comando `update` comprueban la
   firma digital de cada versión antes de instalarla.
+
+**Qué hace el asistente con los resultados**
+
+- **El asistente recibe lo que devuelven las herramientas**: listas de
+  asignaturas, textos de tus apuntes, enunciados de entregas, etc. Según el
+  asistente que uses, ese contenido se envía a su proveedor de IA (Anthropic,
+  OpenAI, Google…) y se trata según sus condiciones y su política de privacidad.
+  Revísalas antes de usarlo con materiales que no quieras compartir.
+- **Los límites de carpeta solo afectan a este programa.** Las herramientas de
+  AulaGlobal MCP solo pueden leer y escribir dentro de la carpeta `AulaGlobal`,
+  pero el asistente puede tener sus propios permisos (por ejemplo, para leer
+  otros archivos o ejecutar comandos), que dependen de cómo lo hayas
+  configurado.
+
+---
+
+## Condiciones de uso
+
+Al usar este programa aceptas lo siguiente:
+
+1. **Proyecto independiente.** No está desarrollado, respaldado ni supervisado
+   por la Universidad Carlos III de Madrid.
+2. **Solo con acceso autorizado.** Úsalo únicamente con tu propia cuenta de
+   AulaGlobal y para acceder a contenido al que ya tienes acceso, respetando la
+   normativa de la universidad.
+3. **Tú decides qué compartes.** Eres responsable de comprobar que puedes
+   compartir con el asistente y con su proveedor de IA el contenido que le
+   pides procesar, teniendo en cuenta los derechos de autor de los materiales y
+   los datos personales que puedan contener.
+4. **Sin garantías.** El software se ofrece tal cual, sin garantía de ningún
+   tipo. En la medida en que lo permita la ley, los autores no son responsables
+   de los daños o perjuicios derivados de su uso, como se indica en la
+   [licencia](LICENSE).
 
 ---
 
@@ -467,6 +509,11 @@ el tratamiento de los nombres de las asignaturas.
 
 Distribuido bajo la [licencia MIT](LICENSE). El software se proporciona
 **tal cual, sin garantía de ningún tipo**.
+
+El programa incluye partes basadas en AGDownloader y bibliotecas de terceros,
+cada una con su propia licencia. Sus avisos y textos de licencia están en
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), que también se incluye en cada
+versión publicada.
 
 ## Documentación técnica
 

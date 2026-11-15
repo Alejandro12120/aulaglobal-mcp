@@ -67,10 +67,18 @@ type Updates interface {
 	TakeNotice() string
 }
 
-// AuthOutput is the auth_status result.
+// AuthOutput is the auth_status result. It is deliberately a separate type from
+// aulaglobal.Auth: the account holder's name and user ID are decoded from Moodle for
+// local use (setup greeting, enrolment fallback) and must never reach the assistant.
 type AuthOutput struct {
-	aulaglobal.Auth
-	UpdateAvailable string `json:"update_available,omitempty" jsonschema:"Newer aulaglobal-mcp version available, when known"`
+	TokenValid      bool    `json:"token_valid" jsonschema:"True when Moodle accepted the token; an invalid token is reported as an error"`
+	Sitename        string  `json:"sitename"`
+	Release         string  `json:"release"`
+	ExpiresAt       *int64  `json:"expires_at"`
+	TokenObtainedAt *string `json:"token_obtained_at,omitempty"`
+	TokenAgeDays    *int    `json:"token_age_days,omitempty"`
+	ExpirySource    string  `json:"expiry_source"`
+	UpdateAvailable string  `json:"update_available,omitempty" jsonschema:"Newer aulaglobal-mcp version available, when known"`
 }
 
 // noticeMiddleware appends the one-time update notice to the first successful
@@ -99,9 +107,9 @@ func New(api *aulaglobal.Client, st *store.Store, updates Updates) *mcp.Server {
 	if updates != nil {
 		server.AddReceivingMiddleware(noticeMiddleware(updates))
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "auth_status", Description: "Validate configured Moodle mobile token and report user/site and known expiry. Moodle site policy may expire tokens (upstream default 12 weeks); when the token is dead the error says so and the user must run `aulaglobal-mcp setup` in a terminal (no assistant restart needed). Never accepts credentials. update_available, when present, is a newer aulaglobal-mcp version the user can install with `aulaglobal-mcp update`."}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, AuthOutput, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "auth_status", Description: "Validate configured Moodle mobile token and report site name, Moodle release, known expiry and token age. Does not return the account holder's name or user ID. Moodle site policy may expire tokens (upstream default 12 weeks); when the token is dead the error says so and the user must run `aulaglobal-mcp setup` in a terminal (no assistant restart needed). Never accepts credentials. update_available, when present, is a newer aulaglobal-mcp version the user can install with `aulaglobal-mcp update`."}, func(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, AuthOutput, error) {
 		a, e := api.Auth(ctx)
-		out := AuthOutput{Auth: a}
+		out := AuthOutput{TokenValid: e == nil, Sitename: a.Sitename, Release: a.Release, ExpiresAt: a.ExpiresAt, TokenObtainedAt: a.TokenObtainedAt, TokenAgeDays: a.TokenAgeDays, ExpirySource: a.ExpirySource}
 		if updates != nil {
 			out.UpdateAvailable = updates.Available()
 		}

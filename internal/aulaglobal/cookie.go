@@ -49,9 +49,11 @@ func ParseLaunch(location, site, passport string) (string, string, error) {
 	}
 	return parts[1], private, nil
 }
+
+// TokenFromCookie exchanges the browser session cookie for a mobile token through
+// launch.php (moodle_mobile_app service, passport signed with MD5(site+passport)).
+// The flow is based on AGDownloader (MIT, see THIRD_PARTY_NOTICES.md).
 func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
 	var nonce [24]byte
 	if _, e := rand.Read(nonce[:]); e != nil {
 		return "", "", e
@@ -64,15 +66,29 @@ func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, st
 	req.AddCookie(&http.Cookie{Name: "MoodleSessionag", Value: strings.TrimSpace(cookie)})
 	client := *c.HTTP
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, e := client.Do(req)
-	if e != nil {
-		return "", "", errors.New("launch request failed")
+	var status int
+	var location string
+	// Same gate as every other request; a 429/503 pauses everybody. GET: safe to retry.
+	if e = c.politely(ctx, true, func() (*throttle, error) {
+		actx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		resp, err := client.Do(req.WithContext(actx))
+		if err != nil {
+			return nil, errors.New("launch request failed")
+		}
+		defer resp.Body.Close()
+		if th := throttleOf(resp); th != nil {
+			return th, nil
+		}
+		status, location = resp.StatusCode, resp.Header.Get("Location")
+		return nil, nil
+	}); e != nil {
+		return "", "", e
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+	if status < 300 || status > 399 {
 		return "", "", errors.New("launch did not return redirect")
 	}
-	return ParseLaunch(resp.Header.Get("Location"), c.Base, passport)
+	return ParseLaunch(location, c.Base, passport)
 }
 func WriteSecret(path, value string) error {
 	dir := filepath.Dir(path)
