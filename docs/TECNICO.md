@@ -135,7 +135,7 @@ Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
 No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
 sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
 Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
-optimizado. Imagen final: 14326383 bytes (14.33 MB); detalles en VERIFICATION.md.
+optimizado. Imagen final: 14326383 bytes (14.33 MB).
 Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto configurable de espera de 60 segundos
 por extracción; panic recuperado. Como Go no permite matar una goroutine,
 un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
@@ -449,9 +449,8 @@ ssh-keygen -t ed25519 -N "" -C aulaglobal-mcp-update -f aulaglobal-update
 
 ## Compilar tú mismo y publicar versiones
 
-El helper opcional ./obtener-token.sh ofrece compilar con Docker y ejecuta setup;
-ya no gestiona cookies. Para compilar directamente usa el comando de la sección
-Token. El usuario de las Releases no necesita Docker.
+Para compilar directamente usa el comando de la sección Token. El usuario de las
+Releases no necesita Docker.
 
 La CI ejecuta vet y pruebas nativas en Ubuntu, macOS y Windows; race en Unix.
 Para publicar, configura primero el remoto de GitHub y sustituye el usuario de
