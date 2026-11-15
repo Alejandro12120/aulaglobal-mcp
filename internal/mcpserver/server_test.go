@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"aulaglobal-mcp/internal/aulaglobal"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -107,7 +108,7 @@ func TestUpdateNoticeAppendedOnceAndAuthField(t *testing.T) {
 		t.Fatalf("first result contents: %q", got)
 	}
 	sc, _ := first.StructuredContent.(map[string]any)
-	if sc["update_available"] != "v0.9.0" || sc["fullname"] != "Ana" {
+	if sc["update_available"] != "v0.9.0" || sc["sitename"] != "AulaGlobal" || sc["token_valid"] != true {
 		t.Fatalf("structured: %v", sc)
 	}
 	second := call(t, s, "auth_status", nil)
@@ -127,7 +128,7 @@ func TestNoUpdateNoNoticeAndNoField(t *testing.T) {
 			t.Errorf("%s: %q", name, texts(res))
 		}
 		sc, _ := res.StructuredContent.(map[string]any)
-		if _, present := sc["update_available"]; present || sc["fullname"] != "Ana" {
+		if _, present := sc["update_available"]; present || sc["sitename"] != "AulaGlobal" {
 			t.Errorf("%s: %v", name, sc)
 		}
 	}
@@ -144,5 +145,47 @@ func TestNoticeAppearsWhenCheckFinishesLater(t *testing.T) {
 	u.mu.Unlock()
 	if got := texts(call(t, s, "auth_status", nil)); len(got) != 2 {
 		t.Fatalf("%q", got)
+	}
+}
+
+// auth_status must not hand the assistant who the user is: neither in the
+// structured result nor in the text copy, nor in the published output schema.
+func TestAuthStatusExposesNoPersonalData(t *testing.T) {
+	s := connect(t, nil)
+	res := call(t, s, "auth_status", nil)
+	if res.IsError {
+		t.Fatalf("%+v", res)
+	}
+	sc, _ := res.StructuredContent.(map[string]any)
+	for _, k := range []string{"fullname", "userid", "username", "firstname", "lastname", "userpictureurl"} {
+		if _, present := sc[k]; present {
+			t.Errorf("auth_status returned %q", k)
+		}
+	}
+	for _, want := range []string{"token_valid", "sitename", "release", "expires_at", "expiry_source"} {
+		if _, present := sc[want]; !present {
+			t.Errorf("auth_status lacks %q: %v", want, sc)
+		}
+	}
+	if sc["release"] != "4.1" {
+		t.Errorf("release: %v", sc["release"])
+	}
+	all := strings.Join(texts(res), "\n")
+	if strings.Contains(all, "Ana") || strings.Contains(all, "userid") || strings.Contains(all, "fullname") {
+		t.Errorf("personal data in text content: %s", all)
+	}
+	tools, err := s.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		schema, _ := json.Marshal(tool.OutputSchema)
+		// (list_courses legitimately has a course "fullname"; no tool has a user ID.)
+		if strings.Contains(string(schema), "userid") || (tool.Name == "auth_status" && strings.Contains(string(schema), "fullname")) {
+			t.Errorf("%s output schema mentions personal fields: %s", tool.Name, schema)
+		}
+		if tool.Name == "auth_status" && !strings.Contains(tool.Description, "Does not return the account holder's name or user ID") {
+			t.Errorf("description does not state the data minimisation: %s", tool.Description)
+		}
 	}
 }
