@@ -95,3 +95,17 @@ func unwrapPath(err error) error {
 	}
 	return err
 }
+
+// MoveAside renames exe to "<exe>.old" and returns that path. Windows cannot
+// delete a running executable but can rename it; the caller (uninstall)
+// schedules the deletion of the parked file. A stale ".old" is replaced.
+func MoveAside(exe string) (string, error) {
+	old := oldPath(exe)
+	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", unwrapPath(err)
+	}
+	if err := os.Rename(exe, old); err != nil {
+		return "", unwrapPath(err)
+	}
+	return old, nil
+}
