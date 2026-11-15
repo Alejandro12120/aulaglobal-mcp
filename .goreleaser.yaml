@@ -17,10 +17,17 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_{{ if eq .Os "darwin" }}{{ if eq .Arch "arm64" }}apple-silicon{{ else }}intel{{ end }}{{ else }}{{ if eq .Arch "amd64" }}x64{{ else }}arm64{{ end }}{{ end }}
     files:
       - README.md
+      - README.en.md
       - LICENSE
       - docs/TECNICO.md
 checksum:
   name_template: checksums.txt
+  # install.sh e install.ps1 también quedan en checksums.txt y, por tanto, cubiertos
+  # por checksums.txt.sig (quien quiera puede verificarlos con ssh-keygen -Y verify).
+  # Los instaladores no se fían de esta línea: verifican la firma con su clave embebida.
+  extra_files:
+    - glob: install.sh
+    - glob: install.ps1
 # Signs checksums.txt with the maintainer's OpenSSH ed25519 key; the binary
 # verifies this signature (internal/selfupdate) before installing an update.
 # ssh-keygen writes <file>.sig by itself, which is exactly `signature` below.
@@ -42,3 +49,8 @@ changelog:
   sort: asc
 release:
   draft: false
+  # Se publican como activos de la versión para que
+  # https://github.com/<repo>/releases/latest/download/install.sh (y .ps1) funcione.
+  extra_files:
+    - glob: install.sh
+    - glob: install.ps1

@@ -135,7 +135,7 @@ Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
 No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
 sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
 Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
-optimizado. Imagen final: 14326383 bytes (14.33 MB); detalles en VERIFICATION.md.
+optimizado. Imagen final: 14326383 bytes (14.33 MB).
 Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto configurable de espera de 60 segundos
 por extracción; panic recuperado. Como Go no permite matar una goroutine,
 un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
@@ -241,6 +241,7 @@ docker run --rm -v "$PWD":/src -w /src golang:1.26.9 go vet ./...
 docker run --rm -v "$PWD":/src -w /src golang:1.26.9 go test -race ./...
 docker build -t aulaglobal-mcp:local .
 node scripts/smoke.mjs
+scripts/test-install.sh   # instaladores, ver «Instaladores»; necesita Docker
 docker image inspect aulaglobal-mcp:local --format '{{.Size}}'
 ```
 
@@ -432,7 +433,9 @@ ssh-keygen -t ed25519 -N "" -C aulaglobal-mcp-update -f aulaglobal-update
 - Guarda el contenido de `aulaglobal-update` (clave privada) como secreto del
   repositorio `UPDATE_SIGNING_KEY` y borra el archivo local.
 - Sustituye el contenido de internal/selfupdate/update_key.pub por
-  `aulaglobal-update.pub` y publica una versión con ese cambio.
+  `aulaglobal-update.pub` y publica una versión con ese cambio. Actualiza también
+  la clave embebida en install.sh (`SIGN_KEY`) e install.ps1 (`$SignKey`): una
+  prueba de Go falla si los tres archivos no coinciden.
 - release.yml escribe el secreto en un archivo 0600 bajo `$RUNNER_TEMP`, falla si
   está vacío o si su clave pública no coincide con update_key.pub, y GoReleaser
   firma `checksums.txt` con `ssh-keygen -Y sign -n aulaglobal-mcp-update`
@@ -447,11 +450,160 @@ ssh-keygen -t ed25519 -N "" -C aulaglobal-mcp-update -f aulaglobal-update
   versión nueva. Las compilaciones locales con GoReleaser
   requieren `--skip=sign`.
 
+## Instaladores (install.sh e install.ps1)
+
+Dos scripts en la raíz del repositorio, publicados como activos de cada versión
+(`release.extra_files` en .goreleaser.yaml), de modo que las URL `latest/download`
+siempre apuntan a los de la última versión:
+
+```sh
+# macOS y Linux (sh POSIX: dash, busybox ash, /bin/sh de macOS)
+curl -fsSL https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell 5.1 o PowerShell 7
+irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
+```
+
+Flujo (el mismo en ambos; salida en español con los marcadores ✓ ! ✗ · de setup y
+pasos «[1/5]…»):
+
+1. Detecta sistema y arquitectura (`uname`; en Windows `RuntimeInformation`, con
+   `PROCESSOR_ARCHITEW6432`/`PROCESSOR_ARCHITECTURE` como respaldo) y la traduce a la
+   etiqueta del archivo: `macos_apple-silicon`, `macos_intel`, `linux_x64`,
+   `linux_arm64`, `windows_x64`, `windows_arm64`. Una terminal bajo Rosetta se trata
+   como Apple Silicon. Cualquier otra combinación (incluido Windows de 32 bits) acaba
+   con un error que apunta a la instalación manual.
+2. Resuelve la versión: la última (`/releases/latest` redirige a
+   `/releases/tag/vX.Y.Z`; con `wget` se lee el nombre de archivo de
+   `latest/download/checksums.txt`) o la fijada con `AULAGLOBAL_VERSION`. La etiqueta
+   se valida con semver estricto `vX.Y.Z` (sin prerelease).
+3. Pregunta la carpeta (`~/.local/bin` o `%LOCALAPPDATA%\Programs\aulaglobal-mcp`),
+   informa de la versión ya instalada, si la hay, y de que se sustituirá (o de que ya
+   tiene la misma y ofrece reinstalar).
+4. Descarga el archivo, `checksums.txt` y `checksums.txt.sig` a una carpeta temporal
+   que se borra siempre al terminar.
+5. **Verifica la firma antes que nada** con `ssh-keygen -Y verify` (namespace
+   `aulaglobal-mcp-update`, allowed_signers `aulaglobal-mcp-update <clave>` generado en
+   la carpeta temporal) y solo después comprueba el SHA-256 del archivo contra la línea
+   exacta de `checksums.txt`. No hay ninguna opción para saltarse la firma; si falta
+   `ssh-keygen` o es demasiado antiguo (sin `-Y verify`: OpenSSH < 8.1) el instalador
+   aborta con un mensaje en español y el enlace de instalación manual. En Windows se
+   indica cómo activar el «Cliente OpenSSH» (Configuración → Aplicaciones →
+   Características opcionales); `ssh-keygen` se busca en el PATH y en
+   `%WINDIR%\System32\OpenSSH`. En PowerShell el contenido de `checksums.txt` se
+   escribe byte a byte en la entrada estándar del proceso (sin redirecciones de
+   PowerShell, que en 5.1 recodifican).
+6. Extrae solo la entrada raíz `aulaglobal-mcp` / `aulaglobal-mcp.exe` por nombre
+   exacto y la instala de forma atómica: copia a un temporal en la misma carpeta y
+   `mv` (Windows: el `.exe` en uso se renombra a `.exe.old`, como hace `update`, y se
+   restaura si falla; si no se puede apartar se pide cerrar el asistente).
+7. PATH (si la carpeta no está ya): pregunta [S/n] y añade una línea idempotente
+   marcada con `# aulaglobal-mcp` al perfil: zsh → `~/.zshrc`; bash → `~/.bashrc` (y
+   `~/.bash_profile` en macOS); fish → `~/.config/fish/config.fish` con
+   `set -gx PATH …`; otro → `~/.profile`. En Windows, `SetEnvironmentVariable('Path',
+   …, 'User')` de forma idempotente (sin distinguir mayúsculas ni barra final) y
+   también `$env:Path` de la sesión.
+8. Ejecuta `<carpeta>/aulaglobal-mcp setup` con la entrada conectada a `/dev/tty`
+   (Windows: la consola). Sin terminal no lo ejecuta y escribe el comando.
+
+Con `curl | sh` la entrada estándar es el propio script, por eso las respuestas se
+leen de `/dev/tty`; sin terminal (CI, cron) se usan los valores predeterminados y se
+avisa. Todo el script está dentro de `main()`, llamado en la última línea: una
+descarga cortada no ejecuta nada. No se llama a `xattr`: `curl` no marca la descarga
+en cuarentena. En Windows `Invoke-WebRequest` tampoco añade Mark-of-the-Web, por lo
+que no hace falta `Unblock-File`.
+
+### Variables de entorno
+
+| Variable | Efecto |
+| --- | --- |
+| `AULAGLOBAL_VERSION` | Instala esa versión (`v0.1.5` o `0.1.5`) en lugar de la última. Con `curl \| sh`: `curl … \| AULAGLOBAL_VERSION=v0.1.5 sh`; en PowerShell: `$env:AULAGLOBAL_VERSION='v0.1.5'` antes de `irm … \| iex`. |
+| `AULAGLOBAL_INSTALL_DIR` | Carpeta de instalación; no se pregunta. Admite `~` y espacios; se rechazan `"`, `$`, `` ` ``, `\` y `:` en POSIX por la línea que se escribe en el perfil. |
+| `AULAGLOBAL_YES=1` | Acepta todas las opciones predeterminadas sin preguntar (también el PATH). Si hay terminal, `setup` se ejecuta igualmente, porque es interactivo por naturaleza. |
+| `AULAGLOBAL_RELEASE_BASE_URL` | **Solo para pruebas.** Sustituye `https://github.com/Alejandro12120/aulaglobal-mcp/releases` (de ahí salen `latest` y `download/<tag>/…`) y desactiva las restricciones https de `curl`. No cambia la clave de confianza: la verificación de firma sigue usando la clave embebida. |
+
+La clave pública está embebida en cada script (`SIGN_KEY` en install.sh,
+`$SignKey` en install.ps1). Una prueba de Go (`internal/selfupdate/installers_test.go`,
+que corre en toda la matriz de CI) falla si alguna difiere de
+`internal/selfupdate/update_key.pub`, si cambian las etiquetas de archivo respecto a
+`AssetName`/.goreleaser.yaml, si install.ps1 deja de ser ASCII (Windows PowerShell 5.1
+puede decodificar mal `irm | iex` el texto no ASCII; los acentos se escriben como
+`\uXXXX` y los convierte la función `T`) o si install.sh deja de terminar en
+`main "$@"`. Al rotar la clave hay que actualizar los tres archivos a la vez.
+
+### Publicación y CI
+
+- .goreleaser.yaml: `release.extra_files` publica los dos scripts y
+  `checksum.extra_files` los incluye en `checksums.txt`, así que también quedan
+  cubiertos por `checksums.txt.sig` (verificables a mano con `ssh-keygen -Y verify`).
+  Los instaladores no se fían de esa línea para sí mismos; es una comodidad para quien
+  quiera auditarlos. `update` ignora las líneas que no son su archivo.
+- ci.yml y release.yml: `shellcheck -s sh install.sh` (y los scripts de prueba) en
+  Linux; en Windows, `scripts/lint-install-ps1.ps1` con el analizador de Windows
+  PowerShell 5.1 y, con `-Analyze`, PSScriptAnalyzer 1.24.0 (se instala del
+  repositorio PSGallery, unos segundos; `Write-Host` está excluido a propósito).
+- El arnés de extremo a extremo (siguiente apartado) no corre en CI: necesita Docker
+  e imágenes grandes y se ejecuta a mano al tocar los instaladores.
+
+### Pruebas de los instaladores
+
+```sh
+scripts/test-install.sh        # install.sh (dash, bash, busybox ash) e install.ps1 (pwsh en Linux)
+scripts/test-install.sh sh     # solo install.sh
+scripts/test-install.sh ps     # solo install.ps1
+```
+
+Necesita Docker. Imágenes: `golang:1.26.9` (trae OpenSSH, curl y wget; dentro del
+contenedor se instala `busybox-static`) y `mcr.microsoft.com/powershell:ubuntu-24.04`
+(sobrescribibles con `GO_IMAGE`/`PS_IMAGE`; `GOCACHE_VOLUME` aporta una caché de Go).
+El repositorio se monta de solo lectura y el único estado es un volumen temporal que
+se borra al terminar. Los contenedores se ejecutan sin terminal (`-t` no se usa): el
+arnés lo comprueba.
+
+Qué hace (scripts/test-install/): compila el binario real con `-X main.version`,
+`mkrelease.go` empaqueta versiones falsas con los nombres de GoReleaser (tar.gz y
+zip, `checksums.txt`) y las firma con una clave ed25519 desechable generada en la
+prueba, y `server.go` las sirve en loopback imitando `/releases/latest` (redirección),
+`/releases/latest/download/…` y `/releases/download/<tag>/…`. Para que el script
+publicado no tenga ningún mecanismo de cambio de clave, las pruebas ejecutan una
+**copia** con la línea `SIGN_KEY` sustituida (se comprueba que difiere solo en esa
+línea); el script original, contra la misma versión, debe fallar por la firma.
+
+install.sh se ejecuta como `cat install.sh | env -i … <shell>` (stdin es el script,
+como con `curl | sh`) bajo dash, bash y busybox ash: instalación con
+`AULAGLOBAL_YES`/`AULAGLOBAL_INSTALL_DIR`, versión por defecto y fijada, segunda
+ejecución (misma versión, idempotencia del PATH), actualización, perfiles
+(zsh/bash/fish/otro, macOS simulado con un `uname` falso), archivo manipulado,
+`checksums.txt` manipulado, firma ausente, clave equivocada, sin `ssh-keygen`,
+`ssh-keygen` antiguo, arquitectura/SO no soportados, solo `wget`, carpeta imposible,
+script truncado, y —con una terminal real creada con `script`— las preguntas de
+carpeta/PATH, y que `setup` recibe un terminal en la entrada. Sin terminal se
+comprueba que `setup` no se ejecuta (no contacta con UC3M). Bajo busybox ash no se
+simulan `uname` ni la ausencia de `wget`, porque busybox ejecuta sus applets sin
+mirar el PATH.
+
+install.ps1 se ejecuta con PowerShell 7 en Linux como `texto | Invoke-Expression`:
+el mismo flujo completo (arquitectura, versión por redirección, descarga,
+firma con el `ssh-keygen` real, SHA-256, zip, instalación, `.old`, `.exe` «en uso»
+simulado con un `.old` imborrable, errores) más pruebas unitarias de las funciones
+puras extraídas con el AST (`ConvertTo-ReleaseTag`, `Get-ChecksumEntry`,
+`Add-PathEntry`, `ConvertTo-QuotedArg`, `Confirm-Choice`…) y
+`lint-install-ps1.ps1 -Analyze`.
+
+**No está verificado en un Windows real**: Windows PowerShell 5.1 (solo se comprueba
+en CI que el analizador lo acepta), la escritura del PATH de usuario en el registro,
+`ssh-keygen.exe` de Windows (el inbox de algunas compilaciones es OpenSSH 7.x, sin
+`-Y verify`: el instalador lo detecta y lo explica), el renombrado de un `.exe` en uso
+y la barra de progreso/consola de verdad. Tampoco se ha probado el `/bin/sh` de
+macOS (bash 3.2 en modo POSIX); el script evita bashismos y pasa ShellCheck con
+`-s sh`.
+
 ## Compilar tú mismo y publicar versiones
 
-El helper opcional ./obtener-token.sh ofrece compilar con Docker y ejecuta setup;
-ya no gestiona cookies. Para compilar directamente usa el comando de la sección
-Token. El usuario de las Releases no necesita Docker.
+Para compilar directamente usa el comando de la sección Token. El usuario de las
+Releases no necesita Docker.
 
 La CI ejecuta vet y pruebas nativas en Ubuntu, macOS y Windows; race en Unix.
 Para publicar, configura primero el remoto de GitHub y sustituye el usuario de
@@ -463,7 +615,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt y checksums.txt.sig (ver Actualización automática).
+release.yml ejecuta GoReleaser v2.8.2 y publica seis archivos con checksums.txt y checksums.txt.sig (ver Actualización automática), más install.sh e install.ps1 (ver Instaladores).
 Compila con CGO_ENABLED=0, trimpath y main.version; --version imprime la versión.
 No publica imágenes GHCR ni attestations por ahora. Los binarios aún no tienen
 firma de sistema operativo (la firma de checksums.txt solo protege la actualización): quedan pendientes Authenticode, firma/notarización de Apple y provenance.
