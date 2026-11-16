@@ -23,14 +23,14 @@ type Timestamp struct {
 	Madrid *string `json:"rfc3339"`
 }
 
-func stamp(n int64) Timestamp {
-	t := Timestamp{Unix: n}
-	if n > 0 {
-		loc, _ := time.LoadLocation("Europe/Madrid")
-		s := time.Unix(n, 0).In(loc).Format(time.RFC3339)
-		t.Madrid = &s
+func stamp(unix int64) Timestamp {
+	timestamp := Timestamp{Unix: unix}
+	if unix > 0 {
+		madrid, _ := time.LoadLocation("Europe/Madrid")
+		formatted := time.Unix(unix, 0).In(madrid).Format(time.RFC3339)
+		timestamp.Madrid = &formatted
 	}
-	return t
+	return timestamp
 }
 
 type Submission struct {
@@ -87,13 +87,13 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 	}
 	names := map[int64]string{}
 	if len(in.CourseIDs) == 0 {
-		courses, e := c.Courses(ctx, "inprogress", in.Language)
-		if e != nil {
-			return out, e
+		courses, err := c.Courses(ctx, "inprogress", in.Language)
+		if err != nil {
+			return out, err
 		}
-		for _, v := range courses {
-			in.CourseIDs = append(in.CourseIDs, v.ID)
-			names[v.ID] = v.Name
+		for _, course := range courses {
+			in.CourseIDs = append(in.CourseIDs, course.ID)
+			names[course.ID] = course.Name
 		}
 	}
 	if len(in.CourseIDs) > 1000 {
@@ -116,8 +116,8 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 			Assignments []remoteAssignment `json:"assignments"`
 		} `json:"courses"`
 	}
-	if e := c.WS(ctx, "mod_assign_get_assignments", args, &res); e != nil {
-		return out, e
+	if err := c.WS(ctx, "mod_assign_get_assignments", args, &res); err != nil {
+		return out, err
 	}
 	now := time.Now().Unix()
 	for _, course := range res.Courses {
@@ -130,17 +130,17 @@ func (c *Client) Assignments(ctx context.Context, in AssignmentInput, plain func
 		if name == "" {
 			name = c.CourseName(ctx, course.ID, in.Language)
 		}
-		for _, a := range course.Assignments {
-			possible := a.NoSubmissions == 0 && (a.Allows == 0 || a.Allows <= now) && (a.Cutoff == 0 || a.Cutoff > now)
-			if in.Status == "upcoming" && !((a.Due > now) || (a.Due == 0 && possible)) {
+		for _, remote := range course.Assignments {
+			possible := remote.NoSubmissions == 0 && (remote.Allows == 0 || remote.Allows <= now) && (remote.Cutoff == 0 || remote.Cutoff > now)
+			if in.Status == "upcoming" && !((remote.Due > now) || (remote.Due == 0 && possible)) {
 				continue
 			}
-			if in.Status == "overdue" && !(a.Due > 0 && a.Due <= now) {
+			if in.Status == "overdue" && !(remote.Due > 0 && remote.Due <= now) {
 				continue
 			}
-			v := Assignment{ID: a.ID, CMID: a.CMID, CourseID: course.ID, CourseName: name, Name: a.Name, Intro: truncateIntro(plain(a.Intro)), IntroNote: "Untrusted course content", Allows: stamp(a.Allows), Due: stamp(a.Due), Cutoff: stamp(a.Cutoff), GradingDue: stamp(a.GradingDue), SubmissionsPossible: possible}
-			v.Attachments = introAttachments(a, course.ID, localName)
-			out.Assignments = append(out.Assignments, v)
+			assignment := Assignment{ID: remote.ID, CMID: remote.CMID, CourseID: course.ID, CourseName: name, Name: remote.Name, Intro: truncateIntro(plain(remote.Intro)), IntroNote: "Untrusted course content", Allows: stamp(remote.Allows), Due: stamp(remote.Due), Cutoff: stamp(remote.Cutoff), GradingDue: stamp(remote.GradingDue), SubmissionsPossible: possible}
+			assignment.Attachments = introAttachments(remote, course.ID, localName)
+			out.Assignments = append(out.Assignments, assignment)
 		}
 	}
 	sortByDue(out.Assignments)
@@ -163,27 +163,27 @@ func truncateIntro(intro string) string {
 // introAttachments turns the files attached to an assignment into downloadable
 // files stored under <course>/Entregas/<assignment>/. The token is removed from
 // each URL, so it never reaches the assistant.
-func introAttachments(a remoteAssignment, courseID int64, courseName string) []File {
+func introAttachments(assignment remoteAssignment, courseID int64, courseName string) []File {
 	files := []File{}
-	for _, f := range a.Attachments {
-		u, e := url.Parse(f.RawURL)
-		if e != nil {
+	for _, file := range assignment.Attachments {
+		fileURL, err := url.Parse(file.RawURL)
+		if err != nil {
 			continue
 		}
-		q := u.Query()
-		q.Del("token")
-		q.Del("wstoken")
-		u.RawQuery = q.Encode()
-		f.URL = u.String()
-		f.RawURL = ""
-		f.CourseID = courseID
-		f.CourseName = courseName
-		f.ModuleID = a.CMID
-		f.Section = "Entregas"
-		f.LocalSubdir = "/" + a.Name + "/"
-		f.Module = a.Name
-		f.Handle = StableHandle(courseID, a.CMID, f.Filepath, f.Filename)
-		files = append(files, f)
+		query := fileURL.Query()
+		query.Del("token")
+		query.Del("wstoken")
+		fileURL.RawQuery = query.Encode()
+		file.URL = fileURL.String()
+		file.RawURL = ""
+		file.CourseID = courseID
+		file.CourseName = courseName
+		file.ModuleID = assignment.CMID
+		file.Section = "Entregas"
+		file.LocalSubdir = "/" + assignment.Name + "/"
+		file.Module = assignment.Name
+		file.Handle = StableHandle(courseID, assignment.CMID, file.Filepath, file.Filename)
+		files = append(files, file)
 	}
 	return files
 }
@@ -191,11 +191,11 @@ func introAttachments(a remoteAssignment, courseID int64, courseName string) []F
 // sortByDue orders assignments by due date, with the ones without a date last.
 func sortByDue(list []Assignment) {
 	sort.SliceStable(list, func(i, j int) bool {
-		a, b := list[i].Due.Unix, list[j].Due.Unix
-		if a == 0 {
+		first, second := list[i].Due.Unix, list[j].Due.Unix
+		if first == 0 {
 			return false
 		}
-		return b == 0 || a < b
+		return second == 0 || first < second
 	})
 }
 
@@ -209,7 +209,7 @@ func (c *Client) addSubmissionStatus(ctx context.Context, list []Assignment) err
 	var once sync.Once
 	var dead error
 	var wg sync.WaitGroup
-	for n := 0; n < 4; n++ {
+	for worker := 0; worker < 4; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -219,7 +219,7 @@ func (c *Client) addSubmissionStatus(ctx context.Context, list []Assignment) err
 					continue
 				default:
 				}
-				a := &list[i]
+				assignment := &list[i]
 				var res struct {
 					LastAttempt struct {
 						Submission struct {
@@ -234,14 +234,14 @@ func (c *Client) addSubmissionStatus(ctx context.Context, list []Assignment) err
 						} `json:"grade"`
 					} `json:"feedback"`
 				}
-				e := c.WS(ctx, "mod_assign_get_submission_status", url.Values{"assignid": {strconv.FormatInt(a.ID, 10)}}, &res)
-				a.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: res.Feedback.Grade.Grade}
-				if errors.Is(e, ErrTokenExpired) || errors.Is(e, ErrRateLimited) {
-					once.Do(func() { dead = e; close(stop) })
+				err := c.WS(ctx, "mod_assign_get_submission_status", url.Values{"assignid": {strconv.FormatInt(assignment.ID, 10)}}, &res)
+				assignment.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: res.Feedback.Grade.Grade}
+				if errors.Is(err, ErrTokenExpired) || errors.Is(err, ErrRateLimited) {
+					once.Do(func() { dead = err; close(stop) })
 					continue
 				}
-				if e != nil {
-					a.Submission.Error = e.Error()
+				if err != nil {
+					assignment.Submission.Error = err.Error()
 				}
 			}
 		}()

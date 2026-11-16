@@ -28,35 +28,35 @@ type TokenProvider interface {
 type Invalidator interface{ Invalidate(context.Context) error }
 type StaticToken struct{ Value, File string }
 
-func (p StaticToken) Get(ctx context.Context) (string, error) {
+func (static StaticToken) Get(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	s := p.Value
-	if p.File != "" {
-		b, e := os.ReadFile(p.File)
-		if e != nil {
+	token := static.Value
+	if static.File != "" {
+		content, err := os.ReadFile(static.File)
+		if err != nil {
 			return "", errors.New("cannot read token file")
 		}
-		s = string(b)
+		token = string(content)
 	}
-	s = strings.TrimSpace(s)
-	if s == "" {
+	token = strings.TrimSpace(token)
+	if token == "" {
 		return "", errors.New("No hay ningún token de AulaGlobal configurado. Ejecuta `aulaglobal-mcp setup` en una terminal para conectar tu cuenta (o define AULAGLOBAL_TOKEN / AULAGLOBAL_TOKEN_FILE).")
 	}
-	return s, nil
+	return token, nil
 }
 
 var secretQuery = regexp.MustCompile("(?i)(token|wstoken|privatetoken|MoodleSessionag)=([^&\\s]+)")
 
-func Redact(s string, secrets ...string) string {
-	for _, v := range secrets {
-		if v != "" {
-			s = strings.ReplaceAll(s, v, "[REDACTED]")
-			s = strings.ReplaceAll(s, url.QueryEscape(v), "[REDACTED]")
+func Redact(text string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[REDACTED]")
+			text = strings.ReplaceAll(text, url.QueryEscape(secret), "[REDACTED]")
 		}
 	}
-	return secretQuery.ReplaceAllString(s, "$1=[REDACTED]")
+	return secretQuery.ReplaceAllString(text, "$1=[REDACTED]")
 }
 
 // ErrTokenExpired marks a token that Moodle no longer accepts. Test with errors.Is.
@@ -94,27 +94,27 @@ var errorCode = regexp.MustCompile("^[a-zA-Z0-9_]+$")
 // token is dead. invalidtoken/invalidtimedtoken are conclusive; accessexception is
 // also raised for plain permission problems, so it is confirmed with site_info
 // (fn is the failing function, "" outside web service calls such as pluginfile).
-func (c *Client) ClassifyAPIError(ctx context.Context, fn, code string) *APIError {
+func (c *Client) ClassifyAPIError(ctx context.Context, function, code string) *APIError {
 	if !errorCode.MatchString(code) {
 		code = "unknown"
 	}
-	e := &APIError{Code: code}
+	apiErr := &APIError{Code: code}
 	switch code {
 	case "invalidtoken", "invalidtimedtoken":
-		e.Expired = true
+		apiErr.Expired = true
 	case "accessexception":
-		if fn == siteInfoFn {
-			e.Expired = true
+		if function == siteInfoFn {
+			apiErr.Expired = true
 			break
 		}
 		switch c.probeToken(ctx) {
 		case probeDead:
-			e.Expired = true
+			apiErr.Expired = true
 		case probeValid:
-			e.TokenOK = true
+			apiErr.TokenOK = true
 		}
 	}
-	return e
+	return apiErr
 }
 
 type probeResult int
@@ -134,15 +134,15 @@ func (c *Client) probeToken(ctx context.Context) probeResult {
 	if ok {
 		return probeValid
 	}
-	e := c.ws(ctx, siteInfoFn, nil, &struct{}{})
-	if e == nil {
+	err := c.ws(ctx, siteInfoFn, nil, &struct{}{})
+	if err == nil {
 		c.probeMu.Lock()
 		c.validUntil = time.Now().Add(30 * time.Second)
 		c.probeMu.Unlock()
 		return probeValid
 	}
-	var api *APIError
-	if errors.As(e, &api) && (api.Code == "invalidtoken" || api.Code == "invalidtimedtoken" || api.Code == "accessexception") {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && (apiErr.Code == "invalidtoken" || apiErr.Code == "invalidtimedtoken" || apiErr.Code == "accessexception") {
 		return probeDead
 	}
 	return probeUnknown
@@ -161,39 +161,39 @@ type Client struct {
 	pol          *polite
 }
 
-func New(base string, p TokenProvider) *Client {
-	u, _ := url.Parse(base)
-	return &Client{Base: strings.TrimRight(base, "/"), Tokens: p, StallTimeout: 60 * time.Second, HTTP: &http.Client{
+func New(base string, tokens TokenProvider) *Client {
+	siteURL, _ := url.Parse(base)
+	return &Client{Base: strings.TrimRight(base, "/"), Tokens: tokens, StallTimeout: 60 * time.Second, HTTP: &http.Client{
 		Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second},
 
-		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			if len(via) >= 5 || u == nil || r.URL.Host != u.Host || r.URL.Scheme != u.Scheme {
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || siteURL == nil || request.URL.Host != siteURL.Host || request.URL.Scheme != siteURL.Scheme {
 				return errors.New("redirect refused")
 			}
 			return nil
 		},
 	}}
 }
-func (c *Client) WS(ctx context.Context, fn string, args url.Values, out any) error {
-	e := c.ws(ctx, fn, args, out)
+func (c *Client) WS(ctx context.Context, function string, args url.Values, out any) error {
+	err := c.ws(ctx, function, args, out)
 	var api *APIError
-	if errors.As(e, &api) {
-		return c.ClassifyAPIError(ctx, fn, api.Code)
+	if errors.As(err, &api) {
+		return c.ClassifyAPIError(ctx, function, api.Code)
 	}
-	return e
+	return err
 }
 
 // ws performs one web service call; Moodle errors come back unclassified.
-func (c *Client) ws(ctx context.Context, fn string, args url.Values, out any) error {
-	token, e := c.Tokens.Get(ctx)
-	if e != nil {
-		return e
+func (c *Client) ws(ctx context.Context, function string, args url.Values, out any) error {
+	token, err := c.Tokens.Get(ctx)
+	if err != nil {
+		return err
 	}
-	b, e := c.wsBody(ctx, token, fn, args)
-	if e != nil {
-		return e
+	body, err := c.wsBody(ctx, token, function, args)
+	if err != nil {
+		return err
 	}
-	if json.Unmarshal(b, out) != nil {
+	if json.Unmarshal(body, out) != nil {
 		return errors.New("invalid Moodle JSON response")
 	}
 	return nil
@@ -202,78 +202,78 @@ func (c *Client) ws(ctx context.Context, fn string, args url.Values, out any) er
 // wsBody returns the raw JSON of a successful call. Read-only functions are
 // deduplicated while in flight (listings are also cached for cacheTTL); only
 // successful responses are ever kept, so a dead token is noticed immediately.
-func (c *Client) wsBody(ctx context.Context, token, fn string, args url.Values) ([]byte, error) {
-	if !readOnlyFns[fn] {
-		return c.wsFetch(ctx, token, fn, args, false)
+func (c *Client) wsBody(ctx context.Context, token, function string, args url.Values) ([]byte, error) {
+	if !readOnlyFns[function] {
+		return c.wsFetch(ctx, token, function, args, false)
 	}
-	p := c.polite()
-	key := cacheKey(token, fn, args)
-	if cacheable[fn] {
-		if b, ok := p.cached(key); ok {
-			return b, nil
+	gate := c.polite()
+	key := cacheKey(token, function, args)
+	if cacheable[function] {
+		if body, ok := gate.cached(key); ok {
+			return body, nil
 		}
 	}
-	return p.shared(ctx, key, func(ctx context.Context) ([]byte, error) {
-		b, e := c.wsFetch(ctx, token, fn, args, true)
-		if e == nil && cacheable[fn] && json.Valid(b) {
-			p.store(key, b)
+	return gate.shared(ctx, key, func(ctx context.Context) ([]byte, error) {
+		body, err := c.wsFetch(ctx, token, function, args, true)
+		if err == nil && cacheable[function] && json.Valid(body) {
+			gate.store(key, body)
 		}
-		return b, e
+		return body, err
 	})
 }
 
 // wsFetch performs the HTTP exchange. retry allows repeating after 429/503 (only
 // for read-only functions). Each attempt has its own 60 s budget; time spent
 // waiting for the rate limiter or a server-requested pause does not count.
-func (c *Client) wsFetch(ctx context.Context, token, fn string, args url.Values, retry bool) ([]byte, error) {
+func (c *Client) wsFetch(ctx context.Context, token, function string, args url.Values, retry bool) ([]byte, error) {
 	form := url.Values{}
-	for k, v := range args {
-		form[k] = v
+	for name, values := range args {
+		form[name] = values
 	}
 	form.Set("wstoken", token)
-	form.Set("wsfunction", fn)
+	form.Set("wsfunction", function)
 	form.Set("moodlewsrestformat", "json")
 	body := form.Encode()
 	var out []byte
-	e := c.politely(ctx, retry, func() (*throttle, error) {
+	err := c.politely(ctx, retry, func() (*throttle, error) {
 		actx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		req, e := http.NewRequestWithContext(actx, "POST", c.Base+"/webservice/rest/server.php", strings.NewReader(body))
-		if e != nil {
+		req, err := http.NewRequestWithContext(actx, "POST", c.Base+"/webservice/rest/server.php", strings.NewReader(body))
+		if err != nil {
 			return nil, errors.New("invalid site configuration")
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, e := c.HTTP.Do(req)
-		if e != nil {
-			if ce := ctx.Err(); ce != nil {
-				return nil, ce // the caller's own cancellation or deadline, not a network failure
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr // the caller's own cancellation or deadline, not a network failure
 			}
-			return nil, errors.New(Redact(e.Error(), token))
+			return nil, errors.New(Redact(err.Error(), token))
 		}
 		defer resp.Body.Close()
-		if th := throttleOf(resp); th != nil {
-			return th, nil
+		if throttled := throttleOf(resp); throttled != nil {
+			return throttled, nil
 		}
 		if resp.StatusCode != 200 {
 			return nil, fmt.Errorf("Moodle HTTP status %d", resp.StatusCode)
 		}
-		b, e := io.ReadAll(io.LimitReader(resp.Body, 32<<20+1))
-		if e != nil {
+		content, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20+1))
+		if err != nil {
 			return nil, errors.New("reading Moodle response failed")
 		}
-		if len(b) > 32<<20 {
+		if len(content) > 32<<20 {
 			return nil, errors.New("Moodle response too large")
 		}
 		// Moodle reports its own errors as JSON with HTTP 200; those are not rate limits.
 		var problem struct{ Exception, Errorcode string }
-		_ = json.Unmarshal(b, &problem)
+		_ = json.Unmarshal(content, &problem)
 		if problem.Exception != "" || problem.Errorcode != "" {
 			return nil, &APIError{Code: problem.Errorcode}
 		}
-		out = b
+		out = content
 		return nil, nil
 	})
-	return out, e
+	return out, err
 }
 
 type Auth struct {
@@ -288,21 +288,21 @@ type Auth struct {
 }
 
 func (c *Client) Auth(ctx context.Context) (Auth, error) {
-	var a Auth
-	e := c.WS(ctx, siteInfoFn, nil, &a)
-	a.ExpirySource = "unknown: get_site_info and mobile launch do not expose this token's validuntil; site duration policy is not an expiry timestamp"
-	if p, ok := c.Tokens.(StaticToken); ok && p.File != "" {
+	var auth Auth
+	err := c.WS(ctx, siteInfoFn, nil, &auth)
+	auth.ExpirySource = "unknown: get_site_info and mobile launch do not expose this token's validuntil; site duration policy is not an expiry timestamp"
+	if staticToken, ok := c.Tokens.(StaticToken); ok && staticToken.File != "" {
 		var meta struct {
 			ObtainedAt time.Time `json:"obtained_at"`
 		}
-		if b, err := os.ReadFile(p.File + ".meta.json"); err == nil && json.Unmarshal(b, &meta) == nil && !meta.ObtainedAt.IsZero() {
+		if metaContent, readErr := os.ReadFile(staticToken.File + ".meta.json"); readErr == nil && json.Unmarshal(metaContent, &meta) == nil && !meta.ObtainedAt.IsZero() {
 			t := meta.ObtainedAt.Format(time.RFC3339)
 			age := max(0, int(time.Since(meta.ObtainedAt).Hours()/24))
-			a.TokenObtainedAt = &t
-			a.TokenAgeDays = &age
+			auth.TokenObtainedAt = &t
+			auth.TokenAgeDays = &age
 		}
 	}
-	return a, e
+	return auth, err
 }
 
 type Course struct {
@@ -318,35 +318,35 @@ var year = regexp.MustCompile(`\s+2\d(?:\d\d)?/\d{2,4}(?:-[12][CS]|-S[12])?`)
 // CleanName picks the Spanish or English part of a bilingual UC3M course name and
 // strips the academic year. Adapted from extractCourseNameByLanguage in AGDownloader
 // (MIT, Copyright (c) 2024 Eduardo Alarcón; see THIRD_PARTY_NOTICES.md).
-func CleanName(s, lang string) string {
-	loc := year.FindStringIndex(s)
+func CleanName(name, lang string) string {
+	loc := year.FindStringIndex(name)
 	if loc == nil {
 		for _, sep := range []string{"-1C", "-2C", "-1S", "-2S", "Bachelor", "Student", "Convenio-Bilateral s"} {
-			if idx := strings.Index(s, sep); idx > 0 {
+			if idx := strings.Index(name, sep); idx > 0 {
 				end := idx
 				if strings.HasPrefix(sep, "-") {
 					end += len(sep)
 				}
 				if lang == "en" {
-					part := strings.TrimSpace(s[end:])
+					part := strings.TrimSpace(name[end:])
 					if part != "" {
 						return part
 					}
 				}
-				return strings.TrimSpace(s[:idx])
+				return strings.TrimSpace(name[:idx])
 			}
 		}
-		return strings.TrimSpace(s)
+		return strings.TrimSpace(name)
 	}
-	es := strings.TrimSpace(s[:loc[0]])
-	en := strings.TrimSpace(s[loc[1]:])
-	if next := year.FindStringIndex(en); next != nil {
-		en = strings.TrimSpace(en[:next[0]])
+	spanish := strings.TrimSpace(name[:loc[0]])
+	english := strings.TrimSpace(name[loc[1]:])
+	if next := year.FindStringIndex(english); next != nil {
+		english = strings.TrimSpace(english[:next[0]])
 	}
-	if lang == "en" && en != "" {
-		return en
+	if lang == "en" && english != "" {
+		return english
 	}
-	return es
+	return spanish
 }
 func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, error) {
 	if class == "" {
@@ -367,17 +367,17 @@ func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, err
 	all := []Course{}
 	offset := 0
 	for {
-		e := c.WS(ctx, "core_course_get_enrolled_courses_by_timeline_classification", url.Values{"classification": {class}, "limit": {"100"}, "offset": {strconv.Itoa(offset)}}, &res)
-		if e != nil {
-			var api *APIError
-			if errors.Is(e, ErrTokenExpired) || !errors.As(e, &api) || (api.Code != "invalidparameter" && api.Code != "servicenotavailable" && api.Code != "wsfunctionnotavailable" && api.Code != "accessexception") {
-				return nil, e
+		listErr := c.WS(ctx, "core_course_get_enrolled_courses_by_timeline_classification", url.Values{"classification": {class}, "limit": {"100"}, "offset": {strconv.Itoa(offset)}}, &res)
+		if listErr != nil {
+			var apiErr *APIError
+			if errors.Is(listErr, ErrTokenExpired) || !errors.As(listErr, &apiErr) || (apiErr.Code != "invalidparameter" && apiErr.Code != "servicenotavailable" && apiErr.Code != "wsfunctionnotavailable" && apiErr.Code != "accessexception") {
+				return nil, listErr
 			}
-			a, err := c.Auth(ctx)
+			auth, err := c.Auth(ctx)
 			if err != nil {
 				return nil, err
 			}
-			if err = c.WS(ctx, "core_enrol_get_users_courses", url.Values{"userid": {strconv.FormatInt(a.UserID, 10)}}, &all); err != nil {
+			if err = c.WS(ctx, "core_enrol_get_users_courses", url.Values{"userid": {strconv.FormatInt(auth.UserID, 10)}}, &all); err != nil {
 				return nil, err
 			}
 			break
@@ -392,12 +392,12 @@ func (c *Client) Courses(ctx context.Context, class, lang string) ([]Course, err
 		}
 	}
 	for i := range all {
-		s := all[i].Display
-		if s == "" {
-			s = all[i].Fullname
+		name := all[i].Display
+		if name == "" {
+			name = all[i].Fullname
 		}
-		c.rememberCourse(all[i].ID, s)
-		all[i].Name = CleanName(s, lang)
+		c.rememberCourse(all[i].ID, name)
+		all[i].Name = CleanName(name, lang)
 	}
 	return all, nil
 }
@@ -433,8 +433,8 @@ type Section struct {
 func Accept(name string, include, exclude []string) bool {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	has := func(list []string) bool {
-		for _, s := range list {
-			if strings.TrimPrefix(strings.ToLower(s), ".") == ext {
+		for _, allowed := range list {
+			if strings.TrimPrefix(strings.ToLower(allowed), ".") == ext {
 				return true
 			}
 		}
@@ -447,74 +447,74 @@ func (c *Client) Files(ctx context.Context, id int64, include, exclude []string)
 		return nil, errors.New("course_id must be positive")
 	}
 	name := c.CourseName(ctx, id, "es")
-	var ss []Section
-	if e := c.WS(ctx, "core_course_get_contents", url.Values{"courseid": {strconv.FormatInt(id, 10)}}, &ss); e != nil {
-		return nil, e
+	var sections []Section
+	if err := c.WS(ctx, "core_course_get_contents", url.Values{"courseid": {strconv.FormatInt(id, 10)}}, &sections); err != nil {
+		return nil, err
 	}
-	for si := range ss {
-		for mi := range ss[si].Modules {
-			m := &ss[si].Modules[mi]
+	for sectionIndex := range sections {
+		for moduleIndex := range sections[sectionIndex].Modules {
+			module := &sections[sectionIndex].Modules[moduleIndex]
 			out := []File{}
-			for _, f := range m.Files {
-				if f.Type != "file" || !Accept(f.Filename, include, exclude) {
+			for _, file := range module.Files {
+				if file.Type != "file" || !Accept(file.Filename, include, exclude) {
 					continue
 				}
-				u, e := url.Parse(f.RawURL)
-				if e != nil {
+				fileURL, err := url.Parse(file.RawURL)
+				if err != nil {
 					continue
 				}
-				q := u.Query()
-				q.Del("token")
-				q.Del("wstoken")
-				u.RawQuery = q.Encode()
-				f.URL = u.String()
-				f.RawURL = ""
-				f.CourseName = name
-				f.Handle = StableHandle(id, m.ID, f.Filepath, f.Filename)
-				f.CourseID = id
-				f.ModuleID = m.ID
-				f.Section = ss[si].Name
-				f.Module = m.Name
-				out = append(out, f)
+				query := fileURL.Query()
+				query.Del("token")
+				query.Del("wstoken")
+				fileURL.RawQuery = query.Encode()
+				file.URL = fileURL.String()
+				file.RawURL = ""
+				file.CourseName = name
+				file.Handle = StableHandle(id, module.ID, file.Filepath, file.Filename)
+				file.CourseID = id
+				file.ModuleID = module.ID
+				file.Section = sections[sectionIndex].Name
+				file.Module = module.Name
+				out = append(out, file)
 			}
-			m.Files = out
+			module.Files = out
 		}
 	}
-	return ss, nil
+	return sections, nil
 }
-func (c *Client) Download(ctx context.Context, f File) (*http.Response, error) {
-	token, e := c.Tokens.Get(ctx)
-	if e != nil {
-		return nil, e
+func (c *Client) Download(ctx context.Context, file File) (*http.Response, error) {
+	token, err := c.Tokens.Get(ctx)
+	if err != nil {
+		return nil, err
 	}
-	u, e := url.Parse(f.URL)
+	fileURL, err := url.Parse(file.URL)
 	base, _ := url.Parse(c.Base)
-	if e != nil || u.Host != base.Host || u.Scheme != base.Scheme || u.User != nil {
+	if err != nil || fileURL.Host != base.Host || fileURL.Scheme != base.Scheme || fileURL.User != nil {
 		return nil, errors.New("file URL outside AulaGlobal refused")
 	}
-	q := u.Query()
-	q.Set("token", token)
-	u.RawQuery = q.Encode()
+	query := fileURL.Query()
+	query.Set("token", token)
+	fileURL.RawQuery = query.Encode()
 	for attempt := 0; attempt < 3; attempt++ {
 		var resp *http.Response
-		var err error
+		var requestErr error
 		// GET is idempotent: a 429/503 pauses every request and is retried by politely.
-		if e = c.politely(ctx, true, func() (*throttle, error) {
-			req, _ := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
-			resp, err = c.HTTP.Do(req)
-			if th := throttleOf(resp); th != nil {
+		if err = c.politely(ctx, true, func() (*throttle, error) {
+			req, _ := http.NewRequestWithContext(ctx, "GET", fileURL.String(), nil)
+			resp, requestErr = c.HTTP.Do(req)
+			if throttled := throttleOf(resp); throttled != nil {
 				resp.Body.Close()
 				resp = nil
-				return th, nil
+				return throttled, nil
 			}
 			return nil, nil
-		}); e != nil {
-			return nil, e
+		}); err != nil {
+			return nil, err
 		}
 		transient := false
-		if err != nil {
-			var ne net.Error
-			transient = errors.As(err, &ne) && ne.Timeout()
+		if requestErr != nil {
+			var netErr net.Error
+			transient = errors.As(requestErr, &netErr) && netErr.Timeout()
 		} else {
 			transient = resp.StatusCode >= 500
 		}
@@ -529,8 +529,8 @@ func (c *Client) Download(ctx context.Context, f File) (*http.Response, error) {
 			}
 			continue
 		}
-		if err != nil {
-			return nil, errors.New(Redact(err.Error(), token))
+		if requestErr != nil {
+			return nil, errors.New(Redact(requestErr.Error(), token))
 		}
 		if resp.StatusCode != 200 {
 			resp.Body.Close()
@@ -547,8 +547,8 @@ func (c *Client) Download(ctx context.Context, f File) (*http.Response, error) {
 }
 
 func StableHandle(course, module int64, path, name string) string {
-	b, _ := json.Marshal([]any{course, module, path, name})
-	sum := sha256.Sum256(b)
+	encoded, _ := json.Marshal([]any{course, module, path, name})
+	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:16])
 }
 

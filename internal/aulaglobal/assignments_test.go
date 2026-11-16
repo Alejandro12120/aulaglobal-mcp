@@ -18,7 +18,7 @@ import (
 
 func TestAssignments(t *testing.T) {
 	now := time.Now().Unix()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		if r.Method != "POST" {
 			t.Error("not POST")
@@ -50,11 +50,11 @@ func TestAssignments(t *testing.T) {
 			t.Errorf("unexpected WS %s", r.Form.Get("wsfunction"))
 		}
 	}))
-	defer ts.Close()
-	c := New(ts.URL, StaticToken{Value: "secret"})
-	out, e := c.Assignments(context.Background(), AssignmentInput{IncludeSubmissionStatus: true, Language: "en"}, func(s string) string { return s })
-	if e != nil || len(out.Assignments) != 3 {
-		t.Fatalf("%+v %v", out, e)
+	defer moodle.Close()
+	client := New(moodle.URL, StaticToken{Value: "secret"})
+	out, err := client.Assignments(context.Background(), AssignmentInput{IncludeSubmissionStatus: true, Language: "en"}, func(s string) string { return s })
+	if err != nil || len(out.Assignments) != 3 {
+		t.Fatalf("%+v %v", out, err)
 	}
 	a := out.Assignments
 	if a[0].ID != 2 || a[1].ID != 1 || a[2].ID != 4 || a[0].CourseName != "Algebra" {
@@ -70,9 +70,9 @@ func TestAssignments(t *testing.T) {
 		status string
 		n      int
 	}{{"all", 5}, {"overdue", 1}} {
-		o, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1, 2}, Status: tc.status}, func(s string) string { return s })
-		if e != nil || len(o.Assignments) != tc.n {
-			t.Fatalf("%s %+v %v", tc.status, o, e)
+		o, err := client.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1, 2}, Status: tc.status}, func(s string) string { return s })
+		if err != nil || len(o.Assignments) != tc.n {
+			t.Fatalf("%s %+v %v", tc.status, o, err)
 		}
 	}
 	for _, tc := range []struct {
@@ -86,7 +86,7 @@ func TestAssignments(t *testing.T) {
 }
 func TestStableRevisionHandles(t *testing.T) {
 	revision := "1"
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		if r.Form.Get("wsfunction") == "core_course_get_courses_by_field" {
 			fmt.Fprint(w, `{"courses":[{"id":1,"fullname":"Curso"}]}`)
@@ -94,15 +94,15 @@ func TestStableRevisionHandles(t *testing.T) {
 		}
 		fmt.Fprintf(w, `[{"name":"Tema","modules":[{"id":2,"contents":[{"type":"file","filename":"a.pdf","filepath":"/folder/","fileurl":"http://%s/pluginfile.php/%s/a.pdf"}]}]}]`, r.Host, revision)
 	}))
-	defer ts.Close()
-	c := New(ts.URL, StaticToken{Value: "secret"})
-	a, e := c.Files(context.Background(), 1, nil, nil)
-	if e != nil {
-		t.Fatal(e)
+	defer moodle.Close()
+	client := New(moodle.URL, StaticToken{Value: "secret"})
+	a, err := client.Files(context.Background(), 1, nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	revision = "2"
-	b, e := c.Files(context.Background(), 1, nil, nil)
-	if e != nil || a[0].Modules[0].Files[0].Handle != b[0].Modules[0].Files[0].Handle {
+	b, err := client.Files(context.Background(), 1, nil, nil)
+	if err != nil || a[0].Modules[0].Files[0].Handle != b[0].Modules[0].Files[0].Handle {
 		t.Fatal("revision changed handle")
 	}
 }
@@ -110,14 +110,14 @@ func TestSecretReplaceMetadata(t *testing.T) {
 	dir := t.TempDir()
 	os.Chmod(dir, 0700)
 	p := filepath.Join(dir, "token")
-	if e := SaveSecret(p, "one", false); e != nil {
-		t.Fatal(e)
+	if err := SaveSecret(p, "one", false); err != nil {
+		t.Fatal(err)
 	}
-	if e := SaveSecret(p, "two", false); e == nil {
+	if err := SaveSecret(p, "two", false); err == nil {
 		t.Fatal("overwrite without force")
 	}
-	if e := SaveSecret(p, "two", true); e != nil {
-		t.Fatal(e)
+	if err := SaveSecret(p, "two", true); err != nil {
+		t.Fatal(err)
 	}
 	st, _ := os.Stat(p)
 	b, _ := os.ReadFile(p)
@@ -125,21 +125,21 @@ func TestSecretReplaceMetadata(t *testing.T) {
 		t.Fatal("incorrect secret")
 	}
 	meta, _ := json.Marshal(map[string]string{"obtained_at": time.Now().Add(-48 * time.Hour).Format(time.RFC3339)})
-	if e := SaveSecret(p+".meta.json", string(meta), true); e != nil {
-		t.Fatal(e)
+	if err := SaveSecret(p+".meta.json", string(meta), true); err != nil {
+		t.Fatal(err)
 	}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"fullname":"User"}`) }))
-	defer ts.Close()
-	a, e := New(ts.URL, StaticToken{File: p}).Auth(context.Background())
-	if e != nil || a.TokenObtainedAt == nil || a.TokenAgeDays == nil || *a.TokenAgeDays != 2 || a.ExpiresAt != nil {
-		t.Fatalf("%+v %v", a, e)
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"fullname":"User"}`) }))
+	defer moodle.Close()
+	a, err := New(moodle.URL, StaticToken{File: p}).Auth(context.Background())
+	if err != nil || a.TokenObtainedAt == nil || a.TokenAgeDays == nil || *a.TokenAgeDays != 2 || a.ExpiresAt != nil {
+		t.Fatalf("%+v %v", a, err)
 	}
 }
 
 func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
 	for _, text := range []string{strings.Repeat("a", 2500), strings.Repeat("界", 1500), strings.Repeat("界", 2500)} {
 		t.Run(fmt.Sprint(len(text)), func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.ParseForm()
 				switch r.Form.Get("wsfunction") {
 				case "mod_assign_get_assignments":
@@ -151,11 +151,11 @@ func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
 					fmt.Fprint(w, `{"courses":[]}`)
 				}
 			}))
-			defer ts.Close()
-			c := New(ts.URL, StaticToken{Value: "secret"})
-			out, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, Status: "all", Language: "en"}, func(s string) string { return s })
-			if e != nil {
-				t.Fatal(e)
+			defer moodle.Close()
+			client := New(moodle.URL, StaticToken{Value: "secret"})
+			out, err := client.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, Status: "all", Language: "en"}, func(s string) string { return s })
+			if err != nil {
+				t.Fatal(err)
 			}
 			expected := text
 			if len([]rune(text)) > 2000 {
@@ -168,7 +168,7 @@ func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
 			if a.CourseName != "Algebra" || a.Attachments[0].CourseName != "Álgebra" {
 				t.Errorf("names: %+v", a)
 			}
-			c.Files(context.Background(), 1, nil, nil)
+			client.Files(context.Background(), 1, nil, nil)
 		})
 	}
 }
@@ -178,7 +178,7 @@ func TestAssignmentsAbortOnDeadToken(t *testing.T) {
 	for _, code := range []string{"invalidtoken", "accessexception"} {
 		t.Run(code, func(t *testing.T) {
 			var statusCalls atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.ParseForm()
 				switch r.Form.Get("wsfunction") {
 				case "mod_assign_get_assignments":
@@ -194,11 +194,11 @@ func TestAssignmentsAbortOnDeadToken(t *testing.T) {
 					fmt.Fprint(w, `{"exception":"x","errorcode":"invalidtoken"}`)
 				}
 			}))
-			defer ts.Close()
-			c := New(ts.URL, StaticToken{Value: "secret"})
-			out, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, IncludeSubmissionStatus: true}, func(s string) string { return s })
-			if !errors.Is(e, ErrTokenExpired) || len(out.Assignments) != 0 {
-				t.Fatalf("want single token error, got %v with %d assignments", e, len(out.Assignments))
+			defer moodle.Close()
+			client := New(moodle.URL, StaticToken{Value: "secret"})
+			out, err := client.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, IncludeSubmissionStatus: true}, func(s string) string { return s })
+			if !errors.Is(err, ErrTokenExpired) || len(out.Assignments) != 0 {
+				t.Fatalf("want single token error, got %v with %d assignments", err, len(out.Assignments))
 			}
 			if n := statusCalls.Load(); n > 8 {
 				t.Fatalf("not short-circuited: %d status calls", n)

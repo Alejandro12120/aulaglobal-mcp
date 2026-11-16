@@ -68,27 +68,27 @@ func (f *fakeClock) sleep(ctx context.Context, d time.Duration) error {
 }
 
 func newFakeClient(base string) (*Client, *fakeClock) {
-	c := New(base, StaticToken{Value: "secret"})
-	fc := &fakeClock{t: time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)}
-	p := c.polite()
-	p.now, p.sleep, p.jitter = fc.now, fc.sleep, func() float64 { return 0.5 } // jitter factor exactly 1
-	p.last, p.tokens = fc.now(), p.burst
-	return c, fc
+	client := New(base, StaticToken{Value: "secret"})
+	clock := &fakeClock{t: time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)}
+	p := client.polite()
+	p.now, p.sleep, p.jitter = clock.now, clock.sleep, func() float64 { return 0.5 } // jitter factor exactly 1
+	p.last, p.tokens = clock.now(), p.burst
+	return client, clock
 }
 
 func TestRateLimiterSpacing(t *testing.T) {
-	c, fc := newFakeClient("http://unused")
-	if e := c.SetMaxRPS(4); e != nil { // burst 8
-		t.Fatal(e)
+	client, clock := newFakeClient("http://unused")
+	if err := client.SetMaxRPS(4); err != nil { // burst 8
+		t.Fatal(err)
 	}
-	p := c.polite()
+	p := client.polite()
 	p.tokens = p.burst
 	for i := 0; i < 20; i++ {
-		if e := p.wait(context.Background()); e != nil {
-			t.Fatal(e)
+		if err := p.wait(context.Background()); err != nil {
+			t.Fatal(err)
 		}
 	}
-	got := fc.sleeps()
+	got := clock.sleeps()
 	if len(got) != 12 {
 		t.Fatalf("the burst of 8 must pass at once and the other 12 be spaced: %d sleeps %v", len(got), got)
 	}
@@ -100,18 +100,18 @@ func TestRateLimiterSpacing(t *testing.T) {
 }
 
 func TestRateLimiterRealTimeTolerant(t *testing.T) {
-	c := New("http://unused", nil)
-	if e := c.SetMaxRPS(50); e != nil {
-		t.Fatal(e)
+	client := New("http://unused", nil)
+	if err := client.SetMaxRPS(50); err != nil {
+		t.Fatal(err)
 	}
-	p := c.polite()
+	p := client.polite()
 	p.mu.Lock()
 	p.burst, p.tokens = 1, 1 // no burst: 6 requests need >= 5 intervals of 20 ms
 	p.mu.Unlock()
 	start := time.Now()
 	for i := 0; i < 6; i++ {
-		if e := p.wait(context.Background()); e != nil {
-			t.Fatal(e)
+		if err := p.wait(context.Background()); err != nil {
+			t.Fatal(err)
 		}
 	}
 	if d := time.Since(start); d < 70*time.Millisecond || d > 3*time.Second {
@@ -120,14 +120,14 @@ func TestRateLimiterRealTimeTolerant(t *testing.T) {
 }
 
 func TestRateLimiterContextCancel(t *testing.T) {
-	c := New("http://unused", nil)
-	p := c.polite()
+	client := New("http://unused", nil)
+	p := client.polite()
 	p.pause(time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
 	start := time.Now()
-	if e := p.wait(ctx); !errors.Is(e, context.Canceled) {
-		t.Fatalf("got %v", e)
+	if err := p.wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("cancellation not prompt")
@@ -140,8 +140,8 @@ func TestRateLimiterContextCancel(t *testing.T) {
 	p2.mu.Unlock()
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel2()
-	if e := p2.wait(ctx2); !errors.Is(e, context.DeadlineExceeded) {
-		t.Fatalf("got %v", e)
+	if err := p2.wait(ctx2); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
 	}
 	p2.mu.Lock()
 	tk := p2.tokens
@@ -153,32 +153,32 @@ func TestRateLimiterContextCancel(t *testing.T) {
 
 func TestMaxRPSValidation(t *testing.T) {
 	for _, s := range []string{"", "abc", "0", "-1", "0.05", "101", "NaN", "Inf"} {
-		if _, e := ParseMaxRPS(s); e == nil {
+		if _, err := ParseMaxRPS(s); err == nil {
 			t.Errorf("%q accepted", s)
 		}
 	}
 	for s, want := range map[string]float64{"4": 4, " 0.5 ": 0.5, "100": 100} {
-		if got, e := ParseMaxRPS(s); e != nil || got != want {
-			t.Errorf("%q: %v %v", s, got, e)
+		if got, err := ParseMaxRPS(s); err != nil || got != want {
+			t.Errorf("%q: %v %v", s, got, err)
 		}
 	}
-	c := New("http://unused", nil)
-	if c.SetMaxRPS(0) == nil || c.SetMaxRPS(1000) == nil {
+	client := New("http://unused", nil)
+	if client.SetMaxRPS(0) == nil || client.SetMaxRPS(1000) == nil {
 		t.Fatal("out-of-range rate accepted")
 	}
-	if p := c.polite(); p.rate != DefaultMaxRPS || p.burst != 8 {
+	if p := client.polite(); p.rate != DefaultMaxRPS || p.burst != 8 {
 		t.Fatalf("defaults changed: %v/%v", p.rate, p.burst)
 	}
 }
 
 // throttleServer answers the first n requests with status (and header), then a valid JSON body.
-func throttleServer(n int32, status int, retryAfter func() string, hits *atomic.Int32, times *[]time.Time, fc *fakeClock) *httptest.Server {
+func throttleServer(n int32, status int, retryAfter func() string, hits *atomic.Int32, times *[]time.Time, clock *fakeClock) *httptest.Server {
 	var mu sync.Mutex
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := hits.Add(1)
 		if times != nil {
 			mu.Lock()
-			*times = append(*times, fc.now())
+			*times = append(*times, clock.now())
 			mu.Unlock()
 		}
 		if h <= n {
@@ -199,18 +199,18 @@ func TestRetryAfterSeconds(t *testing.T) {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var hits atomic.Int32
 			var times []time.Time
-			c, fc := newFakeClient("")
-			ts := throttleServer(1, status, func() string { return "3" }, &hits, &times, fc)
-			defer ts.Close()
-			c.Base = ts.URL
+			client, clock := newFakeClient("")
+			moodle := throttleServer(1, status, func() string { return "3" }, &hits, &times, clock)
+			defer moodle.Close()
+			client.Base = moodle.URL
 			var out struct{ Sitename string }
-			if e := c.WS(context.Background(), siteInfoFn, nil, &out); e != nil || out.Sitename != "x" {
-				t.Fatal(e)
+			if err := client.WS(context.Background(), siteInfoFn, nil, &out); err != nil || out.Sitename != "x" {
+				t.Fatal(err)
 			}
 			if hits.Load() != 2 {
 				t.Fatalf("hits %d", hits.Load())
 			}
-			if got := fc.sleeps(); len(got) != 1 || got[0] != 3*time.Second {
+			if got := clock.sleeps(); len(got) != 1 || got[0] != 3*time.Second {
 				t.Fatalf("slept %v, want [3s]", got)
 			}
 			if gap := times[1].Sub(times[0]); gap < 3*time.Second {
@@ -222,14 +222,14 @@ func TestRetryAfterSeconds(t *testing.T) {
 
 func TestRetryAfterHTTPDate(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	ts := throttleServer(1, 429, func() string { return fc.now().Add(10 * time.Second).UTC().Format(http.TimeFormat) }, &hits, nil, fc)
-	defer ts.Close()
-	c.Base = ts.URL
-	if e := c.WS(context.Background(), siteInfoFn, nil, &struct{}{}); e != nil {
-		t.Fatal(e)
+	client, clock := newFakeClient("")
+	moodle := throttleServer(1, 429, func() string { return clock.now().Add(10 * time.Second).UTC().Format(http.TimeFormat) }, &hits, nil, clock)
+	defer moodle.Close()
+	client.Base = moodle.URL
+	if err := client.WS(context.Background(), siteInfoFn, nil, &struct{}{}); err != nil {
+		t.Fatal(err)
 	}
-	if got := fc.sleeps(); len(got) != 1 || got[0] != 10*time.Second {
+	if got := clock.sleeps(); len(got) != 1 || got[0] != 10*time.Second {
 		t.Fatalf("slept %v, want [10s]", got)
 	}
 }
@@ -276,46 +276,46 @@ func TestRetryAfterParsing(t *testing.T) {
 
 func TestRetriesAreBounded(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	ts := throttleServer(1000, 503, nil, &hits, nil, fc)
-	defer ts.Close()
-	c.Base = ts.URL
-	e := c.WS(context.Background(), siteInfoFn, nil, &struct{}{})
+	client, clock := newFakeClient("")
+	moodle := throttleServer(1000, 503, nil, &hits, nil, clock)
+	defer moodle.Close()
+	client.Base = moodle.URL
+	err := client.WS(context.Background(), siteInfoFn, nil, &struct{}{})
 	var rl *RateLimitError
-	if !errors.Is(e, ErrRateLimited) || !errors.As(e, &rl) {
-		t.Fatalf("got %v", e)
+	if !errors.Is(err, ErrRateLimited) || !errors.As(err, &rl) {
+		t.Fatalf("got %v", err)
 	}
 	if hits.Load() != 3 {
 		t.Fatalf("1 attempt + 2 retries expected, got %d requests", hits.Load())
 	}
-	if got := fc.sleeps(); len(got) != 2 || got[0] != 5*time.Second || got[1] != 10*time.Second {
+	if got := clock.sleeps(); len(got) != 2 || got[0] != 5*time.Second || got[1] != 10*time.Second {
 		t.Fatalf("backoff %v, want [5s 10s]", got)
 	}
-	if rl.RetryAfter != 20*time.Second || !strings.Contains(e.Error(), "AulaGlobal está limitando las peticiones; vuelve a intentarlo en 20 s") {
-		t.Fatalf("message: %v", e)
+	if rl.RetryAfter != 20*time.Second || !strings.Contains(err.Error(), "AulaGlobal está limitando las peticiones; vuelve a intentarlo en 20 s") {
+		t.Fatalf("message: %v", err)
 	}
-	if strings.Contains(e.Error(), "secret") {
+	if strings.Contains(err.Error(), "secret") {
 		t.Fatal("token in error")
 	}
 }
 
 func TestGlobalPauseAffectsParallelRequests(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	fc.release = make(chan struct{})
-	fc.sleeping = make(chan time.Duration, 8)
-	ts := throttleServer(1, 429, func() string { return "7" }, &hits, nil, fc)
-	defer ts.Close()
-	c.Base = ts.URL
+	client, clock := newFakeClient("")
+	clock.release = make(chan struct{})
+	clock.sleeping = make(chan time.Duration, 8)
+	moodle := throttleServer(1, 429, func() string { return "7" }, &hits, nil, clock)
+	defer moodle.Close()
+	client.Base = moodle.URL
 	errs := make(chan error, 2)
-	go func() { errs <- c.WS(context.Background(), siteInfoFn, nil, &struct{}{}) }()
-	if d := <-fc.sleeping; d != 7*time.Second {
+	go func() { errs <- client.WS(context.Background(), siteInfoFn, nil, &struct{}{}) }()
+	if d := <-clock.sleeping; d != 7*time.Second {
 		t.Fatalf("first request paused %v", d)
 	}
 	// A different call, started while the pause is active, must not reach the server.
-	go func() { errs <- c.WS(context.Background(), "core_course_get_contents", nil, &struct{}{}) }()
+	go func() { errs <- client.WS(context.Background(), "core_course_get_contents", nil, &struct{}{}) }()
 	select {
-	case d := <-fc.sleeping:
+	case d := <-clock.sleeping:
 		if d != 7*time.Second {
 			t.Fatalf("second request paused %v", d)
 		}
@@ -325,10 +325,10 @@ func TestGlobalPauseAffectsParallelRequests(t *testing.T) {
 	if hits.Load() != 1 {
 		t.Fatalf("a request was sent during the pause: %d hits", hits.Load())
 	}
-	close(fc.release)
+	close(clock.release)
 	for i := 0; i < 2; i++ {
-		if e := <-errs; e != nil {
-			t.Fatal(e)
+		if err := <-errs; err != nil {
+			t.Fatal(err)
 		}
 	}
 	if hits.Load() != 3 {
@@ -338,35 +338,35 @@ func TestGlobalPauseAffectsParallelRequests(t *testing.T) {
 
 func TestContextHandlingDuringPause(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	ts := throttleServer(1000, 429, func() string { return "100" }, &hits, nil, fc)
-	defer ts.Close()
-	c.Base = ts.URL
+	client, clock := newFakeClient("")
+	moodle := throttleServer(1000, 429, func() string { return "100" }, &hits, nil, clock)
+	defer moodle.Close()
+	client.Base = moodle.URL
 
 	// Pause longer than the caller's remaining time: fail at once with the clear error.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	e := c.WS(ctx, siteInfoFn, nil, &struct{}{})
+	err := client.WS(ctx, siteInfoFn, nil, &struct{}{})
 	var rl *RateLimitError
-	if !errors.As(e, &rl) || rl.RetryAfter != 100*time.Second || !strings.Contains(e.Error(), "en 100 s") {
-		t.Fatalf("got %v", e)
+	if !errors.As(err, &rl) || rl.RetryAfter != 100*time.Second || !strings.Contains(err.Error(), "en 100 s") {
+		t.Fatalf("got %v", err)
 	}
-	if len(fc.sleeps()) != 0 || hits.Load() != 1 {
-		t.Fatalf("waited or retried despite insufficient context: %v hits=%d", fc.sleeps(), hits.Load())
+	if len(clock.sleeps()) != 0 || hits.Load() != 1 {
+		t.Fatalf("waited or retried despite insufficient context: %v hits=%d", clock.sleeps(), hits.Load())
 	}
 
 	// No deadline: cancelling while paused returns promptly with the context error.
-	fc.release = make(chan struct{})
-	fc.sleeping = make(chan time.Duration, 4)
+	clock.release = make(chan struct{})
+	clock.sleeping = make(chan time.Duration, 4)
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- c.WS(ctx2, "core_course_get_contents", nil, &struct{}{}) }()
-	<-fc.sleeping
+	go func() { done <- client.WS(ctx2, "core_course_get_contents", nil, &struct{}{}) }()
+	<-clock.sleeping
 	cancel2()
 	select {
-	case e := <-done:
-		if !errors.Is(e, context.Canceled) {
-			t.Fatalf("got %v", e)
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancellation ignored during pause")
@@ -375,54 +375,54 @@ func TestContextHandlingDuringPause(t *testing.T) {
 
 func TestMoodleJSONErrorIsNotARateLimit(t *testing.T) {
 	var hits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		fmt.Fprint(w, `{"exception":"moodle_exception","errorcode":"toomanyrequests","message":"slow down"}`)
 	}))
-	defer ts.Close()
-	c, fc := newFakeClient(ts.URL)
-	e := c.WS(context.Background(), "core_course_get_contents", nil, &struct{}{})
+	defer moodle.Close()
+	client, clock := newFakeClient(moodle.URL)
+	err := client.WS(context.Background(), "core_course_get_contents", nil, &struct{}{})
 	var api *APIError
-	if !errors.As(e, &api) || errors.Is(e, ErrRateLimited) {
-		t.Fatalf("got %v", e)
+	if !errors.As(err, &api) || errors.Is(err, ErrRateLimited) {
+		t.Fatalf("got %v", err)
 	}
-	if hits.Load() != 1 || len(fc.sleeps()) != 0 {
+	if hits.Load() != 1 || len(clock.sleeps()) != 0 {
 		t.Fatal("HTTP 200 JSON error caused a retry or pause")
 	}
 }
 
 func TestOtherStatusesAreNotRateLimits(t *testing.T) {
 	var hits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.WriteHeader(500)
 	}))
-	defer ts.Close()
-	c, fc := newFakeClient(ts.URL)
-	e := c.WS(context.Background(), siteInfoFn, nil, &struct{}{})
-	if e == nil || errors.Is(e, ErrRateLimited) || hits.Load() != 1 || len(fc.sleeps()) != 0 {
-		t.Fatalf("%v hits=%d", e, hits.Load())
+	defer moodle.Close()
+	client, clock := newFakeClient(moodle.URL)
+	err := client.WS(context.Background(), siteInfoFn, nil, &struct{}{})
+	if err == nil || errors.Is(err, ErrRateLimited) || hits.Load() != 1 || len(clock.sleeps()) != 0 {
+		t.Fatalf("%v hits=%d", err, hits.Load())
 	}
 }
 
 func TestUnknownFunctionIsNeverRetriedOrShared(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	ts := throttleServer(1000, 429, func() string { return "1" }, &hits, nil, fc)
-	defer ts.Close()
-	c.Base = ts.URL
-	e := c.WS(context.Background(), "core_message_send_instant_messages", nil, &struct{}{})
-	if !errors.Is(e, ErrRateLimited) || hits.Load() != 1 {
-		t.Fatalf("non read-only function retried: %v hits=%d", e, hits.Load())
+	client, clock := newFakeClient("")
+	moodle := throttleServer(1000, 429, func() string { return "1" }, &hits, nil, clock)
+	defer moodle.Close()
+	client.Base = moodle.URL
+	err := client.WS(context.Background(), "core_message_send_instant_messages", nil, &struct{}{})
+	if !errors.Is(err, ErrRateLimited) || hits.Load() != 1 {
+		t.Fatalf("non read-only function retried: %v hits=%d", err, hits.Load())
 	}
 	// ...but the pause still applies to what comes next.
-	if _, ok := p429Pending(c); !ok {
+	if _, ok := p429Pending(client); !ok {
 		t.Fatal("429 did not pause the process")
 	}
 }
 
-func p429Pending(c *Client) (time.Duration, bool) {
-	p := c.polite()
+func p429Pending(client *Client) (time.Duration, bool) {
+	p := client.polite()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	d := p.until.Sub(p.now())
@@ -432,13 +432,13 @@ func p429Pending(c *Client) (time.Duration, bool) {
 func TestSingleflight(t *testing.T) {
 	var hits atomic.Int32
 	gate := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		<-gate
 		fmt.Fprint(w, `{"sitename":"shared"}`)
 	}))
-	defer ts.Close()
-	c, _ := newFakeClient(ts.URL)
+	defer moodle.Close()
+	client, _ := newFakeClient(moodle.URL)
 	const n = 10
 	var wg sync.WaitGroup
 	results := make([]string, n)
@@ -447,8 +447,8 @@ func TestSingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var out struct{ Sitename string }
-			if e := c.WS(context.Background(), siteInfoFn, nil, &out); e != nil {
-				t.Error(e)
+			if err := client.WS(context.Background(), siteInfoFn, nil, &out); err != nil {
+				t.Error(err)
 			}
 			results[i] = out.Sitename
 		}()
@@ -456,7 +456,7 @@ func TestSingleflight(t *testing.T) {
 	key := cacheKey("secret", siteInfoFn, nil)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		p := c.polite()
+		p := client.polite()
 		p.cmu.Lock()
 		f := p.flights[key]
 		w := 0
@@ -483,32 +483,32 @@ func TestSingleflight(t *testing.T) {
 		}
 	}
 	// site_info is deduplicated while in flight but never cached.
-	if e := c.WS(context.Background(), siteInfoFn, nil, &struct{}{}); e != nil || hits.Load() != 2 {
-		t.Fatalf("site_info must not be cached: %v hits=%d", e, hits.Load())
+	if err := client.WS(context.Background(), siteInfoFn, nil, &struct{}{}); err != nil || hits.Load() != 2 {
+		t.Fatalf("site_info must not be cached: %v hits=%d", err, hits.Load())
 	}
 }
 
 func TestSingleflightSurvivesOneCallerLeaving(t *testing.T) {
 	var hits atomic.Int32
 	gate := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		<-gate
 		fmt.Fprint(w, `{"sitename":"shared"}`)
 	}))
-	defer ts.Close()
-	c, _ := newFakeClient(ts.URL)
+	defer moodle.Close()
+	client, _ := newFakeClient(moodle.URL)
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	e1 := make(chan error, 1)
-	go func() { e1 <- c.WS(ctx1, siteInfoFn, nil, &struct{}{}) }()
+	firstErr := make(chan error, 1)
+	go func() { firstErr <- client.WS(ctx1, siteInfoFn, nil, &struct{}{}) }()
 	for hits.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
-	e2 := make(chan error, 1)
-	go func() { e2 <- c.WS(context.Background(), siteInfoFn, nil, &struct{}{}) }()
+	secondErr := make(chan error, 1)
+	go func() { secondErr <- client.WS(context.Background(), siteInfoFn, nil, &struct{}{}) }()
 	key := cacheKey("secret", siteInfoFn, nil)
 	for {
-		p := c.polite()
+		p := client.polite()
 		p.cmu.Lock()
 		w := p.flights[key].waiters
 		p.cmu.Unlock()
@@ -518,12 +518,12 @@ func TestSingleflightSurvivesOneCallerLeaving(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	cancel1()
-	if e := <-e1; !errors.Is(e, context.Canceled) {
-		t.Fatalf("first caller: %v", e)
+	if err := <-firstErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first caller: %v", err)
 	}
 	close(gate)
-	if e := <-e2; e != nil {
-		t.Fatalf("the caller that stayed must not inherit the other's cancellation: %v", e)
+	if err := <-secondErr; err != nil {
+		t.Fatalf("the caller that stayed must not inherit the other's cancellation: %v", err)
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("hits %d", hits.Load())
@@ -533,7 +533,7 @@ func TestSingleflightSurvivesOneCallerLeaving(t *testing.T) {
 func TestCacheTTLAndErrorsNotCached(t *testing.T) {
 	var hits atomic.Int32
 	var fail atomic.Bool
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		if fail.Load() {
 			fmt.Fprint(w, `{"exception":"x","errorcode":"invalidtoken"}`)
@@ -541,39 +541,39 @@ func TestCacheTTLAndErrorsNotCached(t *testing.T) {
 		}
 		fmt.Fprint(w, `[{"id":1}]`)
 	}))
-	defer ts.Close()
-	c, fc := newFakeClient(ts.URL)
+	defer moodle.Close()
+	client, clock := newFakeClient(moodle.URL)
 	get := func() error {
 		var out []struct{ ID int }
-		e := c.WS(context.Background(), "core_course_get_contents", nil, &out)
-		if e == nil && (len(out) != 1 || out[0].ID != 1) {
+		err := client.WS(context.Background(), "core_course_get_contents", nil, &out)
+		if err == nil && (len(out) != 1 || out[0].ID != 1) {
 			return errors.New("bad body")
 		}
-		return e
+		return err
 	}
 	fail.Store(true)
-	if e := get(); !errors.Is(e, ErrTokenExpired) {
-		t.Fatalf("got %v", e)
+	if err := get(); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("got %v", err)
 	}
 	fail.Store(false)
-	if e := get(); e != nil || hits.Load() != 2 {
-		t.Fatalf("the error was cached: %v hits=%d", e, hits.Load())
+	if err := get(); err != nil || hits.Load() != 2 {
+		t.Fatalf("the error was cached: %v hits=%d", err, hits.Load())
 	}
-	if e := get(); e != nil || hits.Load() != 2 {
-		t.Fatalf("second call must come from the cache: %v hits=%d", e, hits.Load())
+	if err := get(); err != nil || hits.Load() != 2 {
+		t.Fatalf("second call must come from the cache: %v hits=%d", err, hits.Load())
 	}
-	fc.advance(cacheTTL - time.Second)
-	if e := get(); e != nil || hits.Load() != 2 {
-		t.Fatalf("entry expired early: %v hits=%d", e, hits.Load())
+	clock.advance(cacheTTL - time.Second)
+	if err := get(); err != nil || hits.Load() != 2 {
+		t.Fatalf("entry expired early: %v hits=%d", err, hits.Load())
 	}
-	fc.advance(2 * time.Second)
-	if e := get(); e != nil || hits.Load() != 3 {
-		t.Fatalf("entry did not expire: %v hits=%d", e, hits.Load())
+	clock.advance(2 * time.Second)
+	if err := get(); err != nil || hits.Load() != 3 {
+		t.Fatalf("entry did not expire: %v hits=%d", err, hits.Load())
 	}
 	// A dead token is noticed by the very next uncached call.
 	fail.Store(true)
-	if e := c.WS(context.Background(), siteInfoFn, nil, &struct{}{}); !errors.Is(e, ErrTokenExpired) {
-		t.Fatalf("got %v", e)
+	if err := client.WS(context.Background(), siteInfoFn, nil, &struct{}{}); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -592,21 +592,21 @@ func TestCacheKeyAndSeparation(t *testing.T) {
 
 	// Same call, different token or parameters: separate upstream requests.
 	var hits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		fmt.Fprint(w, `{}`)
 	}))
-	defer ts.Close()
-	c, _ := newFakeClient(ts.URL)
+	defer moodle.Close()
+	client, _ := newFakeClient(moodle.URL)
 	ctx := context.Background()
 	for _, id := range []string{"1", "2", "1", "2"} {
-		_ = c.WS(ctx, "core_course_get_contents", map[string][]string{"courseid": {id}}, &struct{}{})
+		_ = client.WS(ctx, "core_course_get_contents", map[string][]string{"courseid": {id}}, &struct{}{})
 	}
 	if hits.Load() != 2 {
 		t.Fatalf("params not separated: %d hits", hits.Load())
 	}
-	c.Tokens = StaticToken{Value: "other-token"}
-	_ = c.WS(ctx, "core_course_get_contents", map[string][]string{"courseid": {"1"}}, &struct{}{})
+	client.Tokens = StaticToken{Value: "other-token"}
+	_ = client.WS(ctx, "core_course_get_contents", map[string][]string{"courseid": {"1"}}, &struct{}{})
 	if hits.Load() != 3 {
 		t.Fatalf("token not part of the key: %d hits", hits.Load())
 	}
@@ -634,8 +634,8 @@ func TestCacheIsBounded(t *testing.T) {
 		p.store(fmt.Sprint("big", i), big)
 	}
 	total := 0
-	for _, e := range p.cache {
-		total += len(e.body)
+	for _, err := range p.cache {
+		total += len(err.body)
 	}
 	if total > cacheMaxBytes {
 		t.Fatalf("%d bytes cached", total)
@@ -647,8 +647,8 @@ func TestCacheIsBounded(t *testing.T) {
 
 func TestDownloadHonoursRetryAfter(t *testing.T) {
 	var hits atomic.Int32
-	c, fc := newFakeClient("")
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, clock := newFakeClient("")
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits.Add(1) == 1 {
 			w.Header().Set("Retry-After", "2")
 			w.WriteHeader(429)
@@ -656,37 +656,37 @@ func TestDownloadHonoursRetryAfter(t *testing.T) {
 		}
 		io.WriteString(w, "file body")
 	}))
-	defer ts.Close()
-	c.Base = ts.URL
-	resp, e := c.Download(context.Background(), File{URL: ts.URL + "/pluginfile.php/1/x.pdf"})
-	if e != nil {
-		t.Fatal(e)
+	defer moodle.Close()
+	client.Base = moodle.URL
+	resp, err := client.Download(context.Background(), File{URL: moodle.URL + "/pluginfile.php/1/x.pdf"})
+	if err != nil {
+		t.Fatal(err)
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if string(b) != "file body" || hits.Load() != 2 {
 		t.Fatalf("%q hits=%d", b, hits.Load())
 	}
-	if got := fc.sleeps(); len(got) != 1 || got[0] != 2*time.Second {
+	if got := clock.sleeps(); len(got) != 1 || got[0] != 2*time.Second {
 		t.Fatalf("slept %v", got)
 	}
 	// Persistent throttling gives the user-facing error and stops after the bound.
 	hits.Store(0)
-	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(503)
 	}))
-	defer ts2.Close()
-	c.Base = ts2.URL
-	if _, e = c.Download(context.Background(), File{URL: ts2.URL + "/pluginfile.php/1/x.pdf"}); !errors.Is(e, ErrRateLimited) || hits.Load() != 3 {
-		t.Fatalf("%v hits=%d", e, hits.Load())
+	defer secondServer.Close()
+	client.Base = secondServer.URL
+	if _, err = client.Download(context.Background(), File{URL: secondServer.URL + "/pluginfile.php/1/x.pdf"}); !errors.Is(err, ErrRateLimited) || hits.Load() != 3 {
+		t.Fatalf("%v hits=%d", err, hits.Load())
 	}
 }
 
 func TestLaunchHonoursRetryAfterAndLimiter(t *testing.T) {
 	var hits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits.Add(1) == 1 {
 			w.Header().Set("Retry-After", "4")
 			w.WriteHeader(429)
@@ -696,20 +696,20 @@ func TestLaunchHonoursRetryAfterAndLimiter(t *testing.T) {
 		w.Header().Set("Location", "moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%x:::token:::private", h))))
 		w.WriteHeader(303)
 	}))
-	defer ts.Close()
-	c, fc := newFakeClient(ts.URL)
-	token, _, e := c.TokenFromCookie(context.Background(), "fake")
-	if e != nil || token != "token" || hits.Load() != 2 {
-		t.Fatalf("%q %v hits=%d", token, e, hits.Load())
+	defer moodle.Close()
+	client, clock := newFakeClient(moodle.URL)
+	token, _, err := client.TokenFromCookie(context.Background(), "fake")
+	if err != nil || token != "token" || hits.Load() != 2 {
+		t.Fatalf("%q %v hits=%d", token, err, hits.Load())
 	}
-	if got := fc.sleeps(); len(got) != 1 || got[0] != 4*time.Second {
+	if got := clock.sleeps(); len(got) != 1 || got[0] != 4*time.Second {
 		t.Fatalf("slept %v", got)
 	}
 }
 
 func TestAssignmentStatusStopsWhenThrottled(t *testing.T) {
 	var statusHits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		switch r.Form.Get("wsfunction") {
 		case "mod_assign_get_assignments":
@@ -722,11 +722,11 @@ func TestAssignmentStatusStopsWhenThrottled(t *testing.T) {
 			w.WriteHeader(429)
 		}
 	}))
-	defer ts.Close()
-	c, _ := newFakeClient(ts.URL)
-	_, e := c.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, Status: "all", IncludeSubmissionStatus: true}, func(s string) string { return s })
-	if !errors.Is(e, ErrRateLimited) {
-		t.Fatalf("got %v", e)
+	defer moodle.Close()
+	client, _ := newFakeClient(moodle.URL)
+	_, err := client.Assignments(context.Background(), AssignmentInput{CourseIDs: []int64{1}, Status: "all", IncludeSubmissionStatus: true}, func(s string) string { return s })
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("got %v", err)
 	}
 	// 4 workers x 3 attempts at most; the batch must not keep going after the first failure.
 	if statusHits.Load() > 12 {
@@ -736,7 +736,7 @@ func TestAssignmentStatusStopsWhenThrottled(t *testing.T) {
 
 func TestSingleflightFollowerOutlivesLeaderDeadline(t *testing.T) {
 	var hits atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits.Add(1) == 1 {
 			select { // first request is slow: the leader gives up first
 			case <-time.After(400 * time.Millisecond):
@@ -745,28 +745,28 @@ func TestSingleflightFollowerOutlivesLeaderDeadline(t *testing.T) {
 		}
 		fmt.Fprint(w, `{"sitename":"ok"}`)
 	}))
-	defer ts.Close()
-	c, _ := newFakeClient(ts.URL)
+	defer moodle.Close()
+	client, _ := newFakeClient(moodle.URL)
 	lctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	leader := make(chan error, 1)
-	go func() { leader <- c.WS(lctx, siteInfoFn, nil, &struct{}{}) }()
+	go func() { leader <- client.WS(lctx, siteInfoFn, nil, &struct{}{}) }()
 	for hits.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
 	follower := make(chan error, 1)
 	go func() {
 		var out struct{ Sitename string }
-		e := c.WS(context.Background(), siteInfoFn, nil, &out)
-		if e == nil && out.Sitename != "ok" {
-			e = errors.New("bad body")
+		err := client.WS(context.Background(), siteInfoFn, nil, &out)
+		if err == nil && out.Sitename != "ok" {
+			err = errors.New("bad body")
 		}
-		follower <- e
+		follower <- err
 	}()
-	if e := <-leader; !errors.Is(e, context.DeadlineExceeded) {
-		t.Fatalf("leader: %v", e)
+	if err := <-leader; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("leader: %v", err)
 	}
-	if e := <-follower; e != nil {
-		t.Fatalf("follower inherited the leader's deadline: %v", e)
+	if err := <-follower; err != nil {
+		t.Fatalf("follower inherited the leader's deadline: %v", err)
 	}
 }

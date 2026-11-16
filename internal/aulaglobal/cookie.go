@@ -19,20 +19,20 @@ import (
 
 func ParseLaunch(location, site, passport string) (string, string, error) {
 	// Custom scheme uses token= as authority, not an ordinary URL query.
-	u, e := url.Parse(location)
-	if e != nil || u.Scheme != "moodlemobile" {
+	u, err := url.Parse(location)
+	if err != nil || u.Scheme != "moodlemobile" {
 		return "", "", errors.New("expected moodlemobile redirect; session may need login/confirmation")
 	}
 	encoded := strings.TrimPrefix(location, "moodlemobile://token=")
 	if encoded == location || strings.ContainsAny(encoded, "&#?") {
 		return "", "", errors.New("malformed launch redirect")
 	}
-	encoded, e = url.PathUnescape(encoded)
-	if e != nil {
+	encoded, err = url.PathUnescape(encoded)
+	if err != nil {
 		return "", "", errors.New("invalid launch encoding")
 	}
-	b, e := base64.StdEncoding.DecodeString(encoded)
-	if e != nil {
+	b, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
 		return "", "", errors.New("invalid launch base64")
 	}
 	parts := strings.Split(string(b), ":::")
@@ -55,12 +55,12 @@ func ParseLaunch(location, site, passport string) (string, string, error) {
 // The flow is based on AGDownloader (MIT, see THIRD_PARTY_NOTICES.md).
 func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, string, error) {
 	var nonce [24]byte
-	if _, e := rand.Read(nonce[:]); e != nil {
-		return "", "", e
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", "", err
 	}
 	passport := hex.EncodeToString(nonce[:])
-	req, e := http.NewRequestWithContext(ctx, "GET", c.Base+"/admin/tool/mobile/launch.php?"+url.Values{"service": {"moodle_mobile_app"}, "passport": {passport}, "urlscheme": {"moodlemobile"}}.Encode(), nil)
-	if e != nil {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.Base+"/admin/tool/mobile/launch.php?"+url.Values{"service": {"moodle_mobile_app"}, "passport": {passport}, "urlscheme": {"moodlemobile"}}.Encode(), nil)
+	if err != nil {
 		return "", "", errors.New("invalid site")
 	}
 	req.AddCookie(&http.Cookie{Name: "MoodleSessionag", Value: strings.TrimSpace(cookie)})
@@ -69,21 +69,21 @@ func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, st
 	var status int
 	var location string
 	// Same gate as every other request; a 429/503 pauses everybody. GET: safe to retry.
-	if e = c.politely(ctx, true, func() (*throttle, error) {
+	if err = c.politely(ctx, true, func() (*throttle, error) {
 		actx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		resp, err := client.Do(req.WithContext(actx))
-		if err != nil {
+		resp, doErr := client.Do(req.WithContext(actx))
+		if doErr != nil {
 			return nil, errors.New("launch request failed")
 		}
 		defer resp.Body.Close()
-		if th := throttleOf(resp); th != nil {
-			return th, nil
+		if throttled := throttleOf(resp); throttled != nil {
+			return throttled, nil
 		}
 		status, location = resp.StatusCode, resp.Header.Get("Location")
 		return nil, nil
-	}); e != nil {
-		return "", "", e
+	}); err != nil {
+		return "", "", err
 	}
 	if status < 300 || status > 399 {
 		return "", "", errors.New("launch did not return redirect")
@@ -92,26 +92,26 @@ func (c *Client) TokenFromCookie(ctx context.Context, cookie string) (string, st
 }
 func WriteSecret(path, value string) error {
 	dir := filepath.Dir(path)
-	if e := os.MkdirAll(dir, 0700); e != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return errors.New("cannot create secret directory")
 	}
-	st, e := os.Lstat(dir)
-	if e != nil || !st.IsDir() || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
 		return errors.New("secret directory must be private (0700)")
 	}
-	f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if e != nil {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
 		return errors.New("cannot create secret file (must not already exist)")
 	}
-	_, e = f.WriteString(value + "\n")
-	if e == nil {
-		e = f.Sync()
+	_, err = file.WriteString(value + "\n")
+	if err == nil {
+		err = file.Sync()
 	}
-	ce := f.Close()
-	if e != nil {
-		return e
+	closeErr := file.Close()
+	if err != nil {
+		return err
 	}
-	return ce
+	return closeErr
 }
 
 // SaveSecret uses an exclusive temporary file and an atomic replacement with --force.
@@ -120,30 +120,30 @@ func SaveSecret(path, value string, force bool) error {
 		return WriteSecret(path, value)
 	}
 	dir := filepath.Dir(path)
-	if e := os.MkdirAll(dir, 0700); e != nil {
-		return e
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
 	}
-	st, e := os.Lstat(dir)
-	if e != nil || !st.IsDir() || (runtime.GOOS != "windows" && st.Mode().Perm()&0077 != 0) {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
 		return errors.New("secret directory must be private (0700)")
 	}
-	f, e := os.CreateTemp(dir, ".token-*")
-	if e != nil {
+	file, err := os.CreateTemp(dir, ".token-*")
+	if err != nil {
 		return errors.New("cannot create secret temporary file")
 	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	if e = f.Chmod(0600); e != nil {
-		return e
+	defer os.Remove(file.Name())
+	defer file.Close()
+	if err = file.Chmod(0600); err != nil {
+		return err
 	}
-	if _, e = f.WriteString(value + "\n"); e != nil {
-		return e
+	if _, err = file.WriteString(value + "\n"); err != nil {
+		return err
 	}
-	if e = f.Sync(); e != nil {
-		return e
+	if err = file.Sync(); err != nil {
+		return err
 	}
-	if e = f.Close(); e != nil {
-		return e
+	if err = file.Close(); err != nil {
+		return err
 	}
-	return os.Rename(f.Name(), path)
+	return os.Rename(file.Name(), path)
 }
