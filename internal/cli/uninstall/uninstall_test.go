@@ -40,7 +40,7 @@ func (m *memPath) Set(v string) error {
 
 // ufix is a complete fake installation inside a temporary directory. Nothing in
 // it refers to the real HOME, PATH, registry, executable or assistants.
-type ufix struct {
+type fakeInstall struct {
 	t                      *testing.T
 	root, home, installDir string
 	exe, token, configDir  string
@@ -54,114 +54,114 @@ type ufix struct {
 	pathLine               string
 }
 
-func newUFix(t *testing.T) *ufix {
+func newFakeInstall(t *testing.T) *fakeInstall {
 	t.Helper()
 	root := t.TempDir()
-	f := &ufix{t: t, root: root, home: filepath.Join(root, "home")}
-	f.installDir = filepath.Join(root, "Programs", "aulaglobal-mcp")
-	f.exe = filepath.Join(f.installDir, "aulaglobal-mcp")
-	config := filepath.Join(f.home, "config")
-	f.configDir = filepath.Join(config, "aulaglobal-mcp")
-	f.cacheDir = filepath.Join(f.home, "cache", "aulaglobal-mcp")
-	f.token = filepath.Join(f.configDir, "token")
-	f.data = filepath.Join(f.home, "AulaGlobal")
-	testutil.WriteFile(t, f.exe, "binary")
-	for _, n := range []string{"token", "token.private", "token.meta.json"} {
-		testutil.WriteFile(t, filepath.Join(f.configDir, n), "secret-"+n)
+	install := &fakeInstall{t: t, root: root, home: filepath.Join(root, "home")}
+	install.installDir = filepath.Join(root, "Programs", "aulaglobal-mcp")
+	install.exe = filepath.Join(install.installDir, "aulaglobal-mcp")
+	config := filepath.Join(install.home, "config")
+	install.configDir = filepath.Join(config, "aulaglobal-mcp")
+	install.cacheDir = filepath.Join(install.home, "cache", "aulaglobal-mcp")
+	install.token = filepath.Join(install.configDir, "token")
+	install.data = filepath.Join(install.home, "AulaGlobal")
+	testutil.WriteFile(t, install.exe, "binary")
+	for _, name := range []string{"token", "token.private", "token.meta.json"} {
+		testutil.WriteFile(t, filepath.Join(install.configDir, name), "secret-"+name)
 	}
-	testutil.WriteFile(t, filepath.Join(f.cacheDir, "update-check.json"), "{}")
-	testutil.WriteFile(t, filepath.Join(f.data, dataMarker, "manifest.json"), "{}")
-	testutil.WriteFile(t, filepath.Join(f.data, "Fisica", "tema1.pdf"), "pdf")
-	f.pathLine = `export PATH="` + f.installDir + `:$PATH" ` + pathMarker
-	f.zshrc = filepath.Join(f.home, ".zshrc")
-	f.bashrc = filepath.Join(f.home, ".bashrc")
-	testutil.WriteFile(t, f.zshrc, "alias ll='ls -l'\n\n"+f.pathLine+"\n")
-	testutil.WriteFile(t, f.bashrc, "# bashrc\n\n"+f.pathLine+"\n")
-	testutil.WriteFile(t, filepath.Join(f.home, "canary.txt"), "mine")
+	testutil.WriteFile(t, filepath.Join(install.cacheDir, "update-check.json"), "{}")
+	testutil.WriteFile(t, filepath.Join(install.data, dataMarker, "manifest.json"), "{}")
+	testutil.WriteFile(t, filepath.Join(install.data, "Fisica", "tema1.pdf"), "pdf")
+	install.pathLine = `export PATH="` + install.installDir + `:$PATH" ` + pathMarker
+	install.zshrc = filepath.Join(install.home, ".zshrc")
+	install.bashrc = filepath.Join(install.home, ".bashrc")
+	testutil.WriteFile(t, install.zshrc, "alias ll='ls -l'\n\n"+install.pathLine+"\n")
+	testutil.WriteFile(t, install.bashrc, "# bashrc\n\n"+install.pathLine+"\n")
+	testutil.WriteFile(t, filepath.Join(install.home, "canary.txt"), "mine")
 
-	f.claude = &assistantstest.FakeClaude{Scope: "user", Command: f.exe}
-	ce := assistants.Env{GOOS: runtime.GOOS, Home: f.home, ConfigDir: config}
-	ce.LookPath = func(n string) (string, error) {
-		if n == "claude" {
+	install.claude = &assistantstest.FakeClaude{Scope: "user", Command: install.exe}
+	assistantEnv := assistants.Env{GOOS: runtime.GOOS, Home: install.home, ConfigDir: config}
+	assistantEnv.LookPath = func(name string) (string, error) {
+		if name == "claude" {
 			return "fake-claude", nil
 		}
 		return "", os.ErrNotExist
 	}
-	ce.Stat = func(p string) (os.FileInfo, error) {
-		if !strings.HasPrefix(p, f.home+string(os.PathSeparator)) {
+	assistantEnv.Stat = func(path string) (os.FileInfo, error) {
+		if !strings.HasPrefix(path, install.home+string(os.PathSeparator)) {
 			return nil, os.ErrNotExist
 		}
-		return os.Stat(p)
+		return os.Stat(path)
 	}
-	ce.RunClaude = f.claude.Run
-	f.codexPath = filepath.Join(f.home, ".codex", "config.toml")
-	testutil.WriteFile(t, f.codexPath, "model = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\"\n\n[mcp_servers.aulaglobal]\ncommand = '"+f.exe+"'\nargs = ['--transport', 'stdio']\n")
-	f.reg = &memPath{}
-	f.e = uninstallEnv{
-		ce: ce, list: []assistants.Assistant{assistantstest.ByID(t, "claude-code"), assistantstest.ByID(t, "codex"), assistantstest.ByID(t, "claude-desktop")}, goos: "linux", home: f.home,
-		exe: f.exe, tokenFile: f.token, configDir: f.configDir, cacheDir: f.cacheDir, dataDefault: f.data,
+	assistantEnv.RunClaude = install.claude.Run
+	install.codexPath = filepath.Join(install.home, ".codex", "config.toml")
+	testutil.WriteFile(t, install.codexPath, "model = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\"\n\n[mcp_servers.aulaglobal]\ncommand = '"+install.exe+"'\nargs = ['--transport', 'stdio']\n")
+	install.reg = &memPath{}
+	install.e = uninstallEnv{
+		assistantEnv: assistantEnv, assistantList: []assistants.Assistant{assistantstest.ByID(t, "claude-code"), assistantstest.ByID(t, "codex"), assistantstest.ByID(t, "claude-desktop")}, goos: "linux", home: install.home,
+		exe: install.exe, tokenFile: install.token, configDir: install.configDir, cacheDir: install.cacheDir, dataDefault: install.data,
 		interactive: true, getenv: func(string) string { return "" }, removeBinary: removeBinaryUnix,
 	}
-	return f
+	return install
 }
 
-func (f *ufix) desktop(content string) {
-	f.desktopPath = userpaths.Claude(f.e.ce.GOOS, f.home, f.e.ce.ConfigDir)
-	testutil.WriteFile(f.t, f.desktopPath, content)
+func (install *fakeInstall) desktop(content string) {
+	install.desktopPath = userpaths.Claude(install.e.assistantEnv.GOOS, install.home, install.e.assistantEnv.ConfigDir)
+	testutil.WriteFile(install.t, install.desktopPath, content)
 }
 
-func (f *ufix) run(o uninstallOpts, input string) (string, error) {
+func (install *fakeInstall) run(opts uninstallOpts, input string) (string, error) {
 	var out strings.Builder
-	err := runUninstall(termui.UI{In: strings.NewReader(input), Out: &out}, f.e, o)
+	err := runUninstall(termui.UI{In: strings.NewReader(input), Out: &out}, install.e, opts)
 	return out.String(), err
 }
 
 // snapshot hashes every file and directory under root.
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
-	m := map[string]string{}
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	hashes := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, p)
-		if d.IsDir() {
-			m[rel] = "dir"
+		rel, _ := filepath.Rel(root, path)
+		if entry.IsDir() {
+			hashes[rel] = "dir"
 			return nil
 		}
-		b, err := os.ReadFile(p)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		m[rel] = fmt.Sprintf("%x", sha256.Sum256(b))
+		hashes[rel] = fmt.Sprintf("%x", sha256.Sum256(content))
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m
+	return hashes
 }
-func sameSnapshot(a, b map[string]string) string {
+func sameSnapshot(before, after map[string]string) string {
 	var diff []string
-	for k, v := range a {
-		if b[k] != v {
-			diff = append(diff, k)
+	for name, hash := range before {
+		if after[name] != hash {
+			diff = append(diff, name)
 		}
 	}
-	for k := range b {
-		if _, ok := a[k]; !ok {
-			diff = append(diff, k)
+	for name := range after {
+		if _, ok := before[name]; !ok {
+			diff = append(diff, name)
 		}
 	}
 	sort.Strings(diff)
 	return strings.Join(diff, ", ")
 }
 
-func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
+func exists(path string) bool { _, err := os.Lstat(path); return err == nil }
 
-func (f *ufix) transcript(out string) string {
+func (install *fakeInstall) transcript(out string) string {
 	out = strings.ReplaceAll(out, "\r\n", "\n")
-	out = strings.ReplaceAll(out, f.root, "<tmp>")
+	out = strings.ReplaceAll(out, install.root, "<tmp>")
 	out = strings.ReplaceAll(out, `\`, "/")
 	lines := strings.Split(out, "\n")
 	for i := range lines {
@@ -203,20 +203,20 @@ func TestUninstallFlagValidation(t *testing.T) {
 	if _, err := parseUninstallFlags([]string{"--help"}); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("help: %v", err)
 	}
-	o, _ := parseUninstallFlags([]string{"--yes", "--all"})
-	if o.deleteData {
+	opts, _ := parseUninstallFlags([]string{"--yes", "--all"})
+	if opts.deleteData {
 		t.Fatal("--yes implied --delete-data")
 	}
 }
 
 func TestUninstallHelpExitsCleanly(t *testing.T) {
-	f, err := os.CreateTemp(t.TempDir(), "out")
+	install, err := os.CreateTemp(t.TempDir(), "out")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer install.Close()
 	old := os.Stdout
-	os.Stdout = f
+	os.Stdout = install
 	defer func() { os.Stdout = old }()
 	for _, a := range []string{"--help", "-h"} {
 		if err := Run([]string{a}); err != nil {
@@ -224,9 +224,9 @@ func TestUninstallHelpExitsCleanly(t *testing.T) {
 		}
 	}
 	os.Stdout = old
-	b, _ := os.ReadFile(f.Name())
+	content, _ := os.ReadFile(install.Name())
 	for _, want := range []string{"Uso: aulaglobal-mcp uninstall", "--delete-data", "--dry-run", "claude-code,claude-desktop,codex,opencode,antigravity", "nunca implica --delete-data"} {
-		if !strings.Contains(string(b), want) {
+		if !strings.Contains(string(content), want) {
 			t.Errorf("help lacks %q", want)
 		}
 	}
@@ -236,25 +236,25 @@ func TestUninstallHelpExitsCleanly(t *testing.T) {
 }
 
 func TestUninstallWithoutTerminalOrFlagsChangesNothing(t *testing.T) {
-	f := newUFix(t)
-	f.e.interactive = false
-	before := snapshot(t, f.root)
-	out, err := f.run(uninstallOpts{}, "")
+	install := newFakeInstall(t)
+	install.e.interactive = false
+	before := snapshot(t, install.root)
+	out, err := install.run(uninstallOpts{}, "")
 	if err == nil || !strings.Contains(out, "Uso: aulaglobal-mcp uninstall") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" || f.claude.Scope != "user" || len(f.claude.Calls) != 0 && f.claude.Calls[len(f.claude.Calls)-1][1] == "remove" {
-		t.Fatal("changed:", d)
+	if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" || install.claude.Scope != "user" || len(install.claude.Calls) != 0 && install.claude.Calls[len(install.claude.Calls)-1][1] == "remove" {
+		t.Fatal("changed:", difference)
 	}
 	// With flags but no way to confirm, it asks for --yes instead of guessing.
-	if _, err = f.run(uninstallOpts{all: true}, ""); err == nil || !strings.Contains(err.Error(), "--yes") {
+	if _, err = install.run(uninstallOpts{all: true}, ""); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("%v", err)
 	}
-	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
-		t.Fatal("changed:", d)
+	if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" {
+		t.Fatal("changed:", difference)
 	}
 	// --dry-run needs no confirmation.
-	if _, err = f.run(uninstallOpts{all: true, dryRun: true}, ""); err != nil {
+	if _, err = install.run(uninstallOpts{all: true, dryRun: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -262,13 +262,13 @@ func TestUninstallWithoutTerminalOrFlagsChangesNothing(t *testing.T) {
 // ---- goldens -------------------------------------------------------------------
 
 func TestUninstallTranscripts(t *testing.T) {
-	for _, sc := range []string{"disconnect", "logout", "all", "dry-run", "nothing-to-do"} {
-		t.Run(sc, func(t *testing.T) {
-			f := newUFix(t)
-			f.desktop(`{"mcpServers":{"aulaglobal":{"command":"/usr/bin/node","args":["server.js"]},"keep":{"command":"k"}}}`)
-			o := uninstallOpts{}
+	for _, scenario := range []string{"disconnect", "logout", "all", "dry-run", "nothing-to-do"} {
+		t.Run(scenario, func(t *testing.T) {
+			install := newFakeInstall(t)
+			install.desktop(`{"mcpServers":{"aulaglobal":{"command":"/usr/bin/node","args":["server.js"]},"keep":{"command":"k"}}}`)
+			opts := uninstallOpts{}
 			input := ""
-			switch sc {
+			switch scenario {
 			case "disconnect":
 				input = "\n\nn\ns\n" // menu 1, all, keep the foreign entry, continue
 			case "logout":
@@ -276,80 +276,80 @@ func TestUninstallTranscripts(t *testing.T) {
 			case "all":
 				input = "3\n\nn\ns\n" // menu 3, foreign entry: Enter (no), data folder: n, continue
 			case "dry-run":
-				o.all, o.dryRun = true, true
+				opts.all, opts.dryRun = true, true
 				input = "n\ns\n" // foreign: no; data folder: yes (shown in the plan only)
 			case "nothing-to-do":
-				f.claude.Scope = ""
-				os.Remove(f.codexPath)
-				os.Remove(f.desktopPath)
+				install.claude.Scope = ""
+				os.Remove(install.codexPath)
+				os.Remove(install.desktopPath)
 				input = "\n"
 			}
-			out, err := f.run(o, input)
+			out, err := install.run(opts, input)
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			testutil.Golden(t, "uninstall-"+sc, f.transcript(out))
+			testutil.Golden(t, "uninstall-"+scenario, install.transcript(out))
 		})
 	}
 }
 
 func TestUninstallMenuInvalidInputCancels(t *testing.T) {
-	f := newUFix(t)
-	before := snapshot(t, f.root)
-	out, err := f.run(uninstallOpts{}, "x\ny\nz\n")
+	install := newFakeInstall(t)
+	before := snapshot(t, install.root)
+	out, err := install.run(uninstallOpts{}, "x\ny\nz\n")
 	if err != nil || !strings.Contains(out, "Escribe 1, 2 o 3") || !strings.Contains(out, "No se ha cambiado nada") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
-		t.Fatal(d)
+	if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" {
+		t.Fatal(difference)
 	}
 }
 
 // ---- option 1 --------------------------------------------------------------------
 
 func TestUninstallDisconnectSelectedClients(t *testing.T) {
-	f := newUFix(t)
-	out, err := f.run(uninstallOpts{clients: "codex", clientsSet: true, yes: true}, "")
+	install := newFakeInstall(t)
+	out, err := install.run(uninstallOpts{clients: "codex", clientsSet: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, f.codexPath), "[mcp_servers.other]") {
-		t.Fatal(testutil.ReadFile(t, f.codexPath))
+	if strings.Contains(testutil.ReadFile(t, install.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, install.codexPath), "[mcp_servers.other]") {
+		t.Fatal(testutil.ReadFile(t, install.codexPath))
 	}
-	if f.claude.Scope != "user" {
+	if install.claude.Scope != "user" {
 		t.Fatal("Claude Code was not selected but was changed")
 	}
 	// Naming an assistant that has nothing is reported, not an error.
-	out, err = f.run(uninstallOpts{clients: "codex,opencode", clientsSet: true, yes: true}, "")
+	out, err = install.run(uninstallOpts{clients: "codex,opencode", clientsSet: true, yes: true}, "")
 	if err != nil || !strings.Contains(out, "Codex / ChatGPT: no tiene AulaGlobal conectado") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, p := range []string{f.exe, f.token, f.data, f.zshrc} {
-		if !exists(p) {
-			t.Fatalf("%s removed by option 1", p)
+	for _, path := range []string{install.exe, install.token, install.data, install.zshrc} {
+		if !exists(path) {
+			t.Fatalf("%s removed by option 1", path)
 		}
 	}
 }
 
 func TestUninstallInteractiveSelectionByNumber(t *testing.T) {
-	f := newUFix(t)
+	install := newFakeInstall(t)
 	// Claude Code is 1 and Codex is 2: choose only Codex.
-	out, err := f.run(uninstallOpts{}, "1\n2\ns\n")
+	out, err := install.run(uninstallOpts{}, "1\n2\ns\n")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if f.claude.Scope != "user" || strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") {
+	if install.claude.Scope != "user" || strings.Contains(testutil.ReadFile(t, install.codexPath), "aulaglobal") {
 		t.Fatalf("selection ignored\n%s", out)
 	}
 	// 0 means none; invalid answers are asked again.
-	f = newUFix(t)
-	before := snapshot(t, f.root)
-	out, err = f.run(uninstallOpts{}, "1\n9\n0\n")
+	install = newFakeInstall(t)
+	before := snapshot(t, install.root)
+	out, err = install.run(uninstallOpts{}, "1\n9\n0\n")
 	if err != nil || !strings.Contains(out, "No te he entendido") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
-		t.Fatal(d)
+	if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" {
+		t.Fatal(difference)
 	}
 }
 
@@ -357,7 +357,7 @@ func TestUninstallForeignEntriesNeedAnExplicitYes(t *testing.T) {
 	foreign := `{"mcpServers":{"aulaglobal":{"command":"/usr/bin/node","args":["x.js"]}}}`
 	for _, tc := range []struct {
 		name  string
-		o     uninstallOpts
+		opts  uninstallOpts
 		input string
 		gone  bool
 	}{
@@ -367,13 +367,13 @@ func TestUninstallForeignEntriesNeedAnExplicitYes(t *testing.T) {
 		{"answer yes", uninstallOpts{clients: "claude-desktop", clientsSet: true}, "s\ns\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newUFix(t)
-			f.desktop(foreign)
-			out, err := f.run(tc.o, tc.input)
+			install := newFakeInstall(t)
+			install.desktop(foreign)
+			out, err := install.run(tc.opts, tc.input)
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if got := !strings.Contains(testutil.ReadFile(t, f.desktopPath), "aulaglobal"); got != tc.gone {
+			if got := !strings.Contains(testutil.ReadFile(t, install.desktopPath), "aulaglobal"); got != tc.gone {
 				t.Fatalf("removed=%v\n%s", got, out)
 			}
 			if !tc.gone && !strings.Contains(out, "«/usr/bin/node»") {
@@ -384,13 +384,13 @@ func TestUninstallForeignEntriesNeedAnExplicitYes(t *testing.T) {
 }
 
 func TestUninstallClaudeLocalScopeIsExplainedNotTouched(t *testing.T) {
-	f := newUFix(t)
-	f.claude.Scope = "local"
-	out, err := f.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
+	install := newFakeInstall(t)
+	install.claude.Scope = "local"
+	out, err := install.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
 	if err != nil || !strings.Contains(out, "claude mcp remove --scope local aulaglobal") || !strings.Contains(out, "No hay nada que hacer") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, c := range f.claude.Calls {
+	for _, c := range install.claude.Calls {
 		if c[1] == "remove" {
 			t.Fatal("remove called")
 		}
@@ -398,29 +398,29 @@ func TestUninstallClaudeLocalScopeIsExplainedNotTouched(t *testing.T) {
 }
 
 func TestUninstallMalformedConfigGivesManualInstructions(t *testing.T) {
-	f := newUFix(t)
-	f.desktop("{ not json")
-	before := testutil.ReadFile(t, f.desktopPath)
-	out, err := f.run(uninstallOpts{clients: "claude-desktop,codex", clientsSet: true, yes: true}, "")
+	install := newFakeInstall(t)
+	install.desktop("{ not json")
+	before := testutil.ReadFile(t, install.desktopPath)
+	out, err := install.run(uninstallOpts{clients: "claude-desktop,codex", clientsSet: true, yes: true}, "")
 	if err == nil {
 		t.Fatalf("a failure must give a non-zero exit\n%s", out)
 	}
-	if !strings.Contains(out, "✗ Claude Desktop") || !strings.Contains(out, "Alternativa manual") || !strings.Contains(out, f.desktopPath) {
+	if !strings.Contains(out, "✗ Claude Desktop") || !strings.Contains(out, "Alternativa manual") || !strings.Contains(out, install.desktopPath) {
 		t.Fatal(out)
 	}
-	if testutil.ReadFile(t, f.desktopPath) != before || exists(f.desktopPath+".bak") {
+	if testutil.ReadFile(t, install.desktopPath) != before || exists(install.desktopPath+".bak") {
 		t.Fatal("malformed file touched")
 	}
 	// The healthy assistant is still handled.
-	if strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") {
+	if strings.Contains(testutil.ReadFile(t, install.codexPath), "aulaglobal") {
 		t.Fatal("codex not processed")
 	}
 }
 
 func TestUninstallRemoveFailureIsReportedWithManualSteps(t *testing.T) {
-	f := newUFix(t)
-	f.claude.FailRemove = "private diagnostic"
-	out, err := f.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
+	install := newFakeInstall(t)
+	install.claude.FailRemove = "private diagnostic"
+	out, err := install.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
 	if err == nil || !strings.Contains(out, "✗ Claude Code") || !strings.Contains(out, "claude mcp remove --scope user aulaglobal") || strings.Contains(out, "private diagnostic") {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -429,62 +429,62 @@ func TestUninstallRemoveFailureIsReportedWithManualSteps(t *testing.T) {
 // ---- option 2 --------------------------------------------------------------------
 
 func TestUninstallLogoutDeletesOnlyTheToken(t *testing.T) {
-	f := newUFix(t)
-	out, err := f.run(uninstallOpts{logout: true, yes: true}, "")
+	install := newFakeInstall(t)
+	out, err := install.run(uninstallOpts{logout: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if exists(f.configDir) {
+	if exists(install.configDir) {
 		t.Fatal("empty config dir kept")
 	}
-	for _, p := range []string{f.exe, f.cacheDir, f.data, f.zshrc, f.codexPath} {
-		if !exists(p) {
-			t.Fatalf("%s removed by logout", p)
+	for _, path := range []string{install.exe, install.cacheDir, install.data, install.zshrc, install.codexPath} {
+		if !exists(path) {
+			t.Fatalf("%s removed by logout", path)
 		}
 	}
-	if f.claude.Scope != "user" || !strings.Contains(out, "aulaglobal-mcp setup") || strings.Contains(strings.ToLower(out), "revoc") || strings.Contains(strings.ToLower(out), "servidor") {
+	if install.claude.Scope != "user" || !strings.Contains(out, "aulaglobal-mcp setup") || strings.Contains(strings.ToLower(out), "revoc") || strings.Contains(strings.ToLower(out), "servidor") {
 		t.Fatalf("%s", out)
 	}
 	// Logging out twice is harmless.
-	out, err = f.run(uninstallOpts{logout: true, yes: true}, "")
+	out, err = install.run(uninstallOpts{logout: true, yes: true}, "")
 	if err != nil || !strings.Contains(out, "No hay ninguna clave") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
 
 func TestUninstallLogoutCustomTokenLocations(t *testing.T) {
-	f := newUFix(t)
-	custom := filepath.Join(f.root, "secrets", "token")
+	install := newFakeInstall(t)
+	custom := filepath.Join(install.root, "secrets", "token")
 	testutil.WriteFile(t, custom, "tok")
 	testutil.WriteFile(t, custom+".meta.json", "{}")
-	testutil.WriteFile(t, filepath.Join(f.root, "secrets", "keep.txt"), "mine")
-	f.e.tokenFile = custom
+	testutil.WriteFile(t, filepath.Join(install.root, "secrets", "keep.txt"), "mine")
+	install.e.tokenFile = custom
 	// A custom path recorded in an assistant entry is found too.
-	viaEntry := filepath.Join(f.root, "entry-secrets", "token")
+	viaEntry := filepath.Join(install.root, "entry-secrets", "token")
 	testutil.WriteFile(t, viaEntry, "tok")
-	f.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": viaEntry}
-	out, err := f.run(uninstallOpts{logout: true, yes: true}, "")
+	install.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": viaEntry}
+	out, err := install.run(uninstallOpts{logout: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if exists(custom) || exists(custom+".meta.json") || exists(viaEntry) || exists(filepath.Dir(viaEntry)) {
 		t.Fatalf("token left behind\n%s", out)
 	}
-	if testutil.ReadFile(t, filepath.Join(f.root, "secrets", "keep.txt")) != "mine" || !isDir(filepath.Join(f.root, "secrets")) {
+	if testutil.ReadFile(t, filepath.Join(install.root, "secrets", "keep.txt")) != "mine" || !isDir(filepath.Join(install.root, "secrets")) {
 		t.Fatal("a non-empty folder or a foreign file was removed")
 	}
 	// The default token (not in use here) is untouched.
-	if !exists(f.token) {
+	if !exists(install.token) {
 		t.Fatal("default token removed although another path was configured")
 	}
 }
 
 func TestUninstallLogoutNeverDeletesLargeOrIrregularEntryTokens(t *testing.T) {
-	f := newUFix(t)
-	big := filepath.Join(f.root, "thesis.docx")
+	install := newFakeInstall(t)
+	big := filepath.Join(install.root, "thesis.docx")
 	testutil.WriteFile(t, big, strings.Repeat("x", 100<<10))
-	f.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": big}
-	if _, err := f.run(uninstallOpts{logout: true, yes: true}, ""); err != nil {
+	install.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": big}
+	if _, err := install.run(uninstallOpts{logout: true, yes: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(big) {
@@ -495,52 +495,52 @@ func TestUninstallLogoutNeverDeletesLargeOrIrregularEntryTokens(t *testing.T) {
 // ---- option 3 --------------------------------------------------------------------
 
 func TestUninstallAllEndToEnd(t *testing.T) {
-	f := newUFix(t)
-	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
+	install := newFakeInstall(t)
+	out, err := install.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, p := range []string{f.exe, f.installDir, f.configDir, f.cacheDir, f.token} {
-		if exists(p) {
-			t.Errorf("%s still exists", p)
+	for _, path := range []string{install.exe, install.installDir, install.configDir, install.cacheDir, install.token} {
+		if exists(path) {
+			t.Errorf("%s still exists", path)
 		}
 	}
-	if f.claude.Scope != "" || strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, f.codexPath), "[mcp_servers.other]") {
+	if install.claude.Scope != "" || strings.Contains(testutil.ReadFile(t, install.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, install.codexPath), "[mcp_servers.other]") {
 		t.Error("assistants not disconnected correctly")
 	}
-	for _, p := range []string{f.zshrc, f.bashrc} {
-		if got := testutil.ReadFile(t, p); strings.Contains(got, pathMarker) || !strings.HasPrefix(got, "alias ll") && !strings.HasPrefix(got, "# bashrc") {
-			t.Errorf("%s: %q", p, got)
+	for _, path := range []string{install.zshrc, install.bashrc} {
+		if got := testutil.ReadFile(t, path); strings.Contains(got, pathMarker) || !strings.HasPrefix(got, "alias ll") && !strings.HasPrefix(got, "# bashrc") {
+			t.Errorf("%s: %q", path, got)
 		}
-		if !strings.Contains(testutil.ReadFile(t, p+".bak"), pathMarker) {
-			t.Errorf("%s.bak is not the original", p)
+		if !strings.Contains(testutil.ReadFile(t, path+".bak"), pathMarker) {
+			t.Errorf("%s.bak is not the original", path)
 		}
 	}
 	// Materials and everything else stay: --yes does not imply --delete-data.
-	if !exists(filepath.Join(f.data, "Fisica", "tema1.pdf")) || !exists(filepath.Join(f.home, "canary.txt")) || !isDir(filepath.Join(f.root, "Programs")) {
+	if !exists(filepath.Join(install.data, "Fisica", "tema1.pdf")) || !exists(filepath.Join(install.home, "canary.txt")) || !isDir(filepath.Join(install.root, "Programs")) {
 		t.Fatal("something outside the program was removed")
 	}
-	if !strings.Contains(out, f.data) || !strings.Contains(out, "se ha desinstalado") {
+	if !strings.Contains(out, install.data) || !strings.Contains(out, "se ha desinstalado") {
 		t.Fatalf("%s", out)
 	}
 	// Idempotent.
-	f.e.exe = filepath.Join(f.root, "elsewhere", "aulaglobal-mcp")
-	testutil.WriteFile(t, f.e.exe, "x")
-	if out, err = f.run(uninstallOpts{all: true, yes: true}, ""); err != nil {
+	install.e.exe = filepath.Join(install.root, "elsewhere", "aulaglobal-mcp")
+	testutil.WriteFile(t, install.e.exe, "x")
+	if out, err = install.run(uninstallOpts{all: true, yes: true}, ""); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
 
 func TestUninstallAllDeleteDataRemovesOnlyTheMarkedFolder(t *testing.T) {
-	f := newUFix(t)
-	out, err := f.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
+	install := newFakeInstall(t)
+	out, err := install.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if exists(f.data) {
+	if exists(install.data) {
 		t.Fatal("materials kept despite --delete-data")
 	}
-	if !exists(filepath.Join(f.home, "canary.txt")) || !isDir(f.home) {
+	if !exists(filepath.Join(install.home, "canary.txt")) || !isDir(install.home) {
 		t.Fatal("deleted outside the materials folder")
 	}
 }
@@ -552,63 +552,69 @@ func TestUninstallAllAsksAboutMaterialsDefaultingToKeep(t *testing.T) {
 		gone   bool
 	}{{"enter", "\n", false}, {"n", "n\n", false}, {"s", "s\n", true}, {"si-accent", "sí\n", true}, {"other", "quizá\n", false}} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newUFix(t)
-			f.claude.Scope = ""
-			out, err := f.run(uninstallOpts{all: true}, tc.answer+"s\n")
+			install := newFakeInstall(t)
+			install.claude.Scope = ""
+			out, err := install.run(uninstallOpts{all: true}, tc.answer+"s\n")
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if !strings.Contains(out, "¿Borrar también la carpeta AulaGlobal con tus materiales ("+f.data+")? [s/N]") {
+			if !strings.Contains(out, "¿Borrar también la carpeta AulaGlobal con tus materiales ("+install.data+")? [s/N]") {
 				t.Fatalf("question\n%s", out)
 			}
-			if exists(f.data) == tc.gone {
-				t.Fatalf("data folder gone=%v\n%s", !exists(f.data), out)
+			if exists(install.data) == tc.gone {
+				t.Fatalf("data folder gone=%v\n%s", !exists(install.data), out)
 			}
 		})
 	}
 	// Other options never ask about it.
-	f := newUFix(t)
-	if out, _ := f.run(uninstallOpts{logout: true}, "s\n"); strings.Contains(out, "materiales") {
+	install := newFakeInstall(t)
+	if out, _ := install.run(uninstallOpts{logout: true}, "s\n"); strings.Contains(out, "materiales") {
 		t.Fatal("option 2 asked about materials")
 	}
-	f = newUFix(t)
-	if out, _ := f.run(uninstallOpts{clients: "codex", clientsSet: true}, "s\n"); strings.Contains(out, "materiales") {
+	install = newFakeInstall(t)
+	if out, _ := install.run(uninstallOpts{clients: "codex", clientsSet: true}, "s\n"); strings.Contains(out, "materiales") {
 		t.Fatal("option 1 asked about materials")
 	}
 }
 
 func TestUninstallSuspiciousDataPathsAreRefused(t *testing.T) {
 	for name, tc := range map[string]struct {
-		dir   func(f *ufix) string
-		setup func(f *ufix, dir string)
+		dir   func(install *fakeInstall) string
+		setup func(install *fakeInstall, dir string)
 	}{
-		"home itself":     {func(f *ufix) string { return f.home }, nil},
-		"no marker":       {func(f *ufix) string { return filepath.Join(f.root, "notes") }, func(f *ufix, d string) { testutil.WriteFile(f.t, filepath.Join(d, "a.docx"), "x") }},
-		"filesystem root": {func(f *ufix) string { return filepath.VolumeName(f.root) + string(filepath.Separator) }, nil},
-		"parent of home":  {func(f *ufix) string { return f.root }, func(f *ufix, d string) {}},
-		"user folder":     {func(f *ufix) string { return filepath.Join(f.root, "Documents") }, func(f *ufix, d string) { testutil.WriteFile(f.t, filepath.Join(d, dataMarker, "m"), "x") }},
-		"program folder":  {func(f *ufix) string { return f.installDir }, func(f *ufix, d string) {}},
+		"home itself": {func(install *fakeInstall) string { return install.home }, nil},
+		"no marker": {func(install *fakeInstall) string { return filepath.Join(install.root, "notes") }, func(install *fakeInstall, difference string) {
+			testutil.WriteFile(install.t, filepath.Join(difference, "a.docx"), "x")
+		}},
+		"filesystem root": {func(install *fakeInstall) string {
+			return filepath.VolumeName(install.root) + string(filepath.Separator)
+		}, nil},
+		"parent of home": {func(install *fakeInstall) string { return install.root }, func(install *fakeInstall, difference string) {}},
+		"user folder": {func(install *fakeInstall) string { return filepath.Join(install.root, "Documents") }, func(install *fakeInstall, difference string) {
+			testutil.WriteFile(install.t, filepath.Join(difference, dataMarker, "m"), "x")
+		}},
+		"program folder": {func(install *fakeInstall) string { return install.installDir }, func(install *fakeInstall, difference string) {}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newUFix(t)
-			dir := tc.dir(f)
+			install := newFakeInstall(t)
+			dir := tc.dir(install)
 			if tc.setup != nil {
-				tc.setup(f, dir)
+				tc.setup(install, dir)
 			}
-			f.claude.Scope = ""
-			f.e.dataExtra = dir
-			f.e.dataDefault = filepath.Join(f.root, "nothing-here") // so the default folder is not a candidate
-			before := snapshot(t, f.root)
-			out, err := f.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
+			install.claude.Scope = ""
+			install.e.dataExtra = dir
+			install.e.dataDefault = filepath.Join(install.root, "nothing-here") // so the default folder is not a candidate
+			before := snapshot(t, install.root)
+			out, err := install.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
 			if !strings.Contains(out, "No se borrará") {
 				t.Fatalf("refusal not explained\n%s", out)
 			}
-			after := snapshot(t, f.root)
+			after := snapshot(t, install.root)
 			for rel := range before {
-				if _, ok := after[rel]; !ok && !isProgramOrConfig(f, rel) {
+				if _, ok := after[rel]; !ok && !isProgramOrConfig(install, rel) {
 					t.Fatalf("%s was deleted\n%s", rel, out)
 				}
 			}
@@ -616,9 +622,9 @@ func TestUninstallSuspiciousDataPathsAreRefused(t *testing.T) {
 	}
 }
 
-func isProgramOrConfig(f *ufix, rel string) bool {
-	for _, p := range []string{f.exe, f.installDir, f.configDir, f.cacheDir} {
-		r, _ := filepath.Rel(f.root, p)
+func isProgramOrConfig(install *fakeInstall, rel string) bool {
+	for _, path := range []string{install.exe, install.installDir, install.configDir, install.cacheDir} {
+		r, _ := filepath.Rel(install.root, path)
 		if rel == r || strings.HasPrefix(rel, r+string(os.PathSeparator)) {
 			return true
 		}
@@ -627,81 +633,81 @@ func isProgramOrConfig(f *ufix, rel string) bool {
 }
 
 func TestUninstallCustomDataFolderOnlyDeletedByAnInteractiveAnswer(t *testing.T) {
-	setup := func() *ufix {
-		f := newUFix(t)
-		f.claude.Scope = ""
-		custom := filepath.Join(f.root, "Apuntes UC3M")
+	setup := func() *fakeInstall {
+		install := newFakeInstall(t)
+		install.claude.Scope = ""
+		custom := filepath.Join(install.root, "Apuntes UC3M")
 		testutil.WriteFile(t, filepath.Join(custom, dataMarker, "m"), "x")
 		testutil.WriteFile(t, filepath.Join(custom, "a.pdf"), "x")
-		f.e.dataExtra = custom
-		f.e.dataDefault = filepath.Join(f.root, "nothing-here")
-		return f
+		install.e.dataExtra = custom
+		install.e.dataDefault = filepath.Join(install.root, "nothing-here")
+		return install
 	}
 	// --delete-data + --yes: a flag alone does not delete a folder that is not the default one.
-	f := setup()
-	out, err := f.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
-	if err != nil || !exists(f.e.dataExtra) || !strings.Contains(out, "no es la carpeta predeterminada") {
+	install := setup()
+	out, err := install.run(uninstallOpts{all: true, yes: true, deleteData: true}, "")
+	if err != nil || !exists(install.e.dataExtra) || !strings.Contains(out, "no es la carpeta predeterminada") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// Interactive: an extra warning, and only "s" deletes.
-	f = setup()
-	out, err = f.run(uninstallOpts{all: true}, "s\ns\n")
-	if err != nil || exists(f.e.dataExtra) || !strings.Contains(out, "se borrará todo lo que haya dentro") {
+	install = setup()
+	out, err = install.run(uninstallOpts{all: true}, "s\ns\n")
+	if err != nil || exists(install.e.dataExtra) || !strings.Contains(out, "se borrará todo lo que haya dentro") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	f = setup()
-	if out, err = f.run(uninstallOpts{all: true}, "\ns\n"); err != nil || !exists(f.e.dataExtra) {
+	install = setup()
+	if out, err = install.run(uninstallOpts{all: true}, "\ns\n"); err != nil || !exists(install.e.dataExtra) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 }
 
 func TestUninstallListsDifferentMaterialFolders(t *testing.T) {
-	f := newUFix(t)
-	other := filepath.Join(f.root, "Apuntes")
+	install := newFakeInstall(t)
+	other := filepath.Join(install.root, "Apuntes")
 	testutil.WriteFile(t, filepath.Join(other, dataMarker, "m"), "x")
-	f.claude.Env = map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": other}
-	f.e.dataExtra = f.data
-	out, err := f.run(uninstallOpts{all: true}, "n\nn\ns\n")
+	install.claude.Env = map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": other}
+	install.e.dataExtra = install.data
+	out, err := install.run(uninstallOpts{all: true}, "n\nn\ns\n")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, d := range []string{f.data, other} {
-		if !strings.Contains(out, "materiales ("+d+")") {
-			t.Fatalf("no question for %s\n%s", d, out)
+	for _, difference := range []string{install.data, other} {
+		if !strings.Contains(out, "materiales ("+difference+")") {
+			t.Fatalf("no question for %s\n%s", difference, out)
 		}
-		if !exists(d) {
-			t.Fatalf("%s deleted without a yes", d)
+		if !exists(difference) {
+			t.Fatalf("%s deleted without a yes", difference)
 		}
 	}
 }
 
 func TestUninstallAllInContainerKeepsTheBinary(t *testing.T) {
-	f := newUFix(t)
-	f.e.inContainer = true
-	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
+	install := newFakeInstall(t)
+	install.e.inContainer = true
+	out, err := install.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if !exists(f.exe) || !strings.Contains(out, "contenedor") {
+	if !exists(install.exe) || !strings.Contains(out, "contenedor") {
 		t.Fatalf("%s", out)
 	}
-	if exists(f.token) || f.claude.Scope != "" {
+	if exists(install.token) || install.claude.Scope != "" {
 		t.Fatal("the other steps should still run")
 	}
-	if !strings.Contains(testutil.ReadFile(t, f.zshrc), pathMarker) {
+	if !strings.Contains(testutil.ReadFile(t, install.zshrc), pathMarker) {
 		t.Fatal("profiles are not this container's business")
 	}
 }
 
 func TestUninstallProfileLineForAnotherFolderIsKept(t *testing.T) {
-	f := newUFix(t)
+	install := newFakeInstall(t)
 	other := `export PATH="/opt/other-copy:$PATH" ` + pathMarker
-	testutil.WriteFile(t, f.zshrc, "x\n"+other+"\n")
-	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
+	testutil.WriteFile(t, install.zshrc, "x\n"+other+"\n")
+	out, err := install.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := testutil.ReadFile(t, f.zshrc); got != "x\n"+other+"\n" || exists(f.zshrc+".bak") {
+	if got := testutil.ReadFile(t, install.zshrc); got != "x\n"+other+"\n" || exists(install.zshrc+".bak") {
 		t.Fatalf("%q", got)
 	}
 	if !strings.Contains(out, "es de otra carpeta") {
@@ -710,25 +716,25 @@ func TestUninstallProfileLineForAnotherFolderIsKept(t *testing.T) {
 }
 
 func TestUninstallDryRunChangesNothing(t *testing.T) {
-	for _, o := range []uninstallOpts{
+	for _, opts := range []uninstallOpts{
 		{all: true, dryRun: true, deleteData: true},
 		{all: true, dryRun: true, yes: true, deleteData: true},
 		{logout: true, dryRun: true},
 		{clients: "claude-code,codex", clientsSet: true, dryRun: true},
 	} {
-		f := newUFix(t)
-		f.desktop(`{"mcpServers":{"aulaglobal":{"command":"/usr/bin/node"}}}`)
-		before := snapshot(t, f.root)
-		out, err := f.run(o, "s\ns\ns\n")
+		install := newFakeInstall(t)
+		install.desktop(`{"mcpServers":{"aulaglobal":{"command":"/usr/bin/node"}}}`)
+		before := snapshot(t, install.root)
+		out, err := install.run(opts, "s\ns\ns\n")
 		if err != nil {
-			t.Fatalf("%+v: %v\n%s", o, err, out)
+			t.Fatalf("%+v: %v\n%s", opts, err, out)
 		}
-		if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
-			t.Fatalf("%+v changed: %s", o, d)
+		if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" {
+			t.Fatalf("%+v changed: %s", opts, difference)
 		}
-		for _, c := range f.claude.Calls {
+		for _, c := range install.claude.Calls {
 			if c[1] == "remove" {
-				t.Fatalf("%+v: claude remove called", o)
+				t.Fatalf("%+v: claude remove called", opts)
 			}
 		}
 		if !strings.Contains(out, "--dry-run") || !strings.Contains(out, "Plan:") {
@@ -739,14 +745,14 @@ func TestUninstallDryRunChangesNothing(t *testing.T) {
 
 func TestUninstallConfirmationDefaultsToNo(t *testing.T) {
 	for _, input := range []string{"\n", "n\n", "", "no\n"} {
-		f := newUFix(t)
-		before := snapshot(t, f.root)
-		out, err := f.run(uninstallOpts{all: true}, "n\n"+input) // data: no, continue: input
+		install := newFakeInstall(t)
+		before := snapshot(t, install.root)
+		out, err := install.run(uninstallOpts{all: true}, "n\n"+input) // data: no, continue: input
 		if err != nil || !strings.Contains(out, "Cancelado") {
 			t.Fatalf("%q: %v\n%s", input, err, out)
 		}
-		if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
-			t.Fatalf("%q changed: %s", input, d)
+		if difference := sameSnapshot(before, snapshot(t, install.root)); difference != "" {
+			t.Fatalf("%q changed: %s", input, difference)
 		}
 	}
 }
@@ -754,35 +760,35 @@ func TestUninstallConfirmationDefaultsToNo(t *testing.T) {
 // ---- Windows semantics, with a fake registry and a fake scheduler ----------------
 
 func TestUninstallAllWindowsSemantics(t *testing.T) {
-	f := newUFix(t)
-	f.e.goos = "windows"
-	f.e.exe = filepath.Join(f.installDir, "aulaglobal-mcp.exe")
-	if err := os.Rename(f.exe, f.e.exe); err != nil {
+	install := newFakeInstall(t)
+	install.e.goos = "windows"
+	install.e.exe = filepath.Join(install.installDir, "aulaglobal-mcp.exe")
+	if err := os.Rename(install.exe, install.e.exe); err != nil {
 		t.Fatal(err)
 	}
-	f.claude.Command = f.e.exe
-	f.reg.value = `C:\Windows;` + f.installDir + `\;C:\Tools`
+	install.claude.Command = install.e.exe
+	install.reg.value = `C:\Windows;` + install.installDir + `\;C:\Tools`
 	var broadcast int
-	f.e.winPath = f.reg
-	f.e.afterPathEdit = func() { broadcast++ }
-	f.e.removeBinary = func(exe string, rmDir bool) (stepStatus, string) {
-		return removeBinaryWindows(exe, rmDir, func(c string) error { f.spawned = append(f.spawned, c); return nil })
+	install.e.winPath = install.reg
+	install.e.afterPathEdit = func() { broadcast++ }
+	install.e.removeBinary = func(exe string, rmDir bool) (stepStatus, string) {
+		return removeBinaryWindows(exe, rmDir, func(c string) error { install.spawned = append(install.spawned, c); return nil })
 	}
-	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
+	out, err := install.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if f.reg.value != `C:\Windows;C:\Tools` || f.reg.sets != 1 || broadcast != 1 {
-		t.Fatalf("PATH %q sets=%d broadcast=%d", f.reg.value, f.reg.sets, broadcast)
+	if install.reg.value != `C:\Windows;C:\Tools` || install.reg.sets != 1 || broadcast != 1 {
+		t.Fatalf("PATH %q sets=%d broadcast=%d", install.reg.value, install.reg.sets, broadcast)
 	}
-	if exists(f.e.exe) || !exists(f.e.exe+".old") {
+	if exists(install.e.exe) || !exists(install.e.exe+".old") {
 		t.Fatal("executable not parked as .old")
 	}
-	if len(f.spawned) != 1 || !strings.Contains(f.spawned[0], `del /f /q "`+f.e.exe+`.old"`) || !strings.Contains(f.spawned[0], `rmdir "`+f.installDir+`"`) {
-		t.Fatalf("%v", f.spawned)
+	if len(install.spawned) != 1 || !strings.Contains(install.spawned[0], `del /f /q "`+install.e.exe+`.old"`) || !strings.Contains(install.spawned[0], `rmdir "`+install.installDir+`"`) {
+		t.Fatalf("%v", install.spawned)
 	}
 	// Shell profiles are a Unix thing.
-	if !strings.Contains(testutil.ReadFile(t, f.zshrc), pathMarker) {
+	if !strings.Contains(testutil.ReadFile(t, install.zshrc), pathMarker) {
 		t.Fatal("profile edited on Windows")
 	}
 	if !strings.Contains(out, "se borrará en unos segundos") {
@@ -791,25 +797,25 @@ func TestUninstallAllWindowsSemantics(t *testing.T) {
 }
 
 func TestUninstallWindowsPathFailuresAreReported(t *testing.T) {
-	f := newUFix(t)
-	f.e.goos = "windows"
-	f.e.winPath = &memPath{getErr: errors.New("denied")}
-	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
+	install := newFakeInstall(t)
+	install.e.goos = "windows"
+	install.e.winPath = &memPath{getErr: errors.New("denied")}
+	out, err := install.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil || !strings.Contains(out, "No se pudo leer el PATH") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	f = newUFix(t)
-	f.e.goos = "windows"
-	f.e.winPath = &memPath{value: f.installDir, setErr: errors.New("denied")}
-	out, err = f.run(uninstallOpts{all: true, yes: true}, "")
-	if err == nil || !strings.Contains(out, "✗ No se pudo cambiar el PATH") || !strings.Contains(out, f.installDir) {
+	install = newFakeInstall(t)
+	install.e.goos = "windows"
+	install.e.winPath = &memPath{value: install.installDir, setErr: errors.New("denied")}
+	out, err = install.run(uninstallOpts{all: true, yes: true}, "")
+	if err == nil || !strings.Contains(out, "✗ No se pudo cambiar el PATH") || !strings.Contains(out, install.installDir) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// An unrelated PATH is left alone and produces no step.
-	f = newUFix(t)
+	install = newFakeInstall(t)
 	reg := &memPath{value: `C:\Windows;C:\Tools`}
-	f.e.goos, f.e.winPath = "windows", reg
-	if out, err = f.run(uninstallOpts{all: true, yes: true}, ""); err != nil || reg.sets != 0 {
+	install.e.goos, install.e.winPath = "windows", reg
+	if out, err = install.run(uninstallOpts{all: true, yes: true}, ""); err != nil || reg.sets != 0 {
 		t.Fatalf("%v sets=%d\n%s", err, reg.sets, out)
 	}
 }

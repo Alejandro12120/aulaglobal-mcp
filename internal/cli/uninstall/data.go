@@ -13,27 +13,27 @@ const dataMarker = ".aulaglobal-cache"
 // tokenFiles lists what setup stores for a token: the token, its private
 // companion, its metadata and the temporaries an interrupted setup leaves.
 func tokenFiles(token string) []string {
-	cands := []string{token, token + ".private", token + ".meta.json"}
+	candidates := []string{token, token + ".private", token + ".meta.json"}
 	if temps, err := filepath.Glob(filepath.Join(filepath.Dir(token), ".token-*")); err == nil {
-		cands = append(cands, temps...)
+		candidates = append(candidates, temps...)
 	}
 	var out []string
-	for _, p := range cands {
-		if _, err := os.Lstat(p); err == nil {
-			out = append(out, p)
+	for _, path := range candidates {
+		if _, err := os.Lstat(path); err == nil {
+			out = append(out, path)
 		}
 	}
 	return out
 }
 
-func sameDir(a, b string) bool {
-	a, b = filepath.Clean(a), filepath.Clean(b)
-	if a == b {
+func sameDir(first, second string) bool {
+	first, second = filepath.Clean(first), filepath.Clean(second)
+	if first == second {
 		return true
 	}
-	ra, e1 := filepath.EvalSymlinks(a)
-	rb, e2 := filepath.EvalSymlinks(b)
-	return e1 == nil && e2 == nil && ra == rb
+	resolvedFirst, e1 := filepath.EvalSymlinks(first)
+	resolvedSecond, e2 := filepath.EvalSymlinks(second)
+	return e1 == nil && e2 == nil && resolvedFirst == resolvedSecond
 }
 
 type dataVerdict struct {
@@ -54,61 +54,61 @@ var userFolderNames = map[string]bool{
 
 // checkDataDir decides whether p may be deleted as the materials folder.
 // protect lists paths that must not be inside it (program, config, cache).
-func checkDataDir(p, home, def string, protect []string) dataVerdict {
-	v := dataVerdict{dirName: p}
-	refuse := func(why string) dataVerdict { v.reason = why; return v }
-	if strings.TrimSpace(p) == "" || !filepath.IsAbs(p) {
+func checkDataDir(path, home, defaultDir string, protect []string) dataVerdict {
+	verdict := dataVerdict{dirName: path}
+	refuse := func(why string) dataVerdict { verdict.reason = why; return verdict }
+	if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
 		return refuse("la ruta no es absoluta")
 	}
-	p = filepath.Clean(p)
-	v.dirName = p
-	v.custom = !sameDir(p, def)
-	if filepath.Dir(p) == p {
+	path = filepath.Clean(path)
+	verdict.dirName = path
+	verdict.custom = !sameDir(path, defaultDir)
+	if filepath.Dir(path) == path {
 		return refuse("es la raíz del disco")
 	}
-	if home != "" && sameDir(p, home) {
+	if home != "" && sameDir(path, home) {
 		return refuse("es tu carpeta personal")
 	}
 	inside := func(parent, child string) bool {
 		rel, err := filepath.Rel(parent, child)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	if home != "" && inside(p, home) {
+	if home != "" && inside(path, home) {
 		return refuse("contiene tu carpeta personal")
 	}
-	for _, q := range protect {
-		if q != "" && inside(p, filepath.Clean(q)) {
+	for _, protected := range protect {
+		if protected != "" && inside(path, filepath.Clean(protected)) {
 			return refuse("contiene el programa o su configuración")
 		}
 	}
-	if userFolderNames[strings.ToLower(filepath.Base(p))] {
-		return refuse("parece una carpeta personal del sistema (" + filepath.Base(p) + ")")
+	if userFolderNames[strings.ToLower(filepath.Base(path))] {
+		return refuse("parece una carpeta personal del sistema (" + filepath.Base(path) + ")")
 	}
-	fi, err := os.Lstat(p)
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
-		return v
+		return verdict
 	}
-	v.exists = true
+	verdict.exists = true
 	if err != nil {
 		return refuse("no se puede leer")
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
+	if info.Mode()&os.ModeSymlink != 0 {
 		return refuse("es un enlace simbólico")
 	}
-	if !fi.IsDir() {
+	if !info.IsDir() {
 		return refuse("no es una carpeta")
 	}
-	if m, err := os.Lstat(filepath.Join(p, dataMarker)); err == nil && m.IsDir() {
-		v.ok = true
-		return v
+	if marker, err := os.Lstat(filepath.Join(path, dataMarker)); err == nil && marker.IsDir() {
+		verdict.ok = true
+		return verdict
 	}
-	entries, err := os.ReadDir(p)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return refuse("no se puede leer")
 	}
 	if len(entries) == 0 {
-		v.ok, v.empty = true, true
-		return v
+		verdict.ok, verdict.empty = true, true
+		return verdict
 	}
 	return refuse("no contiene la marca " + dataMarker + "; no parece una carpeta de apuntes creada por este programa")
 }

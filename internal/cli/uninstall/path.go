@@ -38,12 +38,12 @@ func profileCandidates(home, zdotdir, xdg string) []string {
 // markedPathLine recognises exactly the two lines install.sh writes and returns
 // the directory they add to PATH.
 func markedPathLine(line string) (string, bool) {
-	for _, f := range []struct{ prefix, suffix string }{
+	for _, form := range []struct{ prefix, suffix string }{
 		{`export PATH="`, `:$PATH" ` + pathMarker},
 		{`set -gx PATH "`, `" $PATH ` + pathMarker},
 	} {
-		if strings.HasPrefix(line, f.prefix) && strings.HasSuffix(line, f.suffix) && len(line) > len(f.prefix)+len(f.suffix) {
-			return line[len(f.prefix) : len(line)-len(f.suffix)], true
+		if strings.HasPrefix(line, form.prefix) && strings.HasSuffix(line, form.suffix) && len(line) > len(form.prefix)+len(form.suffix) {
+			return line[len(form.prefix) : len(line)-len(form.suffix)], true
 		}
 	}
 	return "", false
@@ -65,19 +65,19 @@ func expandHome(dir, home string) string {
 func removeMarkedPathLines(content, home string, match func(dir string) bool) (out string, removed int, others []string) {
 	lines := strings.Split(content, "\n")
 	kept := make([]string, 0, len(lines))
-	for i, l := range lines {
-		if dir, ok := markedPathLine(l); ok {
+	for i, line := range lines {
+		if dir, ok := markedPathLine(line); ok {
 			if match(expandHome(dir, home)) {
 				removed++
 				// install.sh writes a blank line before its own; take it along.
-				if n := len(kept); n > 0 && kept[n-1] == "" && (i+1 >= len(lines) || lines[i+1] == "") {
-					kept = kept[:n-1]
+				if count := len(kept); count > 0 && kept[count-1] == "" && (i+1 >= len(lines) || lines[i+1] == "") {
+					kept = kept[:count-1]
 				}
 				continue
 			}
 			others = append(others, dir)
 		}
-		kept = append(kept, l)
+		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n"), removed, others
 }
@@ -85,20 +85,20 @@ func removeMarkedPathLines(content, home string, match func(dir string) bool) (o
 // rewriteProfile saves path+".bak" with the original and replaces the file
 // atomically, keeping its permission bits. A symlinked profile (dotfile
 // managers) is edited at its target.
-func rewriteProfile(path string, b []byte) error {
+func rewriteProfile(path string, content []byte) error {
 	target := path
-	if fi, err := os.Lstat(path); err != nil {
+	if info, err := os.Lstat(path); err != nil {
 		return err
-	} else if fi.Mode()&os.ModeSymlink != 0 {
+	} else if info.Mode()&os.ModeSymlink != 0 {
 		if target, err = filepath.EvalSymlinks(path); err != nil {
 			return err
 		}
 	}
-	fi, err := os.Stat(target)
+	info, err := os.Stat(target)
 	if err != nil {
 		return err
 	}
-	if !fi.Mode().IsRegular() {
+	if !info.Mode().IsRegular() {
 		return errors.New("no es un archivo normal")
 	}
 	old, err := os.ReadFile(target)
@@ -113,14 +113,14 @@ func rewriteProfile(path string, b []byte) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err = tmp.Write(b); err == nil {
+	if _, err = tmp.Write(content); err == nil {
 		err = tmp.Sync()
 	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
 	if err == nil {
-		err = os.Chmod(tmp.Name(), fi.Mode().Perm())
+		err = os.Chmod(tmp.Name(), info.Mode().Perm())
 	}
 	if err != nil {
 		return err
@@ -137,34 +137,34 @@ type pathStore interface {
 
 // expandPercent expands %NAME% references the way Windows does; unknown names
 // are left as typed.
-func expandPercent(s string, getenv func(string) string) string {
+func expandPercent(text string, getenv func(string) string) string {
 	var out strings.Builder
 	for {
-		i := strings.IndexByte(s, '%')
+		i := strings.IndexByte(text, '%')
 		if i < 0 {
 			break
 		}
-		j := strings.IndexByte(s[i+1:], '%')
+		j := strings.IndexByte(text[i+1:], '%')
 		if j < 0 {
 			break
 		}
-		name := s[i+1 : i+1+j]
-		if v := getenv(name); name != "" && v != "" {
-			out.WriteString(s[:i] + v)
+		name := text[i+1 : i+1+j]
+		if value := getenv(name); name != "" && value != "" {
+			out.WriteString(text[:i] + value)
 		} else {
-			out.WriteString(s[:i+j+2])
+			out.WriteString(text[:i+j+2])
 		}
-		s = s[i+j+2:]
+		text = text[i+j+2:]
 	}
-	out.WriteString(s)
+	out.WriteString(text)
 	return out.String()
 }
 
-func normalizePathEntry(e string, getenv func(string) string) string {
-	e = strings.TrimSpace(expandPercent(strings.TrimSpace(e), getenv))
-	e = strings.ReplaceAll(e, "/", `\`)
-	e = strings.TrimRight(e, `\`)
-	return strings.ToLower(e)
+func normalizePathEntry(err string, getenv func(string) string) string {
+	err = strings.TrimSpace(expandPercent(strings.TrimSpace(err), getenv))
+	err = strings.ReplaceAll(err, "/", `\`)
+	err = strings.TrimRight(err, `\`)
+	return strings.ToLower(err)
 }
 
 // removePathEntry removes the entries of value equal to dir (same comparison as
@@ -178,12 +178,12 @@ func removePathEntry(value, dir string, getenv func(string) string) (string, boo
 	parts := strings.Split(value, ";")
 	kept := parts[:0:0]
 	removed := false
-	for _, p := range parts {
-		if strings.TrimSpace(p) != "" && normalizePathEntry(p, getenv) == want {
+	for _, entry := range parts {
+		if strings.TrimSpace(entry) != "" && normalizePathEntry(entry, getenv) == want {
 			removed = true
 			continue
 		}
-		kept = append(kept, p)
+		kept = append(kept, entry)
 	}
 	if !removed {
 		return value, false

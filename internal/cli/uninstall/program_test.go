@@ -35,9 +35,9 @@ func TestRemoveBinaryUnix(t *testing.T) {
 	dir := filepath.Join(root, "aulaglobal-mcp")
 	exe := filepath.Join(dir, "aulaglobal-mcp")
 	testutil.WriteFile(t, exe, "bin")
-	st, msg := removeBinaryUnix(exe, true)
-	if st != stOK || !strings.Contains(msg, "carpeta") {
-		t.Fatal(st, msg)
+	status, message := removeBinaryUnix(exe, true)
+	if status != stOK || !strings.Contains(message, "carpeta") {
+		t.Fatal(status, message)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatal("empty dedicated folder kept")
@@ -45,15 +45,15 @@ func TestRemoveBinaryUnix(t *testing.T) {
 	// A non-empty folder is never removed.
 	testutil.WriteFile(t, exe, "bin")
 	testutil.WriteFile(t, filepath.Join(dir, "keep.txt"), "mine")
-	if st, _ = removeBinaryUnix(exe, true); st != stOK {
-		t.Fatal(st)
+	if status, _ = removeBinaryUnix(exe, true); status != stOK {
+		t.Fatal(status)
 	}
 	if testutil.ReadFile(t, filepath.Join(dir, "keep.txt")) != "mine" {
 		t.Fatal("foreign file removed")
 	}
 	// Already gone is fine; rmDir=false keeps the folder.
-	if st, _ = removeBinaryUnix(exe, false); st != stOK {
-		t.Fatal(st)
+	if status, _ = removeBinaryUnix(exe, false); status != stOK {
+		t.Fatal(status)
 	}
 	// A shared folder (rmDir=false) with only our binary stays.
 	shared := filepath.Join(root, "bin")
@@ -70,9 +70,9 @@ func TestRemoveBinaryWindowsMovesAsideAndSchedules(t *testing.T) {
 	testutil.WriteFile(t, exe, "bin")
 	testutil.WriteFile(t, exe+".old", "stale")
 	var cmdline string
-	st, msg := removeBinaryWindows(exe, true, func(c string) error { cmdline = c; return nil })
-	if st != stOK || !strings.Contains(msg, exe+".old") {
-		t.Fatal(st, msg)
+	status, message := removeBinaryWindows(exe, true, func(c string) error { cmdline = c; return nil })
+	if status != stOK || !strings.Contains(message, exe+".old") {
+		t.Fatal(status, message)
 	}
 	if _, err := os.Stat(exe); !os.IsNotExist(err) || testutil.ReadFile(t, exe+".old") != "bin" {
 		t.Fatal("not parked")
@@ -82,15 +82,15 @@ func TestRemoveBinaryWindowsMovesAsideAndSchedules(t *testing.T) {
 	}
 	// Scheduling failure: say exactly which file is left.
 	testutil.WriteFile(t, exe, "bin")
-	st, msg = removeBinaryWindows(exe, false, func(string) error { return errors.New("denied") })
-	if st != stWarn || !strings.Contains(msg, exe+".old") {
-		t.Fatal(st, msg)
+	status, message = removeBinaryWindows(exe, false, func(string) error { return errors.New("denied") })
+	if status != stWarn || !strings.Contains(message, exe+".old") {
+		t.Fatal(status, message)
 	}
 	// Rename failure (nothing to rename): exact file named.
 	os.Remove(exe)
-	st, msg = removeBinaryWindows(exe, false, func(string) error { t.Fatal("scheduled"); return nil })
-	if st != stFail || !strings.Contains(msg, exe) {
-		t.Fatal(st, msg)
+	status, message = removeBinaryWindows(exe, false, func(string) error { t.Fatal("scheduled"); return nil })
+	if status != stFail || !strings.Contains(message, exe) {
+		t.Fatal(status, message)
 	}
 }
 

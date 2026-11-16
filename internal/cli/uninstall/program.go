@@ -12,12 +12,12 @@ const programName = "aulaglobal-mcp"
 
 // baseName works for both separators whatever the host OS, so Windows paths can
 // be reasoned about in tests that run elsewhere.
-func baseName(p string) string {
-	p = strings.TrimRight(p, `/\`)
-	if i := strings.LastIndexAny(p, `/\`); i >= 0 {
-		p = p[i+1:]
+func baseName(path string) string {
+	path = strings.TrimRight(path, `/\`)
+	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
+		path = path[i+1:]
 	}
-	return p
+	return path
 }
 
 // pointsToProgram reports whether an assistant entry's command is this
@@ -26,12 +26,12 @@ func pointsToProgram(command, exe string, windows bool) bool {
 	if command == "" {
 		return false
 	}
-	c := filepath.Clean(command)
-	if c == filepath.Clean(exe) || (windows && strings.EqualFold(c, filepath.Clean(exe))) {
+	cleaned := filepath.Clean(command)
+	if cleaned == filepath.Clean(exe) || (windows && strings.EqualFold(cleaned, filepath.Clean(exe))) {
 		return true
 	}
-	if a, e1 := os.Stat(c); e1 == nil {
-		if b, e2 := os.Stat(exe); e2 == nil && os.SameFile(a, b) {
+	if commandInfo, commandErr := os.Stat(cleaned); commandErr == nil {
+		if exeInfo, exeErr := os.Stat(exe); exeErr == nil && os.SameFile(commandInfo, exeInfo) {
 			return true
 		}
 	}
@@ -59,8 +59,8 @@ func removeBinaryUnix(exe string, rmDir bool) (stepStatus, string) {
 // folder if rmdir is non-empty and it is then empty). ok is false when a path
 // holds characters cmd.exe would interpret.
 func windowsCleanupCommand(old, rmdir string) (string, bool) {
-	for _, p := range []string{old, rmdir} {
-		if strings.ContainsAny(p, "\"%&^|<>!\r\n") {
+	for _, path := range []string{old, rmdir} {
+		if strings.ContainsAny(path, "\"%&^|<>!\r\n") {
 			return "", false
 		}
 	}

@@ -35,20 +35,20 @@ func TestRemoveMarkedPathLines(t *testing.T) {
 	home := "/home/ana"
 	match := func(d string) bool { return filepath.Clean(d) == filepath.Clean("/home/ana/.local/bin") } // expandHome joins with the OS separator
 	// install.sh appends "\n<line>\n" to whatever was there.
-	in := "alias ll='ls -l'\n\nexport PATH=\"$HOME/.local/bin:$PATH\" # aulaglobal-mcp\n"
-	out, n, others := removeMarkedPathLines(in, home, match)
-	if out != "alias ll='ls -l'\n" || n != 1 || len(others) != 0 {
-		t.Fatalf("%q %d %v", out, n, others)
+	input := "alias ll='ls -l'\n\nexport PATH=\"$HOME/.local/bin:$PATH\" # aulaglobal-mcp\n"
+	out, removed, others := removeMarkedPathLines(input, home, match)
+	if out != "alias ll='ls -l'\n" || removed != 1 || len(others) != 0 {
+		t.Fatalf("%q %d %v", out, removed, others)
 	}
 	if out2, n2, _ := removeMarkedPathLines(out, home, match); out2 != out || n2 != 0 {
 		t.Fatal("not idempotent")
 	}
 	// Middle of the file, unrelated lines and a line for another directory stay.
-	in = "a\n\nexport PATH=\"$HOME/.local/bin:$PATH\" # aulaglobal-mcp\n\nexport PATH=\"/opt/other:$PATH\" # aulaglobal-mcp\nexport PATH=\"$HOME/.local/bin:$PATH\"\nb"
-	out, n, others = removeMarkedPathLines(in, home, match)
+	input = "a\n\nexport PATH=\"$HOME/.local/bin:$PATH\" # aulaglobal-mcp\n\nexport PATH=\"/opt/other:$PATH\" # aulaglobal-mcp\nexport PATH=\"$HOME/.local/bin:$PATH\"\nb"
+	out, removed, others = removeMarkedPathLines(input, home, match)
 	want := "a\n\nexport PATH=\"/opt/other:$PATH\" # aulaglobal-mcp\nexport PATH=\"$HOME/.local/bin:$PATH\"\nb"
-	if out != want || n != 1 || len(others) != 1 || others[0] != "/opt/other" {
-		t.Fatalf("%q %d %v", out, n, others)
+	if out != want || removed != 1 || len(others) != 1 || others[0] != "/opt/other" {
+		t.Fatalf("%q %d %v", out, removed, others)
 	}
 }
 
@@ -56,17 +56,17 @@ func TestRewriteProfileKeepsModeAndBacksUp(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits")
 	}
-	f := filepath.Join(t.TempDir(), ".zshrc")
-	testutil.WriteFile(t, f, "old\n")
-	if err := os.Chmod(f, 0644); err != nil {
+	profile := filepath.Join(t.TempDir(), ".zshrc")
+	testutil.WriteFile(t, profile, "old\n")
+	if err := os.Chmod(profile, 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := rewriteProfile(f, []byte("new\n")); err != nil {
+	if err := rewriteProfile(profile, []byte("new\n")); err != nil {
 		t.Fatal(err)
 	}
-	fi, _ := os.Stat(f)
-	if testutil.ReadFile(t, f) != "new\n" || testutil.ReadFile(t, f+".bak") != "old\n" || fi.Mode().Perm() != 0644 {
-		t.Fatal("rewrite", fi.Mode())
+	info, _ := os.Stat(profile)
+	if testutil.ReadFile(t, profile) != "new\n" || testutil.ReadFile(t, profile+".bak") != "old\n" || info.Mode().Perm() != 0644 {
+		t.Fatal("rewrite", info.Mode())
 	}
 	// A symlinked profile is edited at its target and stays a symlink.
 	dir := t.TempDir()
@@ -77,7 +77,7 @@ func TestRewriteProfileKeepsModeAndBacksUp(t *testing.T) {
 	if err := rewriteProfile(link, []byte("new\n")); err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 || testutil.ReadFile(t, target) != "new\n" || testutil.ReadFile(t, link+".bak") != "old\n" {
+	if info, _ := os.Lstat(link); info.Mode()&os.ModeSymlink == 0 || testutil.ReadFile(t, target) != "new\n" || testutil.ReadFile(t, link+".bak") != "old\n" {
 		t.Fatal("symlink was replaced")
 	}
 }
@@ -102,8 +102,8 @@ func TestRemovePathEntry(t *testing.T) {
 	}
 	dir := `C:\Users\Ana\AppData\Local\Programs\aulaglobal-mcp`
 	for _, tc := range []struct {
-		in, want string
-		found    bool
+		input, want string
+		found       bool
 	}{
 		{`C:\Windows;` + dir + `;C:\Tools`, `C:\Windows;C:\Tools`, true},
 		{dir, ``, true},
@@ -115,9 +115,9 @@ func TestRemovePathEntry(t *testing.T) {
 		{`C:\Users\Ana\AppData\Local\Programs;` + dir + `\bin`, `C:\Users\Ana\AppData\Local\Programs;` + dir + `\bin`, false},
 		{``, ``, false},
 	} {
-		got, found := removePathEntry(tc.in, dir, getenv)
+		got, found := removePathEntry(tc.input, dir, getenv)
 		if got != tc.want || found != tc.found {
-			t.Errorf("%q -> %q %v", tc.in, got, found)
+			t.Errorf("%q -> %q %v", tc.input, got, found)
 		}
 	}
 	if _, found := removePathEntry("a;b", "", getenv); found {

@@ -28,13 +28,13 @@ const (
 )
 
 type step struct {
-	plan string
-	run  func() (stepStatus, string)
+	description string
+	run         func() (stepStatus, string)
 }
 
 type note struct {
-	st   stepStatus
-	text string
+	status stepStatus
+	text   string
 }
 
 type planner struct {
@@ -45,36 +45,38 @@ type planner struct {
 	pathEdit  bool // a PATH entry or profile line is being removed
 }
 
-func (p *planner) add(plan string, run func() (stepStatus, string)) {
-	p.steps = append(p.steps, step{plan, run})
+func (plan *planner) add(description string, run func() (stepStatus, string)) {
+	plan.steps = append(plan.steps, step{description, run})
 }
 
-func (p *planner) note(st stepStatus, text string) { p.notes = append(p.notes, note{st, text}) }
+func (plan *planner) note(status stepStatus, text string) {
+	plan.notes = append(plan.notes, note{status, text})
+}
 
-func marker(st stepStatus) string {
-	return map[stepStatus]string{stOK: "✓", stInfo: "·", stWarn: "!", stFail: "✗"}[st]
+func marker(status stepStatus) string {
+	return map[stepStatus]string{stOK: "✓", stInfo: "·", stWarn: "!", stFail: "✗"}[status]
 }
 
 // printItem prints one ✓/·/!/✗ line; continuation lines are indented under it.
-func printItem(out io.Writer, st stepStatus, text string) {
+func printItem(out io.Writer, status stepStatus, text string) {
 	lines := strings.Split(text, "\n")
-	fmt.Fprintln(out, "  "+marker(st)+" "+lines[0])
-	for _, l := range lines[1:] {
-		fmt.Fprintln(out, "    "+l)
+	fmt.Fprintln(out, "  "+marker(status)+" "+lines[0])
+	for _, line := range lines[1:] {
+		fmt.Fprintln(out, "    "+line)
 	}
 }
 
 type clientLink struct {
-	a    assistants.Assistant
-	l    assistants.Link
-	ours bool
+	assistant assistants.Assistant
+	link      assistants.Link
+	ours      bool
 }
 
 func (e uninstallEnv) inspectClients() []clientLink {
 	var out []clientLink
-	for _, a := range e.list {
-		l := a.Find(e.ce)
-		out = append(out, clientLink{a, l, l.State == assistants.LinkPresent && pointsToProgram(l.Command, e.exe, e.goos == "windows")})
+	for _, assistant := range e.assistantList {
+		link := assistant.Find(e.assistantEnv)
+		out = append(out, clientLink{assistant, link, link.State == assistants.LinkPresent && pointsToProgram(link.Command, e.exe, e.goos == "windows")})
 	}
 	return out
 }
@@ -84,41 +86,41 @@ func quote(s string) string { return "«" + s + "»" }
 // planClients adds one step per assistant to disconnect. A nil sel means every
 // assistant that has the entry. Otherwise only the IDs in sel are considered,
 // and an assistant named there that has nothing to remove gets a note.
-func (e uninstallEnv) planClients(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink, sel map[string]bool) {
-	explicit := sel != nil
-	for _, c := range cls {
-		if explicit && !sel[c.a.ID()] {
+func (e uninstallEnv) planClients(ui termui.UI, opts uninstallOpts, plan *planner, links []clientLink, selected map[string]bool) {
+	explicit := selected != nil
+	for _, client := range links {
+		if explicit && !selected[client.assistant.ID()] {
 			continue
 		}
-		name := c.a.Name()
-		switch c.l.State {
+		name := client.assistant.Name()
+		switch client.link.State {
 		case assistants.LinkNotInstalled:
 			if explicit {
-				p.note(stInfo, name+": no está instalado en este ordenador.")
+				plan.note(stInfo, name+": no está instalado en este ordenador.")
 			}
 		case assistants.LinkNone:
 			if explicit {
-				p.note(stInfo, name+": no tiene AulaGlobal conectado.")
+				plan.note(stInfo, name+": no tiene AulaGlobal conectado.")
 			}
 		case assistants.LinkElsewhere:
-			p.note(stWarn, name+": AulaGlobal "+c.l.Detail)
+			plan.note(stWarn, name+": AulaGlobal "+client.link.Detail)
 		case assistants.LinkError:
-			p.note(stFail, name+": no se puede modificar con seguridad ("+c.l.Detail+"). No se ha tocado nada.\n"+c.a.ManualRemove(e.ce))
+			plan.note(stFail, name+": no se puede modificar con seguridad ("+client.link.Detail+"). No se ha tocado nada.\n"+client.assistant.ManualRemove(e.assistantEnv))
 		case assistants.LinkPresent:
-			if !c.ours {
-				if !e.interactive || o.yes || !ui.Yes(name+": la entrada «aulaglobal» apunta a "+quote(c.l.Command)+", no a este programa. ¿Quitarla igualmente? [s/N]") {
-					p.note(stWarn, name+": la entrada apunta a "+quote(c.l.Command)+", no a este programa; no se toca.")
+			if !client.ours {
+				if !e.interactive || opts.yes || !ui.Yes(name+": la entrada «aulaglobal» apunta a "+quote(client.link.Command)+", no a este programa. ¿Quitarla igualmente? [s/N]") {
+					plan.note(stWarn, name+": la entrada apunta a "+quote(client.link.Command)+", no a este programa; no se toca.")
 					continue
 				}
 			}
-			c := c
-			plan := name + ": ejecutar `" + c.l.Detail + "`"
-			if c.l.Location != "" {
-				plan = name + ": quitar la entrada «aulaglobal» de " + c.l.Location + " (copia de seguridad: " + c.l.Location + ".bak)"
+			client := client
+			description := name + ": ejecutar `" + client.link.Detail + "`"
+			if client.link.Location != "" {
+				description = name + ": quitar la entrada «aulaglobal» de " + client.link.Location + " (copia de seguridad: " + client.link.Location + ".bak)"
 			}
-			p.add(plan, func() (stepStatus, string) {
-				if err := c.a.Remove(e.ce); err != nil {
-					return stFail, name + ": no se pudo desconectar con seguridad. No se ha tocado nada más.\n" + c.a.ManualRemove(e.ce)
+			plan.add(description, func() (stepStatus, string) {
+				if err := client.assistant.Remove(e.assistantEnv); err != nil {
+					return stFail, name + ": no se pudo desconectar con seguridad. No se ha tocado nada más.\n" + client.assistant.ManualRemove(e.assistantEnv)
 				}
 				return stOK, name + ": desconectado."
 			})
@@ -128,64 +130,64 @@ func (e uninstallEnv) planClients(ui termui.UI, o uninstallOpts, p *planner, cls
 
 // tokenCandidates is the token path from flags/env/defaults plus any custom
 // path an assistant entry of ours points at (only if it looks like a token).
-func (e uninstallEnv) tokenCandidates(cls []clientLink) []string {
+func (e uninstallEnv) tokenCandidates(links []clientLink) []string {
 	seen := map[string]bool{}
 	var out []string
-	add := func(p string) {
-		if p = filepath.Clean(p); !seen[p] {
-			seen[p] = true
-			out = append(out, p)
+	add := func(path string) {
+		if path = filepath.Clean(path); !seen[path] {
+			seen[path] = true
+			out = append(out, path)
 		}
 	}
 	add(e.tokenFile)
-	for _, c := range cls {
-		if p := c.l.Env["AULAGLOBAL_TOKEN_FILE"]; c.ours && filepath.IsAbs(p) {
-			if fi, err := os.Lstat(p); err == nil && fi.Mode().IsRegular() && fi.Size() <= 64<<10 {
-				add(p)
+	for _, client := range links {
+		if path := client.link.Env["AULAGLOBAL_TOKEN_FILE"]; client.ours && filepath.IsAbs(path) {
+			if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Size() <= 64<<10 {
+				add(path)
 			}
 		}
 	}
 	return out
 }
 
-func isDir(p string) bool { fi, err := os.Lstat(p); return err == nil && fi.IsDir() }
+func isDir(path string) bool { info, err := os.Lstat(path); return err == nil && info.IsDir() }
 
 // planToken deletes the token files and, once empty, their folder. With
 // wholeConfig the program's config folder is skipped here, because planAll
 // deletes it as a whole.
-func (e uninstallEnv) planToken(p *planner, cls []clientLink, wholeConfig bool) {
+func (e uninstallEnv) planToken(plan *planner, links []clientLink, wholeConfig bool) {
 	dirs := map[string]bool{}
 	var order []string
 	found := false
-	for _, tok := range e.tokenCandidates(cls) {
-		if d := filepath.Dir(tok); !dirs[d] {
-			dirs[d] = true
-			order = append(order, d)
+	for _, tokenPath := range e.tokenCandidates(links) {
+		if dir := filepath.Dir(tokenPath); !dirs[dir] {
+			dirs[dir] = true
+			order = append(order, dir)
 		}
-		for _, f := range tokenFiles(tok) {
+		for _, file := range tokenFiles(tokenPath) {
 			found = true
-			f := f
-			p.add("Borrar "+f, func() (stepStatus, string) {
-				if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-					return stFail, "No se pudo borrar " + f + ". Bórralo tú."
+			file := file
+			plan.add("Borrar "+file, func() (stepStatus, string) {
+				if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+					return stFail, "No se pudo borrar " + file + ". Bórralo tú."
 				}
-				return stOK, "Borrado: " + f
+				return stOK, "Borrado: " + file
 			})
 		}
 	}
 	if !found {
-		p.note(stInfo, "No hay ninguna clave de acceso guardada ("+e.tokenFile+").")
+		plan.note(stInfo, "No hay ninguna clave de acceso guardada ("+e.tokenFile+").")
 	}
-	for _, d := range order {
-		if !isDir(d) || (wholeConfig && sameDir(d, e.configDir)) || sameDir(d, e.home) || filepath.Dir(d) == d {
+	for _, dir := range order {
+		if !isDir(dir) || (wholeConfig && sameDir(dir, e.configDir)) || sameDir(dir, e.home) || filepath.Dir(dir) == dir {
 			continue
 		}
-		d := d
-		p.add("Borrar la carpeta "+d+" si queda vacía", func() (stepStatus, string) {
-			if err := os.Remove(d); err != nil {
-				return stInfo, "La carpeta " + d + " se conserva (no está vacía)."
+		dir := dir
+		plan.add("Borrar la carpeta "+dir+" si queda vacía", func() (stepStatus, string) {
+			if err := os.Remove(dir); err != nil {
+				return stInfo, "La carpeta " + dir + " se conserva (no está vacía)."
 			}
-			return stOK, "Carpeta borrada: " + d
+			return stOK, "Carpeta borrada: " + dir
 		})
 	}
 }
@@ -204,97 +206,97 @@ func removeOwnDir(dir, what string) func() (stepStatus, string) {
 	}
 }
 
-func (e uninstallEnv) planAll(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink) {
-	e.planClients(ui, o, p, cls, nil)
-	e.planToken(p, cls, true)
+func (e uninstallEnv) planAll(ui termui.UI, opts uninstallOpts, plan *planner, links []clientLink) {
+	e.planClients(ui, opts, plan, links, nil)
+	e.planToken(plan, links, true)
 	if isDir(e.configDir) {
-		p.add("Borrar la carpeta de configuración "+e.configDir, removeOwnDir(e.configDir, "la carpeta de configuración"))
+		plan.add("Borrar la carpeta de configuración "+e.configDir, removeOwnDir(e.configDir, "la carpeta de configuración"))
 	}
 	if isDir(e.cacheDir) {
-		p.add("Borrar la caché de avisos de versión "+e.cacheDir, removeOwnDir(e.cacheDir, "la caché"))
+		plan.add("Borrar la caché de avisos de versión "+e.cacheDir, removeOwnDir(e.cacheDir, "la caché"))
 	}
 	exeDir := filepath.Dir(e.exe)
 	if e.inContainer {
-		p.note(stWarn, "Se está ejecutando en un contenedor: el programa no se borra desde dentro. Elimina el contenedor o la imagen con Docker.")
+		plan.note(stWarn, "Se está ejecutando en un contenedor: el programa no se borra desde dentro. Elimina el contenedor o la imagen con Docker.")
 	} else if e.goos == "windows" {
-		e.planWindowsPath(p, exeDir)
+		e.planWindowsPath(plan, exeDir)
 	} else {
-		e.planProfiles(p, exeDir)
+		e.planProfiles(plan, exeDir)
 	}
-	e.planData(ui, o, p, cls)
+	e.planData(ui, opts, plan, links)
 	if !e.inContainer {
 		rmDir := baseName(exeDir) == programName
-		plan := "Borrar el programa " + e.exe
+		description := "Borrar el programa " + e.exe
 		if e.goos == "windows" {
-			plan = "Apartar el programa como " + e.exe + ".old y borrarlo en cuanto termine este comando"
+			description = "Apartar el programa como " + e.exe + ".old y borrarlo en cuanto termine este comando"
 		}
 		if rmDir {
-			plan += " y su carpeta " + exeDir + " si queda vacía"
+			description += " y su carpeta " + exeDir + " si queda vacía"
 		}
-		p.add(plan, func() (stepStatus, string) { return e.removeBinary(e.exe, rmDir) })
+		plan.add(description, func() (stepStatus, string) { return e.removeBinary(e.exe, rmDir) })
 	}
 	if e.inContainer {
-		p.hints = append(p.hints, "Se han quitado las conexiones y la clave; el programa sigue dentro de este contenedor.")
+		plan.hints = append(plan.hints, "Se han quitado las conexiones y la clave; el programa sigue dentro de este contenedor.")
 	} else {
-		p.hints = append(p.hints, "AulaGlobal MCP se ha desinstalado de este ordenador.")
+		plan.hints = append(plan.hints, "AulaGlobal MCP se ha desinstalado de este ordenador.")
 	}
-	if p.pathEdit {
-		p.hints = append(p.hints, "Abre una terminal nueva para que el PATH se actualice.")
+	if plan.pathEdit {
+		plan.hints = append(plan.hints, "Abre una terminal nueva para que el PATH se actualice.")
 	}
 }
 
-func (e uninstallEnv) planProfiles(p *planner, exeDir string) {
-	for _, f := range profileCandidates(e.home, e.zdotdir, e.xdg) {
-		b, err := os.ReadFile(f)
-		if err != nil || !strings.Contains(string(b), pathMarker) {
+func (e uninstallEnv) planProfiles(plan *planner, exeDir string) {
+	for _, file := range profileCandidates(e.home, e.zdotdir, e.xdg) {
+		content, err := os.ReadFile(file)
+		if err != nil || !strings.Contains(string(content), pathMarker) {
 			continue
 		}
-		match := func(d string) bool { return sameDir(d, exeDir) }
-		_, n, others := removeMarkedPathLines(string(b), e.home, match)
-		for _, d := range others {
-			p.note(stInfo, f+": la línea marcada «"+pathMarker+"» de "+d+" es de otra carpeta; no se toca.")
+		match := func(dir string) bool { return sameDir(dir, exeDir) }
+		_, removed, others := removeMarkedPathLines(string(content), e.home, match)
+		for _, dir := range others {
+			plan.note(stInfo, file+": la línea marcada «"+pathMarker+"» de "+dir+" es de otra carpeta; no se toca.")
 		}
-		if n == 0 {
+		if removed == 0 {
 			continue
 		}
-		p.pathEdit = true
-		f := f
-		p.add("Quitar de "+f+" la línea que añade "+exeDir+" al PATH (copia de seguridad: "+f+".bak)", func() (stepStatus, string) {
-			cur, err := os.ReadFile(f)
+		plan.pathEdit = true
+		file := file
+		plan.add("Quitar de "+file+" la línea que añade "+exeDir+" al PATH (copia de seguridad: "+file+".bak)", func() (stepStatus, string) {
+			current, err := os.ReadFile(file)
 			if err != nil {
-				return stFail, "No se pudo leer " + f + ". Quita tú la línea marcada «" + pathMarker + "»."
+				return stFail, "No se pudo leer " + file + ". Quita tú la línea marcada «" + pathMarker + "»."
 			}
-			out, n, _ := removeMarkedPathLines(string(cur), e.home, match)
-			if n == 0 {
-				return stInfo, f + ": la línea ya no estaba."
+			out, removed, _ := removeMarkedPathLines(string(current), e.home, match)
+			if removed == 0 {
+				return stInfo, file + ": la línea ya no estaba."
 			}
-			if err = rewriteProfile(f, []byte(out)); err != nil {
-				return stFail, "No se pudo modificar " + f + ". Quita tú la línea marcada «" + pathMarker + "»."
+			if err = rewriteProfile(file, []byte(out)); err != nil {
+				return stFail, "No se pudo modificar " + file + ". Quita tú la línea marcada «" + pathMarker + "»."
 			}
-			return stOK, "PATH: línea quitada de " + f + " (copia en " + f + ".bak)"
+			return stOK, "PATH: línea quitada de " + file + " (copia en " + file + ".bak)"
 		})
 	}
 }
 
-func (e uninstallEnv) planWindowsPath(p *planner, exeDir string) {
+func (e uninstallEnv) planWindowsPath(plan *planner, exeDir string) {
 	if e.winPath == nil {
 		return
 	}
-	v, err := e.winPath.Get()
+	pathValue, err := e.winPath.Get()
 	if err != nil {
-		p.note(stWarn, "No se pudo leer el PATH de tu usuario. Si hace falta, quita tú "+exeDir+" de las variables de entorno.")
+		plan.note(stWarn, "No se pudo leer el PATH de tu usuario. Si hace falta, quita tú "+exeDir+" de las variables de entorno.")
 		return
 	}
-	if _, found := removePathEntry(v, exeDir, e.getenv); !found {
+	if _, found := removePathEntry(pathValue, exeDir, e.getenv); !found {
 		return
 	}
-	p.pathEdit = true
-	p.add("Quitar "+exeDir+" del PATH de tu usuario (solo esa entrada)", func() (stepStatus, string) {
-		cur, err := e.winPath.Get()
+	plan.pathEdit = true
+	plan.add("Quitar "+exeDir+" del PATH de tu usuario (solo esa entrada)", func() (stepStatus, string) {
+		current, err := e.winPath.Get()
 		if err != nil {
 			return stFail, "No se pudo leer el PATH de tu usuario. Quita tú " + exeDir + " de las variables de entorno."
 		}
-		out, found := removePathEntry(cur, exeDir, e.getenv)
+		out, found := removePathEntry(current, exeDir, e.getenv)
 		if !found {
 			return stInfo, "El PATH del usuario ya no incluía " + exeDir + "."
 		}
@@ -310,19 +312,19 @@ func (e uninstallEnv) planWindowsPath(p *planner, exeDir string) {
 
 // dataCandidates are the folders where materials may live: what each assistant
 // entry of ours says, --data-dir / AULAGLOBAL_DOWNLOAD_DIR, or the default.
-func (e uninstallEnv) dataCandidates(cls []clientLink) []string {
+func (e uninstallEnv) dataCandidates(links []clientLink) []string {
 	seen := map[string]bool{}
 	var out []string
-	add := func(d string) {
-		if d = filepath.Clean(d); !seen[d] {
-			seen[d] = true
-			out = append(out, d)
+	add := func(dir string) {
+		if dir = filepath.Clean(dir); !seen[dir] {
+			seen[dir] = true
+			out = append(out, dir)
 		}
 	}
-	for _, c := range cls {
-		if c.ours {
-			if d := c.l.Env["AULAGLOBAL_DOWNLOAD_DIR"]; d != "" {
-				add(d)
+	for _, client := range links {
+		if client.ours {
+			if dir := client.link.Env["AULAGLOBAL_DOWNLOAD_DIR"]; dir != "" {
+				add(dir)
 			} else {
 				add(e.dataDefault)
 			}
@@ -339,61 +341,61 @@ func (e uninstallEnv) dataCandidates(cls []clientLink) []string {
 
 // planData decides, folder by folder, whether to delete the materials. Nothing
 // outside a folder that passes checkDataDir is ever deleted.
-func (e uninstallEnv) planData(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink) {
+func (e uninstallEnv) planData(ui termui.UI, opts uninstallOpts, plan *planner, links []clientLink) {
 	protect := []string{filepath.Dir(e.exe), e.configDir, e.cacheDir, filepath.Dir(e.tokenFile)}
-	for _, d := range e.dataCandidates(cls) {
-		v := checkDataDir(d, e.home, e.dataDefault, protect)
+	for _, dir := range e.dataCandidates(links) {
+		pathValue := checkDataDir(dir, e.home, e.dataDefault, protect)
 		switch {
-		case v.reason != "":
-			p.note(stWarn, "No se borrará "+v.dirName+" ("+v.reason+"). Si de verdad quieres borrarla, hazlo tú a mano.")
+		case pathValue.reason != "":
+			plan.note(stWarn, "No se borrará "+pathValue.dirName+" ("+pathValue.reason+"). Si de verdad quieres borrarla, hazlo tú a mano.")
 			continue
-		case !v.exists:
+		case !pathValue.exists:
 			continue
 		}
 		// A custom folder may hold more than the downloads: only an interactive
 		// answer to an explicit warning can delete it, never a flag.
-		ask := e.interactive && !o.yes
+		ask := e.interactive && !opts.yes
 		want := false
 		switch {
-		case v.custom && !ask:
-			p.note(stInfo, "Se conserva "+d+" (no es la carpeta predeterminada; solo se borra respondiendo a la pregunta en una terminal).")
-		case o.deleteData && !v.custom:
+		case pathValue.custom && !ask:
+			plan.note(stInfo, "Se conserva "+dir+" (no es la carpeta predeterminada; solo se borra respondiendo a la pregunta en una terminal).")
+		case opts.deleteData && !pathValue.custom:
 			want = true
 		case ask:
-			if v.custom {
-				fmt.Fprintln(ui.Out, "\n! "+d+" no es la carpeta predeterminada: se borrará todo lo que haya dentro, no solo los apuntes.")
+			if pathValue.custom {
+				fmt.Fprintln(ui.Out, "\n! "+dir+" no es la carpeta predeterminada: se borrará todo lo que haya dentro, no solo los apuntes.")
 			}
-			want = ui.Yes("¿Borrar también la carpeta AulaGlobal con tus materiales (" + d + ")? [s/N]")
+			want = ui.Yes("¿Borrar también la carpeta AulaGlobal con tus materiales (" + dir + ")? [s/N]")
 		}
 		if !want {
-			if !(v.custom && !ask) {
-				p.conserved = append(p.conserved, "tu carpeta AulaGlobal con tus materiales ("+d+")")
+			if !(pathValue.custom && !ask) {
+				plan.conserved = append(plan.conserved, "tu carpeta AulaGlobal con tus materiales ("+dir+")")
 			}
 			continue
 		}
-		d := d
-		p.add("Borrar la carpeta de apuntes "+d+" y todo lo que contiene", func() (stepStatus, string) {
-			cur := checkDataDir(d, e.home, e.dataDefault, protect)
-			if !cur.ok {
-				return stWarn, "No se borra " + d + " (" + cur.reason + ")."
+		dir := dir
+		plan.add("Borrar la carpeta de apuntes "+dir+" y todo lo que contiene", func() (stepStatus, string) {
+			current := checkDataDir(dir, e.home, e.dataDefault, protect)
+			if !current.ok {
+				return stWarn, "No se borra " + dir + " (" + current.reason + ")."
 			}
 			var err error
-			if cur.empty {
-				err = os.Remove(d)
+			if current.empty {
+				err = os.Remove(dir)
 			} else {
-				err = os.RemoveAll(d)
+				err = os.RemoveAll(dir)
 			}
 			if err != nil {
-				return stFail, "No se pudo borrar " + d + " por completo. Bórrala tú."
+				return stFail, "No se pudo borrar " + dir + " por completo. Bórrala tú."
 			}
-			return stOK, "Carpeta de apuntes borrada: " + d
+			return stOK, "Carpeta de apuntes borrada: " + dir
 		})
 	}
 }
 
-func (p *planner) hasFailedNote() bool {
-	for _, n := range p.notes {
-		if n.st == stFail {
+func (plan *planner) hasFailedNote() bool {
+	for _, item := range plan.notes {
+		if item.status == stFail {
 			return true
 		}
 	}
@@ -401,37 +403,37 @@ func (p *planner) hasFailedNote() bool {
 }
 
 // print shows what the plan will do, what it keeps and what it cannot do.
-func (p *planner) print(out io.Writer) {
+func (plan *planner) print(out io.Writer) {
 	fmt.Fprintln(out, "\nPlan:")
-	for _, s := range p.steps {
-		fmt.Fprintln(out, "  · "+s.plan)
+	for _, s := range plan.steps {
+		fmt.Fprintln(out, "  · "+s.description)
 	}
-	if len(p.conserved) > 0 {
-		fmt.Fprintln(out, "\nSe conservará: "+strings.Join(p.conserved, "; ")+".")
+	if len(plan.conserved) > 0 {
+		fmt.Fprintln(out, "\nSe conservará: "+strings.Join(plan.conserved, "; ")+".")
 	}
-	if len(p.notes) > 0 {
+	if len(plan.notes) > 0 {
 		fmt.Fprintln(out, "\nAvisos:")
-		for _, n := range p.notes {
-			printItem(out, n.st, n.text)
+		for _, item := range plan.notes {
+			printItem(out, item.status, item.text)
 		}
 	}
 }
 
 // run executes the steps in order and reports each result. It returns an error
 // if a step failed or a note already said something could not be prepared.
-func (p *planner) run(out io.Writer) error {
-	failed := p.hasFailedNote()
+func (plan *planner) run(out io.Writer) error {
+	failed := plan.hasFailedNote()
 	fmt.Fprintln(out, "\nResultado:")
-	for _, s := range p.steps {
-		st, text := s.run()
-		failed = failed || st == stFail
-		printItem(out, st, text)
+	for _, s := range plan.steps {
+		status, text := s.run()
+		failed = failed || status == stFail
+		printItem(out, status, text)
 	}
 	if failed {
 		return errors.New("algunos pasos no se pudieron completar; consulta el resumen")
 	}
 	fmt.Fprintln(out)
-	for _, h := range p.hints {
+	for _, h := range plan.hints {
 		fmt.Fprintln(out, h)
 	}
 	return nil

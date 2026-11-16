@@ -17,31 +17,31 @@ type registryPath struct{}
 func realPathStore() pathStore { return registryPath{} }
 
 func (registryPath) Get() (string, error) {
-	k, err := registry.OpenKey(registry.CURRENT_USER, "Environment", registry.QUERY_VALUE)
+	key, err := registry.OpenKey(registry.CURRENT_USER, "Environment", registry.QUERY_VALUE)
 	if err != nil {
 		return "", err
 	}
-	defer k.Close()
-	v, _, err := k.GetStringValue("Path")
+	defer key.Close()
+	value, _, err := key.GetStringValue("Path")
 	if err == registry.ErrNotExist {
 		return "", nil
 	}
-	return v, err
+	return value, err
 }
 
 // Set keeps the value's type: install.ps1 and Windows tools usually store
 // REG_EXPAND_SZ so %VARIABLES% in the entries keep working.
 func (registryPath) Set(value string) error {
-	k, err := registry.OpenKey(registry.CURRENT_USER, "Environment", registry.QUERY_VALUE|registry.SET_VALUE)
+	key, err := registry.OpenKey(registry.CURRENT_USER, "Environment", registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
-	defer k.Close()
-	_, typ, err := k.GetStringValue("Path")
+	defer key.Close()
+	_, typ, err := key.GetStringValue("Path")
 	if err == nil && typ == registry.SZ {
-		return k.SetStringValue("Path", value)
+		return key.SetStringValue("Path", value)
 	}
-	return k.SetExpandStringValue("Path", value)
+	return key.SetExpandStringValue("Path", value)
 }
 
 // spawnDetached starts cmdline (a full cmd.exe command line) without a console
