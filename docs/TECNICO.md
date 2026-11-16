@@ -110,13 +110,13 @@ de descarga se devuelven en results.
 |---|---|---|
 | auth_status | {} | token_valid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional. **No** devuelve nombre ni ID de usuario (ver Privacidad y minimización de datos) |
 | list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
-| list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections → modules → contents: filename, filesize nullable, mimetype, timemodified, handle, section, module |
+| list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections con modules y contents anidados: filename, filesize nullable, mimetype, timemodified, handle, section, module |
 | download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
 | read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
 | search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
 | list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
 
-Usa list_courses → list_course_files → download_files → read_file.
+El orden habitual es list_courses, list_course_files, download_files y read_file.
 Los handles se conservan en memoria (máximo 100000); vuelve a listar tras reiniciar.
 Las rutas usan `<Asignatura localizada>/<Sección>/<archivo>`, conservando
 subcarpetas filepath de los módulos carpeta, siempre sanitizadas.
@@ -193,7 +193,7 @@ POST form para WS; token query solo para pluginfile. Errores de red redactados,
 mensajes Moodle arbitrarios no se propagan. Las descargas (GET idempotentes) reintentan
 timeouts/5xx (3 intentos, backoff cancelable). Los POST de WS solo se repiten tras 429/503 y solo si la función es de solo lectura (ver Acceso respetuoso a AulaGlobal).
 Descargas verifican status, rechazan HTML inesperado y errores JSON, tamaño,
-y escriben temporal exclusivo → fsync → rename. Skip compara tamaño y mtime.
+y escriben un temporal exclusivo, lo sincronizan con fsync y lo renombran. Skip compara tamaño y mtime.
 os.Root confina lecturas/escrituras incluso ante enlaces simbólicos hacia fuera.
 Usa un volumen dedicado; no permitas que procesos no confiables escriban en él.
 Los archivos se crean 0600, directorios 0700; no se almacena una cookie.
@@ -343,9 +343,23 @@ inválido, redacción, redirects de launch, filtros/nombres, 200 descargas con c
 workers, skip, cancelación, HTML/JSON/tamaño incorrectos, colisiones y escapes
 por symlinks. scripts/smoke.mjs verifica ambos transportes y seguridad HTTP.
 
-Estructura: cmd/aulaglobal-mcp (CLI/config/lifecycle),
-internal/aulaglobal (API/token/cookie), internal/store (descarga/lectura/búsqueda),
-internal/mcpserver (schemas/herramientas/seguridad HTTP).
+Estructura del código:
+
+- `cmd/aulaglobal-mcp`: la CLI. `main.go` solo reparte los subcomandos (añadir
+  uno es un `case` y un archivo); `serve.go` arranca el servidor MCP;
+  `setup*.go`, `uninstall*.go`, `update.go` y `token_from_cookie.go` son los
+  subcomandos. Cada asistente de IA es un archivo `assistant_<id>.go`;
+  `assistant.go` define la interfaz y la lista, y `config_json.go` y
+  `config_write.go` la edición de configuraciones que comparten.
+- `internal/aulaglobal`: API de Moodle, token, cookie y acceso respetuoso.
+- `internal/store`: descarga, lectura y búsqueda.
+- `internal/mcpserver`: `server.go` registra las herramientas (nombre,
+  descripción y manejador), `tools.go` tiene sus tipos y manejadores, y
+  `http.go` la seguridad HTTP.
+- `internal/selfupdate` y `internal/userpaths`: actualización firmada y rutas.
+
+Para añadir una herramienta MCP: tipos de entrada y salida y un método en
+`tools.go`, y una línea en `New` (`server.go`).
 
 Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.
 
@@ -593,9 +607,9 @@ pasos «[1/5]…»):
    `mv` (Windows: el `.exe` en uso se renombra a `.exe.old`, como hace `update`, y se
    restaura si falla; si no se puede apartar se pide cerrar el asistente).
 7. PATH (si la carpeta no está ya): pregunta [S/n] y añade una línea idempotente
-   marcada con `# aulaglobal-mcp` al perfil: zsh → `~/.zshrc`; bash → `~/.bashrc` (y
-   `~/.bash_profile` en macOS); fish → `~/.config/fish/config.fish` con
-   `set -gx PATH …`; otro → `~/.profile`. En Windows, `SetEnvironmentVariable('Path',
+   marcada con `# aulaglobal-mcp` al perfil: `~/.zshrc` con zsh; `~/.bashrc` con bash (y
+   `~/.bash_profile` en macOS); `~/.config/fish/config.fish` con fish, usando
+   `set -gx PATH …`; `~/.profile` con cualquier otro. En Windows, `SetEnvironmentVariable('Path',
    …, 'User')` de forma idempotente (sin distinguir mayúsculas ni barra final) y
    también `$env:Path` de la sesión.
 8. Ejecuta `<carpeta>/aulaglobal-mcp setup` con la entrada conectada a `/dev/tty`
@@ -671,7 +685,7 @@ ejecución (misma versión, idempotencia del PATH), actualización, perfiles
 (zsh/bash/fish/otro, macOS simulado con un `uname` falso), archivo manipulado,
 `checksums.txt` manipulado, firma ausente, clave equivocada, sin `ssh-keygen`,
 `ssh-keygen` antiguo, arquitectura/SO no soportados, solo `wget`, carpeta imposible,
-script truncado, y —con una terminal real creada con `script`— las preguntas de
+script truncado, y, con una terminal real creada con `script`, las preguntas de
 carpeta/PATH, y que `setup` recibe un terminal en la entrada. Sin terminal se
 comprueba que `setup` no se ejecuta (no contacta con UC3M). Bajo busybox ash no se
 simulan `uname` ni la ausencia de `wget`, porque busybox ejecuta sus applets sin
@@ -820,18 +834,18 @@ No se probó el refresco visual en una aplicación real.
 
 Fuentes oficiales consultadas:
 
-- https://antigravity.google/docs/mcp — ruta actual, esquema, interfaz y recarga CLI/App.
-- https://antigravity.google/docs/getting-started — instalación oficial de `agy` y ubicaciones.
-- https://antigravity.google/docs/changelog — notas vigentes de App, CLI e IDE.
-- https://antigravity.google/cli/install.sh — instalador empleado en el contenedor.
+- https://antigravity.google/docs/mcp: ruta actual, esquema, interfaz y recarga CLI/App.
+- https://antigravity.google/docs/getting-started: instalación oficial de `agy` y ubicaciones.
+- https://antigravity.google/docs/changelog: notas vigentes de App, CLI e IDE.
+- https://antigravity.google/cli/install.sh: instalador empleado en el contenedor.
 
 El esquema multiplataforma y la interfaz gráfica están verificados documentalmente;
 la generación de configuración y ayuda se verificaron también con el binario Linux.
 
 ## Registro unificado de asistentes
 
-`setup_clients.go` define `assistant`: ID, Name, Detect, Inspect, Apply,
-Manual y Reload. La única lista ordenada `assistants` sirve para detección,
+`assistant.go` define `assistant`: ID, Name, Detect, Inspect, Apply,
+Manual y Reload (y, para `uninstall`, Find, Remove y ManualRemove). La única lista ordenada `assistants` sirve para detección,
 selección por ID, ayuda y pruebas de contrato. Los estados son no instalado,
 falta, idéntico, diferente y otro ámbito. Los errores de inspección se cierran
 sin escribir ni mostrar diagnósticos privados.
@@ -840,15 +854,16 @@ sin escribir ni mostrar diagnósticos privados.
 siempre [S/n] para añadir o actualizar. Con dos o más cambios propone configurar
 todos; `e` permite elegir y `n` omite todos los pendientes. Las entradas idénticas
 no preguntan. El resumen distingue añadido, actualizado, ya estaba, omitido y
-falló, y solo imprime Reload de los clientes modificados. Los transcriptos en
+falló, y solo imprime Reload de los clientes modificados. Las transcripciones en
 `cmd/aulaglobal-mcp/testdata/setup-*.golden` fijan el formato.
 
 Para añadir un asistente, sigue **3 pasos**:
 
-1. Crea un archivo que implemente `assistant` (o construya un `fileAssistant`
-   con las particularidades del formato, ruta, detección y recarga).
+1. Crea `assistant_<id>.go` con un tipo que implemente `assistant` (o construye
+   un `fileAssistant` con las particularidades del formato, ruta, detección y
+   recarga). Ahí va todo lo propio del asistente, también quitar su entrada.
 2. Añade una línea a `assistants`. Su ID queda disponible en --help y --clients.
-3. Ejecuta las pruebas compartidas `TestAssistantContracts` y añade fixtures o
+3. Ejecuta las pruebas compartidas `TestAssistantContracts` (`assistant_test.go`) y añade fixtures o
    pruebas de las particularidades del nuevo cliente. No necesita otro flujo UI.
 
 `clientEnv` inyecta lookup/stat, ejecutores de CLI con salida capturada,
@@ -894,10 +909,12 @@ una variable si se coloca después de -e. El separador -- precede al ejecutable.
 
 ## Desinstalación (`aulaglobal-mcp uninstall`)
 
-Implementada en cmd/aulaglobal-mcp (`uninstall.go` flujo, menú y plan;
-`uninstall_clients.go` quitar la entrada de cada asistente; `uninstall_files.go`
-perfiles, PATH, carpeta de apuntes y binario; `uninstall_windows.go` /
-`uninstall_other.go` registro y proceso auxiliar de Windows). Texto en español y
+Implementada en cmd/aulaglobal-mcp: `uninstall.go` (opciones, menú y
+orquestación), `uninstall_plan.go` (qué se hará en cada opción),
+`uninstall_path.go` (perfiles de shell y PATH de Windows), `uninstall_data.go`
+(token y carpeta de apuntes), `uninstall_program.go` (borrar el ejecutable),
+`uninstall_windows.go` / `uninstall_other.go` (registro y proceso auxiliar de
+Windows). Quitar la entrada de cada asistente está en su `assistant_<id>.go`. Texto en español y
 mismo estilo visual que setup (✓ ! ✗ ·, `[s/N]`).
 
 ### Opciones y flags
