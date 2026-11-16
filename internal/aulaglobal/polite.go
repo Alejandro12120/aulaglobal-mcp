@@ -58,12 +58,12 @@ func (e *RateLimitError) Error() string {
 }
 
 // ParseMaxRPS validates the value of AULAGLOBAL_MAX_RPS.
-func ParseMaxRPS(s string) (float64, error) {
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v != v || v < MinMaxRPS || v > MaxMaxRPS {
+func ParseMaxRPS(text string) (float64, error) {
+	rps, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
+	if err != nil || rps != rps || rps < MinMaxRPS || rps > MaxMaxRPS {
 		return 0, fmt.Errorf("AULAGLOBAL_MAX_RPS must be a number between %g and %g", MinMaxRPS, MaxMaxRPS)
 	}
-	return v, nil
+	return rps, nil
 }
 
 // Readonly web service functions: safe to retry, deduplicate and (for the subset
@@ -117,10 +117,10 @@ type polite struct {
 }
 
 func newPolite() *polite {
-	p := &polite{now: time.Now, sleep: realSleep, jitter: rand.Float64, cache: map[string]cacheEntry{}, flights: map[string]*flight{}}
-	p.rate, p.burst = DefaultMaxRPS, burstFor(DefaultMaxRPS)
-	p.tokens, p.last = p.burst, p.now()
-	return p
+	gate := &polite{now: time.Now, sleep: realSleep, jitter: rand.Float64, cache: map[string]cacheEntry{}, flights: map[string]*flight{}}
+	gate.rate, gate.burst = DefaultMaxRPS, burstFor(DefaultMaxRPS)
+	gate.tokens, gate.last = gate.burst, gate.now()
+	return gate
 }
 
 func burstFor(rps float64) float64 { return max(1, float64(int(rps*2+0.5))) }
@@ -147,11 +147,11 @@ func (c *Client) SetMaxRPS(rps float64) error {
 	if rps != rps || rps < MinMaxRPS || rps > MaxMaxRPS {
 		return fmt.Errorf("max requests per second must be between %g and %g", MinMaxRPS, MaxMaxRPS)
 	}
-	p := c.polite()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.rate, p.burst = rps, burstFor(rps)
-	p.tokens = min(p.tokens, p.burst)
+	gate := c.polite()
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	gate.rate, gate.burst = rps, burstFor(rps)
+	gate.tokens = min(gate.tokens, gate.burst)
 	return nil
 }
 
@@ -166,18 +166,18 @@ func (p *polite) wait(ctx context.Context) error {
 		}
 		p.mu.Lock()
 		now := p.now()
-		if d := p.until.Sub(now); d > 0 {
+		if remaining := p.until.Sub(now); remaining > 0 {
 			p.mu.Unlock()
-			if dl, ok := ctx.Deadline(); ok && time.Until(dl) < d {
-				return &RateLimitError{RetryAfter: d}
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < remaining {
+				return &RateLimitError{RetryAfter: remaining}
 			}
-			if err := p.sleep(ctx, d); err != nil {
+			if err := p.sleep(ctx, remaining); err != nil {
 				return err
 			}
 			continue
 		}
-		if el := now.Sub(p.last).Seconds(); el > 0 {
-			p.tokens = min(p.burst, p.tokens+el*p.rate)
+		if elapsed := now.Sub(p.last).Seconds(); elapsed > 0 {
+			p.tokens = min(p.burst, p.tokens+elapsed*p.rate)
 		}
 		p.last = now
 		p.tokens--
@@ -206,10 +206,10 @@ func (p *polite) wait(ctx context.Context) error {
 }
 
 // pause delays every request, from every goroutine, until now+d (never shortens an existing pause).
-func (p *polite) pause(d time.Duration) {
+func (p *polite) pause(duration time.Duration) {
 	p.mu.Lock()
-	if u := p.now().Add(d); u.After(p.until) {
-		p.until = u
+	if resumeAt := p.now().Add(duration); resumeAt.After(p.until) {
+		p.until = resumeAt
 	}
 	p.mu.Unlock()
 }
@@ -217,25 +217,25 @@ func (p *polite) pause(d time.Duration) {
 // backoff turns a Retry-After header (seconds or HTTP-date) into a pause. Without
 // a usable header it is 5 s doubling per attempt with +-25% jitter. Always <= maxRetryAfter.
 func (p *polite) backoff(retryAfter string, attempt int) time.Duration {
-	if d, ok := parseRetryAfter(retryAfter, p.now()); ok {
-		return min(max(d, time.Second), maxRetryAfter)
+	if requested, ok := parseRetryAfter(retryAfter, p.now()); ok {
+		return min(max(requested, time.Second), maxRetryAfter)
 	}
-	d := min(defaultBackoff<<min(attempt, 5), maxRetryAfter)
-	return time.Duration(float64(d) * (0.75 + 0.5*p.jitter()))
+	delay := min(defaultBackoff<<min(attempt, 5), maxRetryAfter)
+	return time.Duration(float64(delay) * (0.75 + 0.5*p.jitter()))
 }
 
-func parseRetryAfter(v string, now time.Time) (time.Duration, bool) {
-	v = strings.TrimSpace(v)
-	if v == "" {
+func parseRetryAfter(header string, now time.Time) (time.Duration, bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
 		return 0, false
 	}
-	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-		if n < 0 {
+	if seconds, err := strconv.ParseInt(header, 10, 64); err == nil {
+		if seconds < 0 {
 			return 0, false
 		}
-		return time.Duration(min(n, 86400)) * time.Second, true
+		return time.Duration(min(seconds, 86400)) * time.Second, true
 	}
-	if t, err := http.ParseTime(v); err == nil {
+	if t, err := http.ParseTime(header); err == nil {
 		return t.Sub(now), true
 	}
 	return 0, false
@@ -263,19 +263,19 @@ func throttleOf(resp *http.Response) *throttle {
 // request is repeated up to maxRateRetries times, otherwise (or when retries are
 // used up, or the pause is longer than ctx allows) a RateLimitError is returned.
 func (c *Client) politely(ctx context.Context, retry bool, once func() (*throttle, error)) error {
-	p := c.polite()
-	for n := 0; ; n++ {
-		if err := p.wait(ctx); err != nil {
+	gate := c.polite()
+	for attempt := 0; ; attempt++ {
+		if err := gate.wait(ctx); err != nil {
 			return err
 		}
-		th, err := once()
-		if err != nil || th == nil {
+		throttled, err := once()
+		if err != nil || throttled == nil {
 			return err
 		}
-		d := p.backoff(th.retryAfter, n)
-		p.pause(d)
-		if !retry || n >= maxRateRetries {
-			return &RateLimitError{RetryAfter: d}
+		delay := gate.backoff(throttled.retryAfter, attempt)
+		gate.pause(delay)
+		if !retry || attempt >= maxRateRetries {
+			return &RateLimitError{RetryAfter: delay}
 		}
 	}
 }
@@ -283,27 +283,27 @@ func (c *Client) politely(ctx context.Context, retry bool, once func() (*throttl
 // cacheKey identifies a call without ever holding the token in the clear: the
 // token only enters a SHA-256 digest. The key is never logged.
 func cacheKey(token, fn string, args url.Values) string {
-	h := sha256.New()
-	h.Write([]byte(token))
-	h.Write([]byte{0})
-	h.Write([]byte(fn))
-	h.Write([]byte{0})
-	h.Write([]byte(args.Encode())) // Encode sorts by key
-	return hex.EncodeToString(h.Sum(nil))
+	hasher := sha256.New()
+	hasher.Write([]byte(token))
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(fn))
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(args.Encode())) // Encode sorts by key
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func (p *polite) cached(key string) ([]byte, bool) {
 	p.cmu.Lock()
 	defer p.cmu.Unlock()
-	e, ok := p.cache[key]
+	entry, ok := p.cache[key]
 	if !ok {
 		return nil, false
 	}
-	if !p.now().Before(e.at.Add(cacheTTL)) {
+	if !p.now().Before(entry.at.Add(cacheTTL)) {
 		delete(p.cache, key)
 		return nil, false
 	}
-	return e.body, true
+	return entry.body, true
 }
 
 func (p *polite) store(key string, body []byte) {
@@ -317,14 +317,14 @@ func (p *polite) store(key string, body []byte) {
 	for {
 		total := 0
 		oldest := ""
-		for k, e := range p.cache {
-			if !now.Before(e.at.Add(cacheTTL)) {
-				delete(p.cache, k) // expired entries go first
+		for existingKey, entry := range p.cache {
+			if !now.Before(entry.at.Add(cacheTTL)) {
+				delete(p.cache, existingKey) // expired entries go first
 				continue
 			}
-			total += len(e.body)
-			if oldest == "" || e.at.Before(p.cache[oldest].at) {
-				oldest = k
+			total += len(entry.body)
+			if oldest == "" || entry.at.Before(p.cache[oldest].at) {
+				oldest = existingKey
 			}
 		}
 		if (len(p.cache) <= cacheMaxEntries && total <= cacheMaxBytes) || oldest == "" {
@@ -342,43 +342,43 @@ func (p *polite) store(key string, body []byte) {
 func (p *polite) shared(ctx context.Context, key string, fetch func(context.Context) ([]byte, error)) ([]byte, error) {
 	for rejoin := 0; ; rejoin++ {
 		p.cmu.Lock()
-		f, ok := p.flights[key]
+		call, ok := p.flights[key]
 		if !ok {
 			base := context.WithoutCancel(ctx)
 			var fctx context.Context
 			var cancel context.CancelFunc
-			if dl, has := ctx.Deadline(); has {
-				fctx, cancel = context.WithDeadline(base, dl)
+			if deadline, has := ctx.Deadline(); has {
+				fctx, cancel = context.WithDeadline(base, deadline)
 			} else {
 				fctx, cancel = context.WithCancel(base)
 			}
-			f = &flight{done: make(chan struct{}), cancel: cancel}
-			p.flights[key] = f
+			call = &flight{done: make(chan struct{}), cancel: cancel}
+			p.flights[key] = call
 			go func() {
-				f.body, f.err = fetch(fctx)
+				call.body, call.err = fetch(fctx)
 				p.cmu.Lock()
-				if p.flights[key] == f {
+				if p.flights[key] == call {
 					delete(p.flights, key)
 				}
 				p.cmu.Unlock()
-				close(f.done)
+				close(call.done)
 				cancel()
 			}()
 		}
-		f.waiters++
+		call.waiters++
 		p.cmu.Unlock()
 		select {
-		case <-f.done:
-			if (errors.Is(f.err, context.DeadlineExceeded) || errors.Is(f.err, context.Canceled)) && ctx.Err() == nil && rejoin < 2 {
+		case <-call.done:
+			if (errors.Is(call.err, context.DeadlineExceeded) || errors.Is(call.err, context.Canceled)) && ctx.Err() == nil && rejoin < 2 {
 				continue
 			}
-			return f.body, f.err
+			return call.body, call.err
 		case <-ctx.Done():
 			p.cmu.Lock()
-			f.waiters--
-			if f.waiters == 0 {
-				f.cancel()
-				if p.flights[key] == f {
+			call.waiters--
+			if call.waiters == 0 {
+				call.cancel()
+				if p.flights[key] == call {
 					delete(p.flights, key) // do not let new callers join a cancelled fetch
 				}
 			}

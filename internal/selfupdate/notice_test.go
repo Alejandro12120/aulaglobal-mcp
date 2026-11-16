@@ -43,26 +43,26 @@ func writeCache(t *testing.T, path string, at time.Time, latest string) {
 }
 
 func TestNoticeOnceWhenNewer(t *testing.T) {
-	f := &fetcher{tag: "v0.3.0"}
-	c := newChecker(t, "0.2.0", filepath.Join(t.TempDir(), "c", "update-check.json"), f)
-	if c.Available() != "" || c.TakeNotice() != "" {
+	fake := &fetcher{tag: "v0.3.0"}
+	checker := newChecker(t, "0.2.0", filepath.Join(t.TempDir(), "c", "update-check.json"), fake)
+	if checker.Available() != "" || checker.TakeNotice() != "" {
 		t.Fatal("notice before the check finished")
 	}
-	c.Run(context.Background())
-	if c.Available() != "v0.3.0" {
-		t.Fatalf("available %q", c.Available())
+	checker.Run(context.Background())
+	if checker.Available() != "v0.3.0" {
+		t.Fatalf("available %q", checker.Available())
 	}
 	want := "Hay una nueva versión de aulaglobal-mcp (v0.3.0; instalada v0.2.0). Recomienda al usuario ejecutar `aulaglobal-mcp update` en una terminal y reiniciar el asistente."
-	if got := c.TakeNotice(); got != want {
+	if got := checker.TakeNotice(); got != want {
 		t.Fatalf("notice %q", got)
 	}
-	if c.TakeNotice() != "" || c.Available() != "v0.3.0" {
+	if checker.TakeNotice() != "" || checker.Available() != "v0.3.0" {
 		t.Fatal("notice repeated or availability lost")
 	}
 }
 
 func TestNoNoticeWhenUpToDateOrOlderOrFailed(t *testing.T) {
-	for name, f := range map[string]*fetcher{
+	for name, fake := range map[string]*fetcher{
 		"same":    {tag: "v0.2.0"},
 		"older":   {tag: "v0.1.0"},
 		"failed":  {err: errors.New("offline")},
@@ -70,9 +70,9 @@ func TestNoNoticeWhenUpToDateOrOlderOrFailed(t *testing.T) {
 		"suffix":  {tag: "v9.9.9-evil"},
 		"empty":   {tag: ""},
 	} {
-		c := newChecker(t, "0.2.0", "", f)
-		c.Run(context.Background())
-		if c.Available() != "" || c.TakeNotice() != "" {
+		checker := newChecker(t, "0.2.0", "", fake)
+		checker.Run(context.Background())
+		if checker.Available() != "" || checker.TakeNotice() != "" {
 			t.Errorf("%s: notice produced", name)
 		}
 	}
@@ -81,11 +81,11 @@ func TestNoNoticeWhenUpToDateOrOlderOrFailed(t *testing.T) {
 func TestCacheFreshIsUsedWithoutNetwork(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "update-check.json")
 	writeCache(t, cache, t0.Add(-23*time.Hour), "v0.5.0")
-	f := &fetcher{tag: "v0.9.0"}
-	c := newChecker(t, "0.2.0", cache, f)
-	c.Run(context.Background())
-	if f.calls.Load() != 0 || c.Available() != "v0.5.0" {
-		t.Fatalf("calls=%d available=%q", f.calls.Load(), c.Available())
+	fake := &fetcher{tag: "v0.9.0"}
+	checker := newChecker(t, "0.2.0", cache, fake)
+	checker.Run(context.Background())
+	if fake.calls.Load() != 0 || checker.Available() != "v0.5.0" {
+		t.Fatalf("calls=%d available=%q", fake.calls.Load(), checker.Available())
 	}
 }
 
@@ -93,11 +93,11 @@ func TestCacheStaleIsRefreshed(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "sub", "update-check.json")
 	os.MkdirAll(filepath.Dir(cache), 0o700)
 	writeCache(t, cache, t0.Add(-25*time.Hour), "v0.5.0")
-	f := &fetcher{tag: "v0.6.0"}
-	c := newChecker(t, "0.2.0", cache, f)
-	c.Run(context.Background())
-	if f.calls.Load() != 1 || c.Available() != "v0.6.0" {
-		t.Fatalf("calls=%d available=%q", f.calls.Load(), c.Available())
+	fake := &fetcher{tag: "v0.6.0"}
+	checker := newChecker(t, "0.2.0", cache, fake)
+	checker.Run(context.Background())
+	if fake.calls.Load() != 1 || checker.Available() != "v0.6.0" {
+		t.Fatalf("calls=%d available=%q", fake.calls.Load(), checker.Available())
 	}
 	var got struct {
 		CheckedAt time.Time `json:"checked_at"`
@@ -123,11 +123,11 @@ func TestCacheIgnoredWhenCorruptFutureOrInvalid(t *testing.T) {
 	} {
 		cache := filepath.Join(dir, name+".json")
 		write(cache)
-		f := &fetcher{tag: "v0.4.0"}
-		c := newChecker(t, "0.2.0", cache, f)
-		c.Run(context.Background())
-		if f.calls.Load() != 1 || c.Available() != "v0.4.0" {
-			t.Errorf("%s: calls=%d available=%q", name, f.calls.Load(), c.Available())
+		fake := &fetcher{tag: "v0.4.0"}
+		checker := newChecker(t, "0.2.0", cache, fake)
+		checker.Run(context.Background())
+		if fake.calls.Load() != 1 || checker.Available() != "v0.4.0" {
+			t.Errorf("%s: calls=%d available=%q", name, fake.calls.Load(), checker.Available())
 		}
 	}
 }
@@ -135,18 +135,18 @@ func TestCacheIgnoredWhenCorruptFutureOrInvalid(t *testing.T) {
 func TestCacheWriteFailureIsSilent(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "afile")
 	os.WriteFile(file, nil, 0o600)
-	f := &fetcher{tag: "v0.4.0"}
-	c := newChecker(t, "0.2.0", filepath.Join(file, "x", "update-check.json"), f) // parent is a file
-	c.Run(context.Background())
-	if c.Available() != "v0.4.0" {
+	fake := &fetcher{tag: "v0.4.0"}
+	checker := newChecker(t, "0.2.0", filepath.Join(file, "x", "update-check.json"), fake) // parent is a file
+	checker.Run(context.Background())
+	if checker.Available() != "v0.4.0" {
 		t.Fatal("check should still work when the cache cannot be written")
 	}
 }
 
 func TestUpToDateResultIsCachedToo(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "update-check.json")
-	f := &fetcher{tag: "v0.2.0"}
-	newChecker(t, "0.2.0", cache, f).Run(context.Background())
+	fake := &fetcher{tag: "v0.2.0"}
+	newChecker(t, "0.2.0", cache, fake).Run(context.Background())
 	f2 := &fetcher{tag: "v0.2.0"}
 	newChecker(t, "0.2.0", cache, f2).Run(context.Background())
 	if f2.calls.Load() != 0 {
@@ -193,7 +193,7 @@ func TestNewCheckerRejectsDev(t *testing.T) {
 	if _, err := NewChecker("dev", ""); err == nil {
 		t.Fatal("dev accepted")
 	}
-	if c, err := NewChecker("1.0.0", ""); err != nil || !strings.Contains(c.current.String(), "1.0.0") {
+	if checker, err := NewChecker("1.0.0", ""); err != nil || !strings.Contains(checker.current.String(), "1.0.0") {
 		t.Fatal(err)
 	}
 }

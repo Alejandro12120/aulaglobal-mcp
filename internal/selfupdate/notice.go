@@ -39,20 +39,20 @@ type Checker struct {
 // NewChecker builds a Checker for the real GitHub repository. cachePath may be
 // empty to disable caching.
 func NewChecker(current, cachePath string) (*Checker, error) {
-	v, ok := ParseVersion(current)
+	parsed, ok := ParseVersion(current)
 	if !ok {
 		return nil, errors.New("version not comparable")
 	}
-	u := New(current)
+	updater := New(current)
 	return &Checker{
-		current:   v,
+		current:   parsed,
 		cachePath: cachePath,
 		now:       time.Now,
 		fetch: func(ctx context.Context) (string, error) {
 			ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 			defer cancel()
-			rel, err := u.Latest(ctx)
-			return rel.Tag, err
+			release, err := updater.Latest(ctx)
+			return release.Tag, err
 		},
 	}, nil
 }
@@ -71,12 +71,12 @@ func (c *Checker) Run(ctx context.Context) {
 			slog.Debug("update check failed", "error", err.Error())
 			return
 		}
-		v, valid := ParseVersion(tag)
+		parsed, valid := ParseVersion(tag)
 		if !valid {
 			slog.Debug("update check returned an invalid version")
 			return
 		}
-		latest = v
+		latest = parsed
 		c.writeCache(latest)
 	}
 	if latest.Compare(c.current) > 0 {
@@ -90,26 +90,26 @@ func (c *Checker) fromCache() (Version, bool) {
 	if c.cachePath == "" {
 		return Version{}, false
 	}
-	b, err := os.ReadFile(c.cachePath)
+	content, err := os.ReadFile(c.cachePath)
 	if err != nil {
 		return Version{}, false
 	}
-	var f cacheFile
-	if json.Unmarshal(b, &f) != nil {
+	var cached cacheFile
+	if json.Unmarshal(content, &cached) != nil {
 		return Version{}, false
 	}
-	age := c.now().Sub(f.CheckedAt)
+	age := c.now().Sub(cached.CheckedAt)
 	if age < 0 || age >= cacheTTL {
 		return Version{}, false
 	}
-	return ParseVersion(f.Latest)
+	return ParseVersion(cached.Latest)
 }
 
 func (c *Checker) writeCache(latest Version) {
 	if c.cachePath == "" {
 		return
 	}
-	b, err := json.Marshal(cacheFile{CheckedAt: c.now().UTC(), Latest: latest.String()})
+	content, err := json.Marshal(cacheFile{CheckedAt: c.now().UTC(), Latest: latest.String()})
 	if err != nil {
 		return
 	}
@@ -123,7 +123,7 @@ func (c *Checker) writeCache(latest Version) {
 		slog.Debug("update cache not written", "error", err.Error())
 		return
 	}
-	_, err = tmp.Write(b)
+	_, err = tmp.Write(content)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}

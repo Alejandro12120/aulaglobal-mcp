@@ -32,54 +32,54 @@ type Store struct {
 	pdfExtractor   func(context.Context, []byte) (document, error)
 }
 
-func Open(path string, max int64, workers int) (*Store, error) {
+func Open(path string, maxFile int64, workers int) (*Store, error) {
 	timeout := int64(60)
-	if v := os.Getenv("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS"); v != "" {
+	if text := os.Getenv("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS"); text != "" {
 		var err error
-		timeout, err = strconv.ParseInt(v, 10, 64)
+		timeout, err = strconv.ParseInt(text, 10, 64)
 		if err != nil || timeout < 1 || timeout > 600 {
 			return nil, errors.New("AULAGLOBAL_EXTRACT_TIMEOUT_SECONDS must be 1..600")
 		}
 	}
-	if max < 1 || max > 16<<30 || workers < 1 || workers > 32 {
+	if maxFile < 1 || maxFile > 16<<30 || workers < 1 || workers > 32 {
 		return nil, errors.New("invalid size or concurrency")
 	}
-	if e := os.MkdirAll(path, 0700); e != nil {
-		return nil, e
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return nil, err
 	}
-	r, e := os.OpenRoot(path)
-	if e != nil {
-		return nil, e
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, err
 	}
-	return &Store{Root: r, MaxFile: max, Workers: workers, ExtractTimeout: time.Duration(timeout) * time.Second, batch: make(chan struct{}, 1)}, nil
+	return &Store{Root: root, MaxFile: maxFile, Workers: workers, ExtractTimeout: time.Duration(timeout) * time.Second, batch: make(chan struct{}, 1)}, nil
 }
-func Sanitize(s string) string {
-	s = strings.Map(func(r rune) rune {
+func Sanitize(name string) string {
+	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || strings.ContainsRune("/\\<>:\"|?*", r) {
 			return '_'
 		}
 		return r
-	}, s)
-	s = strings.ReplaceAll(s, "..", "_")
-	s = strings.Trim(s, " .")
-	if len(s) > 100 {
-		s = s[:100]
-		for !utf8.ValidString(s) {
-			s = s[:len(s)-1]
+	}, name)
+	name = strings.ReplaceAll(name, "..", "_")
+	name = strings.Trim(name, " .")
+	if len(name) > 100 {
+		name = name[:100]
+		for !utf8.ValidString(name) {
+			name = name[:len(name)-1]
 		}
 	}
-	base := strings.ToUpper(strings.Split(s, ".")[0])
+	base := strings.ToUpper(strings.Split(name, ".")[0])
 	if regexp.MustCompile(`^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$`).MatchString(base) {
-		s = "_" + s
+		name = "_" + name
 	}
-	if s == "" {
+	if name == "" {
 		return "unnamed"
 	}
-	return s
+	return name
 }
-func valid(p string) error {
-	p = filepath.Clean(p)
-	if strings.HasPrefix(filepath.ToSlash(p), ".aulaglobal-cache/") || p == ".aulaglobal-cache" || p == "" || p == "." || !filepath.IsLocal(p) || strings.ContainsRune(p, 0) {
+func valid(path string) error {
+	path = filepath.Clean(path)
+	if strings.HasPrefix(filepath.ToSlash(path), ".aulaglobal-cache/") || path == ".aulaglobal-cache" || path == "" || path == "." || !filepath.IsLocal(path) || strings.ContainsRune(path, 0) {
 		return errors.New("path must be relative to download root")
 	}
 	return nil
@@ -97,15 +97,15 @@ type Result struct {
 // error satisfies errors.Is(err, aulaglobal.ErrTokenExpired) or ErrRateLimited; the
 // per-file results are then incomplete and should be discarded in favour of the
 // single error (files already on disk are skipped on the next attempt).
-func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) ([]Result, error) {
+func (s *Store) Download(ctx context.Context, client *aulaglobal.Client, files []aulaglobal.File) ([]Result, error) {
 	// Serialize batches so concurrent tools cannot replace the same destination.
 	select {
 	case s.batch <- struct{}{}:
 		defer func() { <-s.batch }()
 	case <-ctx.Done():
 		out := make([]Result, len(files))
-		for i, f := range files {
-			out[i] = Result{Path: Path(f), Status: "error", Error: ctx.Err().Error()}
+		for i, file := range files {
+			out[i] = Result{Path: Path(file), Status: "error", Error: ctx.Err().Error()}
 		}
 		return out, nil
 	}
@@ -125,15 +125,15 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 	var once sync.Once
 	var dead error
 	var wg sync.WaitGroup
-	for n := 0; n < s.Workers; n++ {
+	for worker := 0; worker < s.Workers; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				r, e := s.one(dctx, c, files[i], paths[files[i].Handle])
-				out[i] = r
-				if e != nil {
-					once.Do(func() { dead = e; close(stop); cancel() })
+				result, fileErr := s.one(dctx, client, files[i], paths[files[i].Handle])
+				out[i] = result
+				if fileErr != nil {
+					once.Do(func() { dead = fileErr; close(stop); cancel() })
 				}
 			}
 		}()
@@ -151,108 +151,133 @@ func (s *Store) Download(ctx context.Context, c *aulaglobal.Client, files []aula
 
 // one downloads a single file. The error is non-nil only when the token is dead or
 // AulaGlobal is rate limiting us.
-func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, path string) (res Result, fatal error) {
+func (s *Store) one(ctx context.Context, client *aulaglobal.Client, file aulaglobal.File, path string) (res Result, fatal error) {
 	res.Path = path
 	res.Status = "error"
 	run := func() error {
-		if e := ctx.Err(); e != nil {
-			return e
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if e := valid(res.Path); e != nil {
-			return e
+		if err := valid(res.Path); err != nil {
+			return err
 		}
-		if st, e := s.Root.Stat(res.Path); e == nil && st.Mode().IsRegular() && f.Size != nil && st.Size() == *f.Size && f.Modified > 0 && st.ModTime().Unix() == f.Modified {
+		if info, err := s.Root.Stat(res.Path); err == nil && info.Mode().IsRegular() && file.Size != nil && info.Size() == *file.Size && file.Modified > 0 && info.ModTime().Unix() == file.Modified {
 			res.Status = "skipped"
-			res.Bytes = st.Size()
+			res.Bytes = info.Size()
 			return nil
 		}
-		if f.Size != nil && *f.Size > s.MaxFile {
+		if file.Size != nil && *file.Size > s.MaxFile {
 			return errors.New("file exceeds size limit")
 		}
-		resp, e := c.Download(ctx, f)
-		if e != nil {
-			if errors.Is(e, aulaglobal.ErrRateLimited) {
-				fatal = e
+		resp, err := client.Download(ctx, file)
+		if err != nil {
+			if errors.Is(err, aulaglobal.ErrRateLimited) {
+				fatal = err
 			}
-			return e
+			return err
 		}
 		defer resp.Body.Close()
-		br := bufio.NewReader(resp.Body)
-		peek, _ := br.Peek(4096)
-		typ, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		sniff := http.DetectContentType(peek)
-		if typ == "text/html" || strings.HasPrefix(sniff, "text/html") {
-			if f.Mimetype != "text/html" {
-				return errors.New("HTML login/error page refused")
+		reader := bufio.NewReader(resp.Body)
+		peek, _ := reader.Peek(4096)
+		if err = refuseNonFile(ctx, client, file, resp.Header.Get("Content-Type"), peek); err != nil {
+			if errors.Is(err, aulaglobal.ErrTokenExpired) {
+				fatal = err
 			}
-			low := strings.ToLower(string(peek))
-			if strings.Contains(low, "login") || strings.Contains(low, "moodleexception") {
-				return errors.New("HTML login/error page refused")
-			}
+			return err
 		}
-		if typ == "application/json" || strings.HasPrefix(strings.TrimSpace(string(peek)), "{") {
-			var problem struct{ Exception, Errorcode string }
-			if (json.Unmarshal(peek, &problem) == nil && (problem.Exception != "" || problem.Errorcode != "")) || regexp.MustCompile(`"(exception|errorcode)"\s*:`).Match(peek) {
-				if api := c.ClassifyAPIError(ctx, "", problem.Errorcode); errors.Is(api, aulaglobal.ErrTokenExpired) {
-					fatal = api
-					return api
-				}
-				return errors.New("Moodle JSON file error (token may be invalid or expired)")
-			}
-			if f.Mimetype != "application/json" && typ == "application/json" {
-				return errors.New("unexpected JSON download refused")
-			}
+		written, err := s.save(ctx, res.Path, reader, file)
+		if err != nil {
+			return err
 		}
-		dir := filepath.Dir(res.Path)
-		if e = s.Root.MkdirAll(dir, 0700); e != nil {
-			return e
-		}
-		var nonce [16]byte
-		if _, e = rand.Read(nonce[:]); e != nil {
-			return e
-		}
-		tmp := filepath.Join(dir, ".partial-"+hex.EncodeToString(nonce[:]))
-		fd, e := s.Root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if e != nil {
-			return e
-		}
-		defer s.Root.Remove(tmp)
-		defer fd.Close()
-		n, e := io.Copy(fd, io.LimitReader(br, s.MaxFile+1))
-		if e != nil {
-			return errors.New("download stream failed")
-		}
-		if n > s.MaxFile {
-			return errors.New("file exceeds size limit")
-		}
-		if f.Size != nil && n != *f.Size {
-			return errors.New("download size differs from Moodle filesize")
-		}
-		if e = ctx.Err(); e != nil {
-			return e
-		}
-		if e = fd.Sync(); e != nil {
-			return e
-		}
-		if e = fd.Close(); e != nil {
-			return e
-		}
-		if f.Modified > 0 {
-			if e = s.Root.Chtimes(tmp, time.Now(), time.Unix(f.Modified, 0)); e != nil {
-				return e
-			}
-		}
-		if e = s.Root.Rename(tmp, res.Path); e != nil {
-			return e
-		}
-		res.Bytes = n
+		res.Bytes = written
 		res.Status = "downloaded"
 		return nil
 	}
-	if e := run(); e != nil {
-		res.Error = e.Error()
+	if err := run(); err != nil {
+		res.Error = err.Error()
 	}
 	return
+}
+
+// refuseNonFile rejects a response that is not the file: a login or error page
+// that Moodle served with HTTP 200, or a JSON error. peek holds its first bytes.
+// The error wraps aulaglobal.ErrTokenExpired when the JSON error means the token
+// is dead.
+func refuseNonFile(ctx context.Context, client *aulaglobal.Client, file aulaglobal.File, contentType string, peek []byte) error {
+	typ, _, _ := mime.ParseMediaType(contentType)
+	sniff := http.DetectContentType(peek)
+	if typ == "text/html" || strings.HasPrefix(sniff, "text/html") {
+		if file.Mimetype != "text/html" {
+			return errors.New("HTML login/error page refused")
+		}
+		low := strings.ToLower(string(peek))
+		if strings.Contains(low, "login") || strings.Contains(low, "moodleexception") {
+			return errors.New("HTML login/error page refused")
+		}
+	}
+	if typ == "application/json" || strings.HasPrefix(strings.TrimSpace(string(peek)), "{") {
+		var problem struct{ Exception, Errorcode string }
+		if (json.Unmarshal(peek, &problem) == nil && (problem.Exception != "" || problem.Errorcode != "")) || regexp.MustCompile(`"(exception|errorcode)"\s*:`).Match(peek) {
+			if apiErr := client.ClassifyAPIError(ctx, "", problem.Errorcode); errors.Is(apiErr, aulaglobal.ErrTokenExpired) {
+				return apiErr
+			}
+			return errors.New("Moodle JSON file error (token may be invalid or expired)")
+		}
+		if file.Mimetype != "application/json" && typ == "application/json" {
+			return errors.New("unexpected JSON download refused")
+		}
+	}
+	return nil
+}
+
+// save writes body to dest through a temporary file, so a failed or oversized
+// download never leaves a partial file under the final name. The file gets
+// Moodle's modification time, which is what a later run compares to skip it.
+// It returns the number of bytes written.
+func (s *Store) save(ctx context.Context, dest string, body io.Reader, file aulaglobal.File) (int64, error) {
+	dir := filepath.Dir(dest)
+	if err := s.Root.MkdirAll(dir, 0700); err != nil {
+		return 0, err
+	}
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return 0, err
+	}
+	tmp := filepath.Join(dir, ".partial-"+hex.EncodeToString(nonce[:]))
+	temp, err := s.Root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return 0, err
+	}
+	defer s.Root.Remove(tmp)
+	defer temp.Close()
+	written, err := io.Copy(temp, io.LimitReader(body, s.MaxFile+1))
+	if err != nil {
+		return 0, errors.New("download stream failed")
+	}
+	if written > s.MaxFile {
+		return 0, errors.New("file exceeds size limit")
+	}
+	if file.Size != nil && written != *file.Size {
+		return 0, errors.New("download size differs from Moodle filesize")
+	}
+	if err = ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err = temp.Sync(); err != nil {
+		return 0, err
+	}
+	if err = temp.Close(); err != nil {
+		return 0, err
+	}
+	if file.Modified > 0 {
+		if err = s.Root.Chtimes(tmp, time.Now(), time.Unix(file.Modified, 0)); err != nil {
+			return 0, err
+		}
+	}
+	if err = s.Root.Rename(tmp, dest); err != nil {
+		return 0, err
+	}
+	return written, nil
 }
 
 type ReadResult struct {
@@ -266,67 +291,67 @@ type ReadResult struct {
 
 var tags = regexp.MustCompile(`(?s)<[^>]*>`)
 
-func PlainHTML(s string) string {
-	return html.UnescapeString(tags.ReplaceAllString(scripts.ReplaceAllString(s, " "), " "))
+func PlainHTML(markup string) string {
+	return html.UnescapeString(tags.ReplaceAllString(scripts.ReplaceAllString(markup, " "), " "))
 }
 
 var scripts = regexp.MustCompile(`(?is)<(script|style)\b[^>]*>.*?</(?:script|style)>`)
 
-func textLike(p string) bool {
-	switch strings.ToLower(filepath.Ext(p)) {
+func textLike(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
 	case ".txt", ".md", ".csv", ".html", ".htm", ".json", ".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".xml", ".yaml", ".yml", ".sh", ".sql", ".c", ".h", ".cpp", ".java", ".rs", ".tex", ".log":
 		return true
 	}
 	return false
 }
 func (s *Store) Read(ctx context.Context, path string, offset, length int) (ReadResult, error) {
-	r := ReadResult{Path: filepath.ToSlash(path), Offset: offset, NextOffset: -1}
-	if e := valid(path); e != nil {
-		return r, e
+	result := ReadResult{Path: filepath.ToSlash(path), Offset: offset, NextOffset: -1}
+	if err := valid(path); err != nil {
+		return result, err
 	}
 	if offset < 0 || length < 1 || length > 65536 {
-		return r, errors.New("offset >= 0 and length 1..65536 required")
+		return result, errors.New("offset >= 0 and length 1..65536 required")
 	}
-	if e := ctx.Err(); e != nil {
-		return r, e
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
-	st, e := s.Root.Stat(path)
-	if e != nil {
-		return r, e
+	info, err := s.Root.Stat(path)
+	if err != nil {
+		return result, err
 	}
-	r.Size = st.Size()
-	d, e := s.extract(ctx, path)
-	if e != nil {
+	result.Size = info.Size()
+	doc, err := s.extract(ctx, path)
+	if err != nil {
 		if ctx.Err() != nil {
-			return r, ctx.Err()
+			return result, ctx.Err()
 		}
-		r.Note = e.Error()
-		return r, nil
+		result.Note = err.Error()
+		return result, nil
 	}
-	text := d.text()
+	text := doc.text()
 	if text == "" {
-		r.Note = "no extractable text"
-		return r, nil
+		result.Note = "no extractable text"
+		return result, nil
 	}
-	r.Note = "Untrusted course content"
+	result.Note = "Untrusted course content"
 	if offset < len(text) && !utf8.RuneStart(text[offset]) {
-		return r, errors.New("offset must be a UTF-8 boundary")
+		return result, errors.New("offset must be a UTF-8 boundary")
 	}
 	if offset > len(text) {
-		return r, errors.New("offset beyond extracted text")
+		return result, errors.New("offset beyond extracted text")
 	}
 	end := min(len(text), offset+length)
 	for end > offset && end < len(text) && !utf8.RuneStart(text[end]) {
 		end--
 	}
 	if end == offset && offset < len(text) {
-		return r, errors.New("length too small for next UTF-8 character")
+		return result, errors.New("length too small for next UTF-8 character")
 	}
-	r.Text = text[offset:end]
+	result.Text = text[offset:end]
 	if end < len(text) {
-		r.NextOffset = end
+		result.NextOffset = end
 	}
-	return r, nil
+	return result, nil
 }
 
 type Match struct {
@@ -344,8 +369,8 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 	if regex {
 		pattern = query
 	}
-	re, e := regexp.Compile(pattern)
-	if e != nil {
+	matcher, err := regexp.Compile(pattern)
+	if err != nil {
 		return nil, errors.New("invalid regex")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -358,8 +383,8 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 		}
 	}
 	if prefix != "" {
-		if e := valid(prefix); e != nil {
-			return nil, e
+		if err := valid(prefix); err != nil {
+			return nil, err
 		}
 	}
 	scannedBytes := 0
@@ -367,19 +392,19 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 	count := 0
 	var walk func(string) error
 	walk = func(dir string) error {
-		if e := ctx.Err(); e != nil {
-			return e
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		fd, e := s.Root.Open(dir)
-		if e != nil {
-			return e
+		dirFile, err := s.Root.Open(dir)
+		if err != nil {
+			return err
 		}
-		defer fd.Close()
+		defer dirFile.Close()
 		for {
-			entries, e := fd.ReadDir(128)
+			entries, err := dirFile.ReadDir(128)
 			for _, entry := range entries {
-				if e := ctx.Err(); e != nil {
-					return e
+				if err := ctx.Err(); err != nil {
+					return err
 				}
 				if len(out) >= limit {
 					return nil
@@ -391,30 +416,30 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 				if entry.Name() == ".aulaglobal-cache" || strings.HasPrefix(entry.Name(), ".partial-") {
 					continue
 				}
-				p := filepath.Join(dir, entry.Name())
+				path := filepath.Join(dir, entry.Name())
 				if entry.Type()&os.ModeSymlink != 0 {
 					continue
 				}
 				if entry.IsDir() {
-					if prefix != "" && p != prefix && !strings.HasPrefix(prefix, p+string(filepath.Separator)) && !strings.HasPrefix(p, prefix+string(filepath.Separator)) {
+					if prefix != "" && path != prefix && !strings.HasPrefix(prefix, path+string(filepath.Separator)) && !strings.HasPrefix(path, prefix+string(filepath.Separator)) {
 						continue
 					}
-					if e := walk(p); e != nil {
-						return e
+					if err := walk(path); err != nil {
+						return err
 					}
 					continue
 				}
-				if !supported(p) {
+				if !supported(path) {
 					continue
 				}
-				if prefix != "" && p != prefix && !strings.HasPrefix(p, prefix+string(filepath.Separator)) {
+				if prefix != "" && path != prefix && !strings.HasPrefix(path, prefix+string(filepath.Separator)) {
 					continue
 				}
-				d, e := s.extract(ctx, p)
-				if e != nil {
+				doc, err := s.extract(ctx, path)
+				if err != nil {
 					continue
 				}
-				for _, page := range d.Pages {
+				for _, page := range doc.Pages {
 					if len(out) >= limit {
 						return nil
 					}
@@ -422,21 +447,21 @@ func (s *Store) Search(ctx context.Context, query string, regex bool, limit int,
 					if scannedBytes > 128<<20 {
 						return errors.New("search byte limit: 128 MiB")
 					}
-					for _, loc := range re.FindAllStringIndex(page.Text, limit-len(out)) {
+					for _, loc := range matcher.FindAllStringIndex(page.Text, limit-len(out)) {
 						start := max(0, loc[0]-80)
 						end := min(len(page.Text), start+240)
-						out = append(out, Match{filepath.ToSlash(p), loc[0], page.Number, strings.ToValidUTF8(page.Text[start:end], "�")})
+						out = append(out, Match{filepath.ToSlash(path), loc[0], page.Number, strings.ToValidUTF8(page.Text[start:end], "�")})
 					}
 				}
 			}
-			if e == io.EOF {
+			if err == io.EOF {
 				return nil
 			}
-			if e != nil {
-				return e
+			if err != nil {
+				return err
 			}
 		}
 	}
-	err := walk(".")
+	err = walk(".")
 	return out, err
 }

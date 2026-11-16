@@ -15,21 +15,21 @@ type stallBody struct {
 	closed bool
 }
 
-func newStallBody(b io.ReadCloser, d time.Duration) *stallBody {
-	s := &stallBody{ReadCloser: b, idle: d}
-	s.mu.Lock()
-	s.timer = time.AfterFunc(d, func() { s.Close() })
-	s.mu.Unlock()
-	return s
+func newStallBody(body io.ReadCloser, idle time.Duration) *stallBody {
+	watched := &stallBody{ReadCloser: body, idle: idle}
+	watched.mu.Lock()
+	watched.timer = time.AfterFunc(idle, func() { watched.Close() })
+	watched.mu.Unlock()
+	return watched
 }
-func (s *stallBody) Read(p []byte) (int, error) {
-	n, e := s.ReadCloser.Read(p)
+func (s *stallBody) Read(buffer []byte) (int, error) {
+	count, err := s.ReadCloser.Read(buffer)
 	s.mu.Lock()
-	if n > 0 && !s.closed {
+	if count > 0 && !s.closed {
 		s.timer.Reset(s.idle)
 	}
 	s.mu.Unlock()
-	return n, e
+	return count, err
 }
 func (s *stallBody) Close() error {
 	s.mu.Lock()

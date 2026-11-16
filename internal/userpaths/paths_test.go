@@ -7,9 +7,9 @@ import (
 )
 
 func TestDefaults(t *testing.T) {
-	token, data, e := Defaults()
-	if e != nil {
-		t.Fatal(e)
+	token, data, err := Defaults()
+	if err != nil {
+		t.Fatal(err)
 	}
 	config, _ := os.UserConfigDir()
 	home, _ := os.UserHomeDir()

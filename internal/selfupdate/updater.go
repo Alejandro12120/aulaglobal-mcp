@@ -61,11 +61,11 @@ type Release struct {
 }
 
 // Version returns the parsed tag.
-func (r Release) Version() Version { v, _ := ParseVersion(r.Tag); return v }
+func (r Release) Version() Version { parsed, _ := ParseVersion(r.Tag); return parsed }
 
 func (u *Updater) userAgent() string {
-	if v, ok := ParseVersion(u.Current); ok {
-		return "aulaglobal-mcp/" + v.String()
+	if parsed, ok := ParseVersion(u.Current); ok {
+		return "aulaglobal-mcp/" + parsed.String()
 	}
 	return "aulaglobal-mcp/dev"
 }
@@ -99,14 +99,14 @@ func (u *Updater) get(ctx context.Context, url, accept string, limit int64, time
 	if resp.ContentLength > limit {
 		return nil, errors.New("la respuesta supera el tamaño máximo permitido")
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("descarga interrumpida: %w", unwrapURL(err))
 	}
-	if int64(len(b)) > limit {
+	if int64(len(body)) > limit {
 		return nil, errors.New("la respuesta supera el tamaño máximo permitido")
 	}
-	return b, nil
+	return body, nil
 }
 
 func unwrapURL(err error) error {
@@ -134,18 +134,18 @@ func (u *Updater) Latest(ctx context.Context) (Release, error) {
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return Release{}, errors.New("respuesta de GitHub no válida")
 	}
-	v, ok := ParseVersion(doc.TagName)
+	parsed, ok := ParseVersion(doc.TagName)
 	if !ok || !strings.HasPrefix(doc.TagName, "v") {
 		return Release{}, errors.New("la última versión publicada tiene una etiqueta no válida")
 	}
 	if doc.Draft || doc.Prerelease {
 		return Release{}, errors.New("la última versión publicada no es una versión estable")
 	}
-	rel := Release{Tag: v.String(), Assets: map[string]bool{}}
-	for _, a := range doc.Assets {
-		rel.Assets[a.Name] = true
+	release := Release{Tag: parsed.String(), Assets: map[string]bool{}}
+	for _, asset := range doc.Assets {
+		release.Assets[asset.Name] = true
 	}
-	return rel, nil
+	return release, nil
 }
 
 func (u *Updater) assetURL(tag, name string) string {
@@ -154,27 +154,27 @@ func (u *Updater) assetURL(tag, name string) string {
 
 // Install downloads rel, verifies signature and checksum, and replaces the
 // executable. progress (optional) receives one finished line per stage.
-func (u *Updater) Install(ctx context.Context, rel Release, progress func(string)) error {
+func (u *Updater) Install(ctx context.Context, release Release, progress func(string)) error {
 	say := func(s string) {
 		if progress != nil {
 			progress(s)
 		}
 	}
-	if _, ok := ParseVersion(rel.Tag); !ok {
+	if _, ok := ParseVersion(release.Tag); !ok {
 		return errors.New("etiqueta de versión no válida")
 	}
-	archive, err := AssetName(strings.TrimPrefix(rel.Tag, "v"), u.GOOS, u.GOARCH)
+	archive, err := AssetName(strings.TrimPrefix(release.Tag, "v"), u.GOOS, u.GOARCH)
 	if err != nil {
 		return err
 	}
 	sigName := checksumsAsset + signatureSuffix
 	for _, need := range []string{archive, checksumsAsset} {
-		if !rel.Assets[need] {
-			return fmt.Errorf("la versión %s no incluye %s", rel.Tag, need)
+		if !release.Assets[need] {
+			return fmt.Errorf("la versión %s no incluye %s", release.Tag, need)
 		}
 	}
-	if !rel.Assets[sigName] {
-		return fmt.Errorf("la versión %s no incluye la firma (%s); no se instala por seguridad", rel.Tag, sigName)
+	if !release.Assets[sigName] {
+		return fmt.Errorf("la versión %s no incluye la firma (%s); no se instala por seguridad", release.Tag, sigName)
 	}
 
 	exe := u.ExePath
@@ -184,11 +184,11 @@ func (u *Updater) Install(ctx context.Context, rel Release, progress func(string
 		}
 	}
 
-	sums, err := u.get(ctx, u.assetURL(rel.Tag, checksumsAsset), "application/octet-stream", maxChecksumBytes, smallTimeout)
+	sums, err := u.get(ctx, u.assetURL(release.Tag, checksumsAsset), "application/octet-stream", maxChecksumBytes, smallTimeout)
 	if err != nil {
 		return err
 	}
-	sig, err := u.get(ctx, u.assetURL(rel.Tag, sigName), "application/octet-stream", maxSigBytes, smallTimeout)
+	sig, err := u.get(ctx, u.assetURL(release.Tag, sigName), "application/octet-stream", maxSigBytes, smallTimeout)
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (u *Updater) Install(ctx context.Context, rel Release, progress func(string
 		return err
 	}
 	say("· Descargando " + archive)
-	data, err := u.get(ctx, u.assetURL(rel.Tag, archive), "application/octet-stream", maxArchiveBytes, archiveTimeout)
+	data, err := u.get(ctx, u.assetURL(release.Tag, archive), "application/octet-stream", maxArchiveBytes, archiveTimeout)
 	if err != nil {
 		return err
 	}

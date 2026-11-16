@@ -21,7 +21,7 @@ import (
 func TestWSErrors(t *testing.T) {
 	for _, code := range []string{"invalidtoken", "accessexception", "someerror"} {
 		t.Run(code, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != "POST" || r.URL.RawQuery != "" {
 					t.Error("credentials must be POST body")
 				}
@@ -31,12 +31,12 @@ func TestWSErrors(t *testing.T) {
 				}
 				fmt.Fprintf(w, `{"exception":"moodle_exception","errorcode":%q,"message":"secret"}`, code)
 			}))
-			defer ts.Close()
-			c := New(ts.URL, StaticToken{Value: "secret"})
-			_, e := c.Auth(context.Background())
+			defer moodle.Close()
+			client := New(moodle.URL, StaticToken{Value: "secret"})
+			_, err := client.Auth(context.Background())
 			var api *APIError
-			if !errors.As(e, &api) || api.Code != code || strings.Contains(e.Error(), "secret") {
-				t.Fatalf("bad error: %v", e)
+			if !errors.As(err, &api) || api.Code != code || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("bad error: %v", err)
 			}
 		})
 	}
@@ -72,34 +72,34 @@ func TestLaunch(t *testing.T) {
 	for _, private := range []string{"", ":::private"} {
 		h := md5.Sum([]byte(Site + "passport"))
 		payload := fmt.Sprintf("%x:::token%s", h, private)
-		token, p, e := ParseLaunch("moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte(payload)), Site, "passport")
-		if e != nil || token != "token" || (":::"+p != private && private != "") {
-			t.Fatalf("%s %s %v", token, p, e)
+		token, p, err := ParseLaunch("moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte(payload)), Site, "passport")
+		if err != nil || token != "token" || (":::"+p != private && private != "") {
+			t.Fatalf("%s %s %v", token, p, err)
 		}
 	}
-	if _, _, e := ParseLaunch("https://login", Site, "x"); e == nil {
+	if _, _, err := ParseLaunch("https://login", Site, "x"); err == nil {
 		t.Fatal("accepted login")
 	}
-	if _, _, e := ParseLaunch("moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte("bad:::token")), Site, "x"); e == nil {
+	if _, _, err := ParseLaunch("moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte("bad:::token")), Site, "x"); err == nil {
 		t.Fatal("signature unchecked")
 	}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, e := r.Cookie("MoodleSessionag"); e != nil {
-			t.Error(e)
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := r.Cookie("MoodleSessionag"); err != nil {
+			t.Error(err)
 		}
 		h := md5.Sum([]byte("http://" + r.Host + r.URL.Query().Get("passport")))
 		w.Header().Set("Location", "moodlemobile://token="+base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%x:::token:::private", h))))
 		w.WriteHeader(303)
 	}))
-	defer ts.Close()
-	token, p, e := New(ts.URL, StaticToken{}).TokenFromCookie(context.Background(), "fake")
-	if e != nil || token != "token" || p != "private" {
-		t.Fatalf("%s %s %v", token, p, e)
+	defer moodle.Close()
+	token, p, err := New(moodle.URL, StaticToken{}).TokenFromCookie(context.Background(), "fake")
+	if err != nil || token != "token" || p != "private" {
+		t.Fatalf("%s %s %v", token, p, err)
 	}
 }
 
 func TestCatalogAndFallback(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		switch r.Form.Get("wsfunction") {
 		case "core_course_get_enrolled_courses_by_timeline_classification":
@@ -115,52 +115,52 @@ func TestCatalogAndFallback(t *testing.T) {
 			fmt.Fprintf(w, `[{"id":1,"name":"../section","modules":[{"id":2,"name":"module","contents":[{"type":"file","filename":"doc.pdf","fileurl":"http://%s/file?token=secret","filesize":5},{"type":"file","filename":"doc.txt","fileurl":"http://%s/other","filesize":5},{"type":"url","filename":"link"}]}]}]`, r.Host, r.Host)
 		}
 	}))
-	defer ts.Close()
-	c := New(ts.URL, StaticToken{Value: "secret"})
-	courses, e := c.Courses(context.Background(), "inprogress", "en")
-	if e != nil || len(courses) != 1 || courses[0].Name != "Algebra" {
-		t.Fatalf("%+v %v", courses, e)
+	defer moodle.Close()
+	client := New(moodle.URL, StaticToken{Value: "secret"})
+	courses, err := client.Courses(context.Background(), "inprogress", "en")
+	if err != nil || len(courses) != 1 || courses[0].Name != "Algebra" {
+		t.Fatalf("%+v %v", courses, err)
 	}
-	ss, e := c.Files(context.Background(), 1, nil, []string{"txt"})
-	if e != nil || len(ss[0].Modules[0].Files) != 1 {
-		t.Fatalf("%+v %v", ss, e)
+	ss, err := client.Files(context.Background(), 1, nil, []string{"txt"})
+	if err != nil || len(ss[0].Modules[0].Files) != 1 {
+		t.Fatalf("%+v %v", ss, err)
 	}
 	f := ss[0].Modules[0].Files[0]
 	if f.RawURL != "" || strings.Contains(f.URL, "secret") || f.Handle == "" {
 		t.Fatalf("URL/handle error %+v", f)
 	}
-	a, e := c.Auth(context.Background())
-	if e != nil || a.ExpiresAt != nil || !strings.HasPrefix(a.ExpirySource, "unknown") {
-		t.Fatalf("%+v %v", a, e)
+	a, err := client.Auth(context.Background())
+	if err != nil || a.ExpiresAt != nil || !strings.HasPrefix(a.ExpirySource, "unknown") {
+		t.Fatalf("%+v %v", a, err)
 	}
 }
 func TestDownloadHostAndRedirect(t *testing.T) {
 	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("credentials leaked across host") }))
 	defer evil.Close()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, evil.URL, 302) }))
-	defer ts.Close()
-	c := New(ts.URL, StaticToken{Value: "secret"})
-	for _, u := range []string{evil.URL, ts.URL} {
-		if _, e := c.Download(context.Background(), File{URL: u}); e == nil || strings.Contains(e.Error(), "secret") {
-			t.Fatalf("redirect/host error %v", e)
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, evil.URL, 302) }))
+	defer moodle.Close()
+	client := New(moodle.URL, StaticToken{Value: "secret"})
+	for _, u := range []string{evil.URL, moodle.URL} {
+		if _, err := client.Download(context.Background(), File{URL: u}); err == nil || strings.Contains(err.Error(), "secret") {
+			t.Fatalf("redirect/host error %v", err)
 		}
 	}
 }
 
 func TestWriteSecret(t *testing.T) {
 	path := t.TempDir() + "/private/token"
-	if e := WriteSecret(path, "fake"); e != nil {
-		t.Fatal(e)
+	if err := WriteSecret(path, "fake"); err != nil {
+		t.Fatal(err)
 	}
-	st, e := os.Stat(path)
-	if e != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0600) {
-		t.Fatal("secret permissions", e)
+	st, err := os.Stat(path)
+	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0600) {
+		t.Fatal("secret permissions", err)
 	}
-	st, e = os.Stat(filepath.Dir(path))
-	if e != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0700) {
-		t.Fatal("directory permissions", e)
+	st, err = os.Stat(filepath.Dir(path))
+	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0700) {
+		t.Fatal("directory permissions", err)
 	}
-	if e = WriteSecret(path, "overwrite"); e == nil {
+	if err = WriteSecret(path, "overwrite"); err == nil {
 		t.Fatal("overwrote existing secret")
 	}
 }
@@ -183,7 +183,7 @@ func TestTokenClassification(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var probes atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.ParseForm()
 				if r.Form.Get("wsfunction") == "core_webservice_get_site_info" {
 					probes.Add(1)
@@ -196,18 +196,18 @@ func TestTokenClassification(t *testing.T) {
 				}
 				fmt.Fprintf(w, `{"exception":"x","errorcode":%q}`, tc.code)
 			}))
-			defer ts.Close()
-			c := New(ts.URL, StaticToken{Value: "secret"})
-			e := c.WS(context.Background(), tc.fn, nil, &struct{}{})
+			defer moodle.Close()
+			client := New(moodle.URL, StaticToken{Value: "secret"})
+			err := client.WS(context.Background(), tc.fn, nil, &struct{}{})
 			var api *APIError
-			if !errors.As(e, &api) || api.Code != tc.code {
-				t.Fatalf("bad error: %v", e)
+			if !errors.As(err, &api) || api.Code != tc.code {
+				t.Fatalf("bad error: %v", err)
 			}
-			if errors.Is(e, ErrTokenExpired) != tc.expired || api.TokenOK != tc.tokenOK {
-				t.Fatalf("expired=%v tokenOK=%v: %v", errors.Is(e, ErrTokenExpired), api.TokenOK, e)
+			if errors.Is(err, ErrTokenExpired) != tc.expired || api.TokenOK != tc.tokenOK {
+				t.Fatalf("expired=%v tokenOK=%v: %v", errors.Is(err, ErrTokenExpired), api.TokenOK, err)
 			}
-			if !strings.Contains(e.Error(), tc.wantSubstr) || strings.Contains(e.Error(), tc.wantNotSubstr) || strings.Contains(e.Error(), "secret") {
-				t.Fatalf("message: %v", e)
+			if !strings.Contains(err.Error(), tc.wantSubstr) || strings.Contains(err.Error(), tc.wantNotSubstr) || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("message: %v", err)
 			}
 			if probes.Load() != tc.siteInfoCalls && !(tc.fn == "core_webservice_get_site_info" && probes.Load() == 1) {
 				t.Fatalf("site_info calls = %d, want %d", probes.Load(), tc.siteInfoCalls)
@@ -217,8 +217,8 @@ func TestTokenClassification(t *testing.T) {
 }
 
 func TestMissingTokenMessage(t *testing.T) {
-	_, e := StaticToken{}.Get(context.Background())
-	if e == nil || !strings.Contains(e.Error(), "aulaglobal-mcp setup") {
-		t.Fatal(e)
+	_, err := StaticToken{}.Get(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "aulaglobal-mcp setup") {
+		t.Fatal(err)
 	}
 }

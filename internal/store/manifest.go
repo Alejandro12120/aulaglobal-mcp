@@ -21,113 +21,113 @@ type manifestEntry struct {
 	Modified     int64  `json:"timemodified"`
 }
 
-func (s *Store) atomic(path string, b []byte) error {
+func (s *Store) atomic(path string, content []byte) error {
 	if err := s.Root.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
 	var nonce [16]byte
-	if _, e := rand.Read(nonce[:]); e != nil {
-		return e
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return err
 	}
 	tmp := filepath.Join(filepath.Dir(path), ".partial-"+hex.EncodeToString(nonce[:]))
-	f, e := s.Root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
+	temp, err := s.Root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
 	}
 	defer s.Root.Remove(tmp)
-	defer f.Close()
-	if _, e = f.Write(b); e != nil {
-		return e
+	defer temp.Close()
+	if _, err = temp.Write(content); err != nil {
+		return err
 	}
-	if e = f.Sync(); e != nil {
-		return e
+	if err = temp.Sync(); err != nil {
+		return err
 	}
-	if e = f.Close(); e != nil {
-		return e
+	if err = temp.Close(); err != nil {
+		return err
 	}
 	return s.Root.Rename(tmp, path)
 }
-func Path(f aulaglobal.File) string {
-	course := f.CourseName
+func Path(file aulaglobal.File) string {
+	course := file.CourseName
 	if course == "" {
-		course = fmtCourse(f.CourseID)
+		course = fmtCourse(file.CourseID)
 	}
-	parts := []string{Sanitize(course), Sanitize(f.Section)}
-	subdir := f.Filepath
-	if f.LocalSubdir != "" {
-		subdir = f.LocalSubdir
+	parts := []string{Sanitize(course), Sanitize(file.Section)}
+	subdir := file.Filepath
+	if file.LocalSubdir != "" {
+		subdir = file.LocalSubdir
 	}
 	for _, part := range strings.FieldsFunc(subdir, func(r rune) bool { return r == '/' || r == '\\' }) {
 		parts = append(parts, Sanitize(part))
 	}
-	return filepath.ToSlash(filepath.Join(append(parts, Sanitize(f.Filename))...))
+	return filepath.ToSlash(filepath.Join(append(parts, Sanitize(file.Filename))...))
 }
-func fmtCourse(id int64) string { b, _ := json.Marshal(id); return "course-" + string(b) }
+func fmtCourse(id int64) string { encoded, _ := json.Marshal(id); return "course-" + string(encoded) }
 func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
-	m := map[string]manifestEntry{}
-	b, e := s.cacheRead(".aulaglobal-cache/manifest.json")
-	if e == nil {
-		if json.Unmarshal(b, &m) != nil {
+	manifest := map[string]manifestEntry{}
+	content, err := s.cacheRead(".aulaglobal-cache/manifest.json")
+	if err == nil {
+		if json.Unmarshal(content, &manifest) != nil {
 			return nil, errors.New("invalid download manifest")
 		}
-	} else if !os.IsNotExist(e) {
-		return nil, e
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
 	folders := map[int64]string{}
 	// Sort legacy entries as well: a course must never depend on map iteration order.
-	ids := make([]string, 0, len(m))
-	for id := range m {
+	ids := make([]string, 0, len(manifest))
+	for id := range manifest {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		v := m[id]
-		if v.CourseID != 0 && v.CourseFolder != "" {
-			if Sanitize(v.CourseFolder) != v.CourseFolder {
+		entry := manifest[id]
+		if entry.CourseID != 0 && entry.CourseFolder != "" {
+			if Sanitize(entry.CourseFolder) != entry.CourseFolder {
 				return nil, errors.New("invalid course folder")
 			}
-			folders[v.CourseID] = v.CourseFolder
+			folders[entry.CourseID] = entry.CourseFolder
 		}
 	}
 	used := map[string]string{}
-	for id, v := range m {
-		v.Path = filepath.ToSlash(strings.ReplaceAll(v.Path, "\\", "/"))
-		if valid(v.Path) != nil {
+	for id, entry := range manifest {
+		entry.Path = filepath.ToSlash(strings.ReplaceAll(entry.Path, "\\", "/"))
+		if valid(entry.Path) != nil {
 			return nil, errors.New("invalid manifest path")
 		}
-		m[id] = v
-		used[v.Path] = id
+		manifest[id] = entry
+		used[entry.Path] = id
 	}
 	sorted := append([]aulaglobal.File(nil), files...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Handle < sorted[j].Handle })
 	out := map[string]string{}
-	for _, f := range sorted {
-		id := f.Handle
+	for _, file := range sorted {
+		id := file.Handle
 		// Recover a pre-upgrade course folder from an already assigned handle.
-		if folders[f.CourseID] == "" {
+		if folders[file.CourseID] == "" {
 			for _, candidate := range sorted {
-				if candidate.CourseID == f.CourseID && m[candidate.Handle].Path != "" {
-					folders[f.CourseID] = strings.Split(filepath.ToSlash(m[candidate.Handle].Path), "/")[0]
+				if candidate.CourseID == file.CourseID && manifest[candidate.Handle].Path != "" {
+					folders[file.CourseID] = strings.Split(filepath.ToSlash(manifest[candidate.Handle].Path), "/")[0]
 					break
 				}
 			}
 		}
-		if folders[f.CourseID] == "" {
-			name := f.CourseName
+		if folders[file.CourseID] == "" {
+			name := file.CourseName
 			if name == "" {
-				name = fmtCourse(f.CourseID)
+				name = fmtCourse(file.CourseID)
 			}
-			folders[f.CourseID] = Sanitize(name)
+			folders[file.CourseID] = Sanitize(name)
 		}
-		f.CourseName = folders[f.CourseID]
-		p := m[id].Path
-		if p == "" {
-			p = filepath.ToSlash(Path(f))
+		file.CourseName = folders[file.CourseID]
+		entryPath := manifest[id].Path
+		if entryPath == "" {
+			entryPath = filepath.ToSlash(Path(file))
 
-			base := p
-			for n := 0; ; n++ {
-				owner, occupied := used[p]
-				_, err := s.Root.Stat(p)
+			base := entryPath
+			for attempt := 0; ; attempt++ {
+				owner, occupied := used[entryPath]
+				_, err := s.Root.Stat(entryPath)
 				if (!occupied || owner == id) && (occupied || os.IsNotExist(err)) {
 					break
 				}
@@ -135,18 +135,18 @@ func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 					return nil, err
 				}
 				ext := filepath.Ext(base)
-				suffix := fmt.Sprintf("%d", n+2)
-				p = strings.TrimSuffix(base, ext) + " (" + suffix + ")" + ext
+				suffix := fmt.Sprintf("%d", attempt+2)
+				entryPath = strings.TrimSuffix(base, ext) + " (" + suffix + ")" + ext
 			}
 
 		}
-		used[p] = id
-		m[id] = manifestEntry{Path: p, Size: f.Size, Modified: f.Modified, CourseID: f.CourseID, CourseFolder: f.CourseName}
-		out[id] = p
+		used[entryPath] = id
+		manifest[id] = manifestEntry{Path: entryPath, Size: file.Size, Modified: file.Modified, CourseID: file.CourseID, CourseFolder: file.CourseName}
+		out[id] = entryPath
 	}
-	b, e = json.Marshal(m)
-	if e != nil {
-		return nil, e
+	content, err = json.Marshal(manifest)
+	if err != nil {
+		return nil, err
 	}
-	return out, s.atomic(".aulaglobal-cache/manifest.json", b)
+	return out, s.atomic(".aulaglobal-cache/manifest.json", content)
 }
