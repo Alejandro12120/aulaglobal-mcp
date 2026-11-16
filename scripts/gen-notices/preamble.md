@@ -20,7 +20,7 @@ AGDownloader:
    with the token read from the `moodlemobile://` redirect
    (`TokenFromCookie` in `internal/aulaglobal/cookie.go`).
 2. The DevTools console line that reads the `MoodleSessionag` cookie, shown by
-   `aulaglobal-mcp setup` (`cmd/aulaglobal-mcp/setup.go`); adapted to copy the
+   `aulaglobal-mcp setup` (`internal/cli/setup/setup.go`); adapted to copy the
    value to the clipboard instead of logging it.
 3. The course-name cleaning logic (`CleanName` in
    `internal/aulaglobal/client.go`), adapted from `extractCourseNameByLanguage`.

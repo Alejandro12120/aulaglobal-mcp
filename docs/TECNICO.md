@@ -345,12 +345,22 @@ por symlinks. scripts/smoke.mjs verifica ambos transportes y seguridad HTTP.
 
 Estructura del código:
 
-- `cmd/aulaglobal-mcp`: la CLI. `main.go` solo reparte los subcomandos (añadir
-  uno es un `case` y un archivo); `serve.go` arranca el servidor MCP;
-  `setup*.go`, `uninstall*.go`, `update.go` y `token_from_cookie.go` son los
-  subcomandos. Cada asistente de IA es un archivo `assistant_<id>.go`;
-  `assistant.go` define la interfaz y la lista, y `config_json.go` y
-  `config_write.go` la edición de configuraciones que comparten.
+- `cmd/aulaglobal-mcp`: solo `main.go`. Reparte los subcomandos (añadir uno es
+  un `case` y un paquete en `internal/cli`) y guarda `version`, que el
+  enlazador rellena con `-X main.version=...`.
+- `internal/cli/serve`, `setup`, `uninstall`, `update`: un paquete por comando.
+  `setup` incluye también `token-from-cookie`, que comparte con él el guardado
+  del token. Cada paquete trae sus pruebas y sus `testdata` (los `.golden`).
+  `internal/cli/env` lee variables de entorno con valor por defecto.
+- `internal/assistants`: la interfaz `Assistant`, la lista, un archivo por
+  asistente (`claudecode.go`, `claudedesktop.go`, `codex.go`, `opencode.go`,
+  `antigravity.go`), `file.go` (lo común a los asistentes con un solo archivo
+  de configuración) y `config_json.go` / `config_write.go` (edición de
+  configuraciones). `assistants/assistantstest` tiene los dobles de prueba
+  (entorno temporal, `claude` falso, fixture) que usan también `setup` y
+  `uninstall`.
+- `internal/termui` (preguntas por terminal), `internal/atomicfile` (escritura
+  atómica) e `internal/testutil` (ayudas de prueba comunes).
 - `internal/aulaglobal`: API de Moodle, token, cookie y acceso respetuoso.
 - `internal/store`: descarga, lectura y búsqueda.
 - `internal/mcpserver`: `server.go` registra las herramientas (nombre,
@@ -360,6 +370,9 @@ Estructura del código:
 
 Para añadir una herramienta MCP: tipos de entrada y salida y un método en
 `tools.go`, y una línea en `New` (`server.go`).
+
+Para añadir un subcomando: un paquete `internal/cli/<nombre>` con una función
+`Run` y un `case` en `run` (`cmd/aulaglobal-mcp/main.go`).
 
 Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.
 
@@ -469,7 +482,7 @@ SIGINT/SIGTERM compilan en Windows; el cierre por señal Unix requiere CI/host U
 ## Actualización automática
 
 `aulaglobal-mcp update [--check] [--yes] [--force]` está implementado en
-internal/selfupdate (la CLI en cmd/aulaglobal-mcp/update.go).
+internal/selfupdate (la CLI en internal/cli/update).
 
 Flujo: consulta `GET https://api.github.com/repos/Alejandro12120/aulaglobal-mcp/releases/latest`
 (sin autenticación, User-Agent `aulaglobal-mcp/<versión>`; excluye borradores y
@@ -783,7 +796,7 @@ El original exacto se guarda en .bak; la escritura usa temporal y rename.
 No se imprime la salida del CLI ni errores con posible contenido privado.
 
 Prueba real en Docker node:22: npm opencode-ai 1.19.5 ofrece --env pero no
---global en mcp add --help. Las capturas están en cmd/aulaglobal-mcp/testdata.
+--global en mcp add --help. Las capturas están en internal/assistants/testdata.
 Por ello esa versión usa el fallback; no se presupone que npm y la
 documentación V2 estén sincronizados. No se contacta con UC3M.
 
@@ -816,7 +829,7 @@ Los tests simulan metadatos, sin depender de permisos ejecutables del host.
 Se probó el binario oficial Linux `agy 1.5.9`, instalado con el instalador oficial
 en Docker: `--version`, `--help`, `mcp --help`, `mcp add --help` y un registro
 stdio con entorno. La ayuda real se conserva en
-`cmd/aulaglobal-mcp/testdata/agy-1.5.9-mcp-add-help.txt`.
+`internal/assistants/testdata/agy-1.5.9-mcp-add-help.txt`.
 `agy mcp add` acepta `-e KEY=value` antes del nombre y genera `disabled: false`.
 Setup prueba esa ayuda y ejecuta argv sin shell en un HOME/USERPROFILE temporal;
 lee la entrada generada y hace la fusión final con los helpers existentes.
@@ -844,8 +857,8 @@ la generación de configuración y ayuda se verificaron también con el binario 
 
 ## Registro unificado de asistentes
 
-`assistant.go` define `assistant`: ID, Name, Detect, Inspect, Apply,
-Manual y Reload (y, para `uninstall`, Find, Remove y ManualRemove). La única lista ordenada `assistants` sirve para detección,
+`internal/assistants` define `Assistant`: ID, Name, Detect, Inspect, Apply,
+Manual y Reload (y, para `uninstall`, Find, Remove y ManualRemove). La única lista ordenada `registry` (`assistants.All`) sirve para detección,
 selección por ID, ayuda y pruebas de contrato. Los estados son no instalado,
 falta, idéntico, diferente y otro ámbito. Los errores de inspección se cierran
 sin escribir ni mostrar diagnósticos privados.
@@ -855,15 +868,15 @@ siempre [S/n] para añadir o actualizar. Con dos o más cambios propone configur
 todos; `e` permite elegir y `n` omite todos los pendientes. Las entradas idénticas
 no preguntan. El resumen distingue añadido, actualizado, ya estaba, omitido y
 falló, y solo imprime Reload de los clientes modificados. Las transcripciones en
-`cmd/aulaglobal-mcp/testdata/setup-*.golden` fijan el formato.
+`internal/cli/setup/testdata/setup-*.golden` fijan el formato.
 
 Para añadir un asistente, sigue **3 pasos**:
 
-1. Crea `assistant_<id>.go` con un tipo que implemente `assistant` (o construye
+1. Crea `internal/assistants/<id>.go` con un tipo que implemente `Assistant` (o construye
    un `fileAssistant` con las particularidades del formato, ruta, detección y
    recarga). Ahí va todo lo propio del asistente, también quitar su entrada.
-2. Añade una línea a `assistants`. Su ID queda disponible en --help y --clients.
-3. Ejecuta las pruebas compartidas `TestAssistantContracts` (`assistant_test.go`) y añade fixtures o
+2. Añade una entrada a `registry`. Su ID queda disponible en --help y --clients.
+3. Ejecuta las pruebas compartidas `TestAssistantContracts` (`internal/cli/setup/contracts_test.go`) y añade fixtures o
    pruebas de las particularidades del nuevo cliente. No necesita otro flujo UI.
 
 `clientEnv` inyecta lookup/stat, ejecutores de CLI con salida capturada,
@@ -909,12 +922,12 @@ una variable si se coloca después de -e. El separador -- precede al ejecutable.
 
 ## Desinstalación (`aulaglobal-mcp uninstall`)
 
-Implementada en cmd/aulaglobal-mcp: `uninstall.go` (opciones, menú y
-orquestación), `uninstall_plan.go` (qué se hará en cada opción),
-`uninstall_path.go` (perfiles de shell y PATH de Windows), `uninstall_data.go`
-(token y carpeta de apuntes), `uninstall_program.go` (borrar el ejecutable),
-`uninstall_windows.go` / `uninstall_other.go` (registro y proceso auxiliar de
-Windows). Quitar la entrada de cada asistente está en su `assistant_<id>.go`. Texto en español y
+Implementada en `internal/cli/uninstall`: `uninstall.go` (opciones, menú y
+orquestación), `plan.go` (qué se hará en cada opción), `path.go` (perfiles de
+shell y PATH de Windows), `data.go` (token y carpeta de apuntes), `program.go`
+(borrar el ejecutable), `system_windows.go` / `system_other.go` (registro y
+proceso auxiliar de Windows). Quitar la entrada de cada asistente está en su
+archivo de `internal/assistants`. Texto en español y
 mismo estilo visual que setup (✓ ! ✗ ·, `[s/N]`).
 
 ### Opciones y flags
@@ -1012,7 +1025,7 @@ basta). La comprobación se repite justo antes de borrar.
 
 ### Pruebas
 
-`uninstall_*_test.go`: plantilla de instalación falsa en directorio temporal
+`internal/cli/uninstall/*_test.go`: plantilla de instalación falsa en directorio temporal
 (HOME, config, caché, perfiles, ejecutable, asistentes y registro inyectados; nunca
 se tocan los archivos, PATH, registro ni ejecutable reales y no se contacta con
 AulaGlobal), pruebas por asistente (incluido OpenCode V1/V2, TOML con otros
