@@ -21,79 +21,79 @@ type openCodeAssistant struct{}
 func (openCodeAssistant) ID() string     { return "opencode" }
 func (openCodeAssistant) Name() string   { return "OpenCode" }
 func (openCodeAssistant) Reload() string { return "Reinicia OpenCode o abre una sesión nueva." }
-func (openCodeAssistant) cli(e Env) string {
-	return findOpenCode(e.GOOS, e.Home, e.AppData, e.LookPath, e.Stat)
+func (openCodeAssistant) cli(env Env) string {
+	return findOpenCode(env.GOOS, env.Home, env.AppData, env.LookPath, env.Stat)
 }
-func (a openCodeAssistant) Detect(e Env) bool {
-	return a.cli(e) != "" || dirExists(e, userpaths.OpenCode(e.Home, e.XDGConfigHome))
+func (a openCodeAssistant) Detect(env Env) bool {
+	return a.cli(env) != "" || dirExists(env, userpaths.OpenCode(env.Home, env.XDGConfigHome))
 }
 
-func findOpenCode(goos, home, appdata string, look func(string) (string, error), stat func(string) (os.FileInfo, error)) string {
+func findOpenCode(goos, home, appData string, lookPath func(string) (string, error), stat func(string) (os.FileInfo, error)) string {
 	names := []string{"opencode"}
 	if goos == "windows" {
 		names = []string{"opencode.exe", "opencode.cmd"}
 	}
-	for _, n := range names {
-		if p, e := look(n); e == nil {
-			return p
+	for _, name := range names {
+		if found, err := lookPath(name); err == nil {
+			return found
 		}
 	}
-	var paths []string
-	for _, n := range names {
-		for _, d := range []string{filepath.Join(home, ".opencode", "bin"), filepath.Join(home, ".local", "bin"), filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".npm", "bin")} {
-			paths = append(paths, filepath.Join(d, n))
+	var candidates []string
+	for _, name := range names {
+		for _, dir := range []string{filepath.Join(home, ".opencode", "bin"), filepath.Join(home, ".local", "bin"), filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".npm", "bin")} {
+			candidates = append(candidates, filepath.Join(dir, name))
 		}
-		if goos == "windows" && appdata != "" {
-			paths = append(paths, filepath.Join(appdata, "npm", n))
+		if goos == "windows" && appData != "" {
+			candidates = append(candidates, filepath.Join(appData, "npm", name))
 		}
 	}
 	if goos != "windows" {
-		paths = append(paths, "/opt/homebrew/bin/opencode", "/usr/local/bin/opencode", "/usr/bin/opencode")
+		candidates = append(candidates, "/opt/homebrew/bin/opencode", "/usr/local/bin/opencode", "/usr/bin/opencode")
 	}
-	for _, p := range paths {
-		if isExecutable(goos, stat, p) {
-			return p
+	for _, candidate := range candidates {
+		if isExecutable(goos, stat, candidate) {
+			return candidate
 		}
 	}
 	return ""
 }
 
-func runOpenCode(ctx context.Context, path string, args ...string) ([]byte, error) {
-	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(path), ".cmd") {
-		script := filepath.Join(filepath.Dir(path), "node_modules", "opencode-ai", "bin", "opencode")
-		if _, e := os.Stat(script); e != nil {
-			return nil, e
+func runOpenCode(ctx context.Context, cliPath string, args ...string) ([]byte, error) {
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(cliPath), ".cmd") {
+		script := filepath.Join(filepath.Dir(cliPath), "node_modules", "opencode-ai", "bin", "opencode")
+		if _, err := os.Stat(script); err != nil {
+			return nil, err
 		}
-		node, e := exec.LookPath("node")
-		if e != nil {
-			return nil, e
+		node, err := exec.LookPath("node")
+		if err != nil {
+			return nil, err
 		}
 		return exec.CommandContext(ctx, node, append([]string{script}, args...)...).CombinedOutput()
 	}
-	return exec.CommandContext(ctx, path, args...).CombinedOutput()
+	return exec.CommandContext(ctx, cliPath, args...).CombinedOutput()
 }
 
 // path returns the configuration file. Having both opencode.json and
 // opencode.jsonc is ambiguous, so it is an error.
-func (a openCodeAssistant) path(e Env) (string, error) {
-	dir := userpaths.OpenCode(e.Home, e.XDGConfigHome)
-	p := filepath.Join(dir, "opencode.json")
-	c := filepath.Join(dir, "opencode.jsonc")
-	_, ce := e.Stat(c)
-	_, je := e.Stat(p)
-	if ce == nil {
-		if je == nil {
+func (a openCodeAssistant) path(env Env) (string, error) {
+	dir := userpaths.OpenCode(env.Home, env.XDGConfigHome)
+	jsonPath := filepath.Join(dir, "opencode.json")
+	jsoncPath := filepath.Join(dir, "opencode.jsonc")
+	_, jsoncErr := env.Stat(jsoncPath)
+	_, jsonErr := env.Stat(jsonPath)
+	if jsoncErr == nil {
+		if jsonErr == nil {
 			return "", errors.New("conflicting files")
 		}
-		if !os.IsNotExist(je) {
-			return "", je
+		if !os.IsNotExist(jsonErr) {
+			return "", jsonErr
 		}
-		return c, nil
+		return jsoncPath, nil
 	}
-	if !os.IsNotExist(ce) {
-		return "", ce
+	if !os.IsNotExist(jsoncErr) {
+		return "", jsoncErr
 	}
-	return p, nil
+	return jsonPath, nil
 }
 
 func openCodeArgs(exe string, extra []string) []string {
@@ -112,83 +112,83 @@ func openCodeEntry(exe string, extra []string) map[string]any {
 	return entry
 }
 
-func (a openCodeAssistant) read(e Env, w Entry) (string, []byte, Inspection) {
-	p, old, early, done := loadConfig(e, a.Detect(e), a.path)
-	if done {
-		return p, old, early
+func (a openCodeAssistant) read(env Env, want Entry) (string, []byte, Inspection) {
+	path, content, known := loadConfig(env, a.Detect(env), a.path)
+	if known != nil {
+		return path, content, *known
 	}
-	if len(old) > 0 {
-		if err := strictJSON(old); err != nil {
-			return p, old, Inspection{Err: err}
+	if len(content) > 0 {
+		if err := strictJSON(content); err != nil {
+			return path, content, Inspection{Err: err}
 		}
 	}
-	_, exists, err := openCodeConfig(old, openCodeEntry(w.Exe, w.Extra), false)
+	_, exists, err := openCodeConfig(content, openCodeEntry(want.Exe, want.Extra), false)
 	if err != nil {
-		return p, old, Inspection{Err: err}
+		return path, content, Inspection{Err: err}
 	}
 	if !exists {
-		return p, old, Inspection{State: Missing}
+		return path, content, Inspection{State: Missing}
 	}
 	var root map[string]any
-	json.Unmarshal(old, &root)
-	m, _ := root["mcp"].(map[string]any)
-	v1 := true
-	if servers, ok := m["servers"].(map[string]any); ok {
-		m = servers
-		v1 = false
+	json.Unmarshal(content, &root)
+	servers, _ := root["mcp"].(map[string]any)
+	isV1 := true
+	if v2Servers, ok := servers["servers"].(map[string]any); ok {
+		servers = v2Servers
+		isV1 = false
 	}
-	want := openCodeEntry(w.Exe, w.Extra)
-	if v1 {
-		want["enabled"] = true
+	wanted := openCodeEntry(want.Exe, want.Extra)
+	if isV1 {
+		wanted["enabled"] = true
 	}
-	if sameEntry(m[aulaglobalKey], want) {
-		return p, old, Inspection{State: Identical}
+	if sameEntry(servers[aulaglobalKey], wanted) {
+		return path, content, Inspection{State: Identical}
 	}
 	detail := "entrada existente"
-	if b, ok := m[aulaglobalKey].(map[string]any); ok {
-		if cmd, ok := b["command"].([]any); ok && len(cmd) > 0 {
-			v, _ := json.Marshal(cmd[0])
-			detail = "comando " + string(v)
+	if current, ok := servers[aulaglobalKey].(map[string]any); ok {
+		if command, ok := current["command"].([]any); ok && len(command) > 0 {
+			program, _ := json.Marshal(command[0])
+			detail = "comando " + string(program)
 		}
 	}
-	return p, old, Inspection{State: Different, Detail: detail}
+	return path, content, Inspection{State: Different, Detail: detail}
 }
 
-func (a openCodeAssistant) Inspect(e Env, w Entry) Inspection {
-	_, _, i := a.read(e, w)
-	return i
+func (a openCodeAssistant) Inspect(env Env, want Entry) Inspection {
+	_, _, inspection := a.read(env, want)
+	return inspection
 }
 
-func (a openCodeAssistant) Apply(e Env, w Entry, replace bool) error {
-	p, old, i := a.read(e, w)
-	if i.Err != nil {
-		return i.Err
+func (a openCodeAssistant) Apply(env Env, want Entry, replace bool) error {
+	path, content, inspection := a.read(env, want)
+	if inspection.Err != nil {
+		return inspection.Err
 	}
-	if i.State == Identical {
+	if inspection.State == Identical {
 		return nil
 	}
-	if i.State == NotInstalled {
+	if inspection.State == NotInstalled {
 		return errors.New("not installed")
 	}
-	if i.State == Different && !replace {
+	if inspection.State == Different && !replace {
 		return errors.New("replacement not authorized")
 	}
-	cli := a.cli(e)
-	scriptable := false
+	cli := a.cli(env)
+	cliCanAddGlobal := false
 	if cli != "" {
-		help, err := e.call(e.RunOpenCode, cli, "mcp", "add", "--help")
-		scriptable = err == nil && strings.Contains(string(help), "--global")
+		help, err := env.call(env.RunOpenCode, cli, "mcp", "add", "--help")
+		cliCanAddGlobal = err == nil && strings.Contains(string(help), "--global")
 	}
-	b, _, err := openCodeConfig(old, openCodeEntry(w.Exe, w.Extra), replace)
+	merged, _, err := openCodeConfig(content, openCodeEntry(want.Exe, want.Extra), replace)
 	if err != nil {
 		return err
 	}
-	if cli != "" && scriptable && i.State == Missing {
-		if _, err = e.call(e.RunOpenCode, cli, openCodeArgs(w.Exe, w.Extra)...); err != nil {
+	if cli != "" && cliCanAddGlobal && inspection.State == Missing {
+		if _, err = env.call(env.RunOpenCode, cli, openCodeArgs(want.Exe, want.Extra)...); err != nil {
 			return err
 		}
 		// A zero exit status is not enough: check that the global entry is there.
-		_, _, check := a.read(e, w)
+		_, _, check := a.read(env, want)
 		if check.Err != nil {
 			return check.Err
 		}
@@ -197,15 +197,15 @@ func (a openCodeAssistant) Apply(e Env, w Entry, replace bool) error {
 		}
 		return nil
 	}
-	if !dirExists(e, filepath.Dir(p)) {
+	if !dirExists(env, filepath.Dir(path)) {
 		return errors.New("global directory missing")
 	}
-	return e.write(p, b)
+	return env.write(path, merged)
 }
 
-func (a openCodeAssistant) Manual(w Entry) string {
-	v2, _, _ := openCodeConfig(nil, openCodeEntry(w.Exe, w.Extra), true)
-	v1, _, _ := openCodeConfig([]byte(`{"mcp":{"aulaglobal":{"type":"local","command":["old"]}}}`), openCodeEntry(w.Exe, w.Extra), true)
+func (a openCodeAssistant) Manual(want Entry) string {
+	v2, _, _ := openCodeConfig(nil, openCodeEntry(want.Exe, want.Extra), true)
+	v1, _, _ := openCodeConfig([]byte(`{"mcp":{"aulaglobal":{"type":"local","command":["old"]}}}`), openCodeEntry(want.Exe, want.Extra), true)
 	return "Alternativa manual · OpenCode:\nV2 actual: mcp.servers, sin enabled.\n" + string(v2) + "V1 antiguo: mcp, con enabled.\n" + string(v1)
 }
 
@@ -217,98 +217,98 @@ func (a openCodeAssistant) Manual(w Entry) string {
 func openCodeConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, error) {
 	root := map[string]json.RawMessage{}
 	if len(strings.TrimSpace(string(old))) > 0 {
-		if e := json.Unmarshal(old, &root); e != nil {
-			return nil, false, e
+		if err := json.Unmarshal(old, &root); err != nil {
+			return nil, false, err
 		}
 		if root == nil {
 			return nil, false, errors.New("object required")
 		}
 	}
 	servers := map[string]json.RawMessage{}
-	if raw, ok := root["mcp"]; ok {
-		if e := json.Unmarshal(raw, &servers); e != nil {
-			return nil, false, e
+	if rawMCP, ok := root["mcp"]; ok {
+		if err := json.Unmarshal(rawMCP, &servers); err != nil {
+			return nil, false, err
 		}
 		if servers == nil {
 			return nil, false, errors.New("object required")
 		}
 	}
 	mcp := servers
-	v1 := false
-	if raw, ok := mcp["servers"]; ok {
+	isV1 := false
+	if rawServers, ok := mcp["servers"]; ok {
 		servers = map[string]json.RawMessage{}
-		if e := json.Unmarshal(raw, &servers); e != nil || servers == nil {
+		if err := json.Unmarshal(rawServers, &servers); err != nil || servers == nil {
 			return nil, false, errors.New("invalid servers")
 		}
-		for k, raw := range mcp {
-			if k != "servers" {
-				var v map[string]any
-				if json.Unmarshal(raw, &v) == nil && v["type"] != nil {
+		for name, raw := range mcp {
+			if name != "servers" {
+				var server map[string]any
+				if json.Unmarshal(raw, &server) == nil && server["type"] != nil {
 					return nil, false, errors.New("mixed versions")
 				}
 			}
 		}
 	} else {
 		for _, raw := range mcp {
-			var v map[string]any
-			if json.Unmarshal(raw, &v) == nil && v["type"] != nil {
-				v1 = true
+			var server map[string]any
+			if json.Unmarshal(raw, &server) == nil && server["type"] != nil {
+				isV1 = true
 			}
 		}
-		if !v1 && len(mcp) > 0 {
+		if !isV1 && len(mcp) > 0 {
 			return nil, false, errors.New("ambiguous mcp")
 		}
-		if !v1 {
+		if !isV1 {
 			servers = map[string]json.RawMessage{}
 		}
 	}
-	copyEntry := map[string]any{}
-	for k, v := range entry {
-		copyEntry[k] = v
+	entryCopy := map[string]any{}
+	for key, value := range entry {
+		entryCopy[key] = value
 	}
-	if v1 {
-		copyEntry["enabled"] = true
+	if isV1 {
+		entryCopy["enabled"] = true
 	} else {
-		delete(copyEntry, "enabled")
+		delete(entryCopy, "enabled")
 	}
 	_, exists := servers[aulaglobalKey]
 	if exists && !replace {
 		return nil, true, nil
 	}
-	b, e := json.Marshal(copyEntry)
-	if e != nil {
-		return nil, exists, e
+	entryJSON, err := json.Marshal(entryCopy)
+	if err != nil {
+		return nil, exists, err
 	}
-	servers[aulaglobalKey] = b
-	if !v1 {
-		mcp["servers"], e = json.Marshal(servers)
+	servers[aulaglobalKey] = entryJSON
+	if !isV1 {
+		mcp["servers"], err = json.Marshal(servers)
 	} else {
 		mcp = servers
 	}
-	root["mcp"], e = json.Marshal(mcp)
-	if e != nil {
-		return nil, exists, e
+	root["mcp"], err = json.Marshal(mcp)
+	if err != nil {
+		return nil, exists, err
 	}
 	if len(root) == 1 {
 		root["$schema"] = json.RawMessage(`"https://opencode.ai/config.json"`)
 	}
-	b, e = json.MarshalIndent(root, "", "  ")
-	return append(b, '\n'), exists, e
+	out, err := json.MarshalIndent(root, "", "  ")
+	return append(out, '\n'), exists, err
 }
 
-// openCodeServersPath returns where the servers live in old: mcp.servers for
+// openCodeServersPath returns where the servers live in content: mcp.servers for
 // V2, mcp for V1.
-func openCodeServersPath(old []byte) ([]string, error) {
+func openCodeServersPath(content []byte) ([]string, error) {
 	var root map[string]json.RawMessage
-	if e := json.Unmarshal(old, &root); e != nil || root == nil {
+	if err := json.Unmarshal(content, &root); err != nil || root == nil {
 		return nil, errors.New("object required")
 	}
-	raw, ok := root["mcp"]
+	rawMCP, ok := root["mcp"]
 	if !ok {
 		return []string{"mcp"}, nil
 	}
 	var mcp map[string]json.RawMessage
-	if e := json.Unmarshal(raw, &mcp); e != nil || mcp == nil {
+	if err := json.Unmarshal(rawMCP, &mcp); err != nil || mcp == nil {
 		return nil, errors.New("mcp must be an object")
 	}
 	if _, ok := mcp["servers"]; ok {
@@ -317,34 +317,34 @@ func openCodeServersPath(old []byte) ([]string, error) {
 	return []string{"mcp"}, nil
 }
 
-func (a openCodeAssistant) entryOf(old []byte) (map[string]any, bool, error) {
-	path, err := openCodeServersPath(old)
+func (a openCodeAssistant) entryOf(content []byte) (map[string]any, bool, error) {
+	path, err := openCodeServersPath(content)
 	if err != nil {
 		return nil, false, err
 	}
-	return jsonServerEntry(old, path)
+	return jsonServerEntry(content, path)
 }
 
-func (a openCodeAssistant) removeFrom(old []byte) ([]byte, bool, error) {
-	path, err := openCodeServersPath(old)
+func (a openCodeAssistant) removeFrom(content []byte) ([]byte, bool, error) {
+	path, err := openCodeServersPath(content)
 	if err != nil {
 		return nil, false, err
 	}
-	return jsonRemoveServer(old, path)
+	return jsonRemoveServer(content, path)
 }
 
-func (a openCodeAssistant) Find(e Env) Link {
-	return findInConfig(e, a.Detect(e), a.path, a.entryOf, "no se puede interpretar con seguridad (¿JSONC o formato ambiguo?)")
+func (a openCodeAssistant) Find(env Env) Link {
+	return findInConfig(env, a.Detect(env), a.path, a.entryOf, "no se puede interpretar con seguridad (¿JSONC o formato ambiguo?)")
 }
 
-func (a openCodeAssistant) Remove(e Env) error {
-	return removeFromConfig(e, a.path, a.removeFrom)
+func (a openCodeAssistant) Remove(env Env) error {
+	return removeFromConfig(env, a.path, a.removeFrom)
 }
 
-func (a openCodeAssistant) ManualRemove(e Env) string {
-	p, _ := a.path(e)
-	if p == "" {
-		p = filepath.Join("~", ".config", "opencode", "opencode.json")
+func (a openCodeAssistant) ManualRemove(env Env) string {
+	path, _ := a.path(env)
+	if path == "" {
+		path = filepath.Join("~", ".config", "opencode", "opencode.json")
 	}
-	return "Alternativa manual · OpenCode: abre " + p + " y borra la clave «aulaglobal» dentro de «mcp.servers» (V2) o de «mcp» (V1)."
+	return "Alternativa manual · OpenCode: abre " + path + " y borra la clave «aulaglobal» dentro de «mcp.servers» (V2) o de «mcp» (V1)."
 }

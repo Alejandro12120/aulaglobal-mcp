@@ -13,64 +13,68 @@ import (
 )
 
 type removeCase struct {
-	name    string
-	a       assistants.Assistant
-	path    func(assistants.Env) string
-	before  string // %EXE% is replaced by the command
-	after   string
-	wantEnv map[string]string
+	name      string
+	assistant assistants.Assistant
+	path      func(assistants.Env) string
+	before    string // %EXE% is replaced by the command
+	after     string
+	wantEnv   map[string]string
 }
 
 func removeCases(t *testing.T) []removeCase {
 	return []removeCase{
 		{
-			name: "claude-desktop keeps order, indentation and big numbers", a: assistantstest.ByID(t, "claude-desktop"),
-			path:    func(e assistants.Env) string { return userpaths.Claude(e.GOOS, e.Home, e.ConfigDir) },
+			name: "claude-desktop keeps order, indentation and big numbers", assistant: assistantstest.ByID(t, "claude-desktop"),
+			path:    func(env assistants.Env) string { return userpaths.Claude(env.GOOS, env.Home, env.ConfigDir) },
 			before:  "{\n  \"zeta\": 1234567890123456789,\n  \"mcpServers\": {\n    \"keep\": {\n      \"command\": \"keep\"\n    },\n    \"aulaglobal\": {\n      \"command\": \"%EXE%\",\n      \"args\": [\"--transport\", \"stdio\"],\n      \"env\": {\"AULAGLOBAL_DOWNLOAD_DIR\": \"/notes\"}\n    },\n    \"last\": {\"command\": \"last\"}\n  },\n  \"alpha\": true\n}\n",
 			after:   "{\n  \"zeta\": 1234567890123456789,\n  \"mcpServers\": {\n    \"keep\": {\n      \"command\": \"keep\"\n    },\n    \"last\": {\"command\": \"last\"}\n  },\n  \"alpha\": true\n}\n",
 			wantEnv: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/notes"},
 		},
 		{
-			name: "claude-desktop only server", a: assistantstest.ByID(t, "claude-desktop"),
-			path:   func(e assistants.Env) string { return userpaths.Claude(e.GOOS, e.Home, e.ConfigDir) },
+			name: "claude-desktop only server", assistant: assistantstest.ByID(t, "claude-desktop"),
+			path:   func(env assistants.Env) string { return userpaths.Claude(env.GOOS, env.Home, env.ConfigDir) },
 			before: "{\n  \"mcpServers\": {\n    \"aulaglobal\": {\"command\": \"%EXE%\"}\n  }\n}\n",
 			after:  "{\n  \"mcpServers\": {}\n}\n",
 		},
 		{
-			name: "antigravity last member", a: assistantstest.ByID(t, "antigravity"),
-			path:   func(e assistants.Env) string { return userpaths.Antigravity(e.Home) },
+			name: "antigravity last member", assistant: assistantstest.ByID(t, "antigravity"),
+			path:   func(env assistants.Env) string { return userpaths.Antigravity(env.Home) },
 			before: "{\"mcpServers\":{\"keep\":{\"command\":\"k\"},\"aulaglobal\":{\"command\":\"%EXE%\",\"disabled\":false}}}",
 			after:  "{\"mcpServers\":{\"keep\":{\"command\":\"k\"}}}",
 		},
 		{
-			name: "antigravity first member with tabs", a: assistantstest.ByID(t, "antigravity"),
-			path:   func(e assistants.Env) string { return userpaths.Antigravity(e.Home) },
+			name: "antigravity first member with tabs", assistant: assistantstest.ByID(t, "antigravity"),
+			path:   func(env assistants.Env) string { return userpaths.Antigravity(env.Home) },
 			before: "{\n\t\"mcpServers\": {\n\t\t\"aulaglobal\": {\"command\": \"%EXE%\"},\n\t\t\"keep\": {\"command\": \"k\"}\n\t}\n}",
 			after:  "{\n\t\"mcpServers\": {\n\t\t\"keep\": {\"command\": \"k\"}\n\t}\n}",
 		},
 		{
-			name: "codex table with sub-table and comments", a: assistantstest.ByID(t, "codex"),
-			path:    func(e assistants.Env) string { return filepath.Join(e.Home, ".codex", "config.toml") },
+			name: "codex table with sub-table and comments", assistant: assistantstest.ByID(t, "codex"),
+			path:    func(env assistants.Env) string { return filepath.Join(env.Home, ".codex", "config.toml") },
 			before:  "# my settings\nmodel = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\" # note\n\n[mcp_servers.aulaglobal]\ncommand = '%EXE%'\nargs = ['--transport', 'stdio']\n\n[mcp_servers.aulaglobal.env]\nAULAGLOBAL_TOKEN_FILE = '/tok'\n\n[projects.\"/p\"]\ntrust = \"trusted\"\n",
 			after:   "# my settings\nmodel = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\" # note\n\n[projects.\"/p\"]\ntrust = \"trusted\"\n",
 			wantEnv: map[string]string{"AULAGLOBAL_TOKEN_FILE": "/tok"},
 		},
 		{
-			name: "codex block appended by setup is removed with its blank line", a: assistantstest.ByID(t, "codex"),
-			path:   func(e assistants.Env) string { return filepath.Join(e.Home, ".codex", "config.toml") },
+			name: "codex block appended by setup is removed with its blank line", assistant: assistantstest.ByID(t, "codex"),
+			path:   func(env assistants.Env) string { return filepath.Join(env.Home, ".codex", "config.toml") },
 			before: "model = \"x\"\n\n[mcp_servers.aulaglobal]\ncommand = '%EXE%'\n",
 			after:  "model = \"x\"\n",
 		},
 		{
-			name: "opencode V2", a: assistantstest.ByID(t, "opencode"),
-			path:    func(e assistants.Env) string { return filepath.Join(userpaths.OpenCode(e.Home, ""), "opencode.json") },
+			name: "opencode V2", assistant: assistantstest.ByID(t, "opencode"),
+			path: func(env assistants.Env) string {
+				return filepath.Join(userpaths.OpenCode(env.Home, ""), "opencode.json")
+			},
 			before:  "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"servers\": {\n      \"aulaglobal\": {\n        \"type\": \"local\",\n        \"command\": [\"%EXE%\", \"--transport\", \"stdio\"],\n        \"environment\": {\"AULAGLOBAL_DOWNLOAD_DIR\": \"/n\"}\n      },\n      \"keep\": {\"type\": \"local\", \"command\": [\"k\"]}\n    }\n  }\n}\n",
 			after:   "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"servers\": {\n      \"keep\": {\"type\": \"local\", \"command\": [\"k\"]}\n    }\n  }\n}\n",
 			wantEnv: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/n"},
 		},
 		{
-			name: "opencode V1", a: assistantstest.ByID(t, "opencode"),
-			path:   func(e assistants.Env) string { return filepath.Join(userpaths.OpenCode(e.Home, ""), "opencode.json") },
+			name: "opencode V1", assistant: assistantstest.ByID(t, "opencode"),
+			path: func(env assistants.Env) string {
+				return filepath.Join(userpaths.OpenCode(env.Home, ""), "opencode.json")
+			},
 			before: "{\n  \"mcp\": {\n    \"keep\": {\"type\": \"local\", \"command\": [\"k\"], \"enabled\": true},\n    \"aulaglobal\": {\"type\": \"local\", \"command\": [\"%EXE%\", \"--transport\", \"stdio\"], \"enabled\": true}\n  },\n  \"theme\": \"dark\"\n}\n",
 			after:  "{\n  \"mcp\": {\n    \"keep\": {\"type\": \"local\", \"command\": [\"k\"], \"enabled\": true}\n  },\n  \"theme\": \"dark\"\n}\n",
 		},
@@ -80,48 +84,48 @@ func removeCases(t *testing.T) []removeCase {
 func TestRemoveEveryFileClientKeepsTheRestByteForByte(t *testing.T) {
 	for _, tc := range removeCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
-			e := assistantstest.FileEnv(t)
-			p := tc.path(e)
-			exe := filepath.Join(e.Home, "bin", "aulaglobal-mcp")
+			env := assistantstest.FileEnv(t)
+			path := tc.path(env)
+			exe := filepath.Join(env.Home, "bin", "aulaglobal-mcp")
 			literal := exe // TOML literal strings take the path as is; JSON needs backslashes escaped
-			if tc.a.ID() != "codex" {
+			if tc.assistant.ID() != "codex" {
 				literal = strings.ReplaceAll(exe, `\`, `\\`)
 			}
-			testutil.WriteFile(t, p, strings.ReplaceAll(tc.before, "%EXE%", literal))
-			if !tc.a.Detect(e) {
+			testutil.WriteFile(t, path, strings.ReplaceAll(tc.before, "%EXE%", literal))
+			if !tc.assistant.Detect(env) {
 				t.Fatal("not detected")
 			}
-			l := tc.a.Find(e)
-			if l.State != assistants.LinkPresent || l.Location != p {
-				t.Fatalf("%+v", l)
+			link := tc.assistant.Find(env)
+			if link.State != assistants.LinkPresent || link.Location != path {
+				t.Fatalf("%+v", link)
 			}
-			if filepath.Clean(l.Command) != filepath.Clean(exe) {
-				t.Fatalf("command %q", l.Command)
+			if filepath.Clean(link.Command) != filepath.Clean(exe) {
+				t.Fatalf("command %q", link.Command)
 			}
-			for k, v := range tc.wantEnv {
-				if l.Env[k] != v {
-					t.Fatalf("env %v", l.Env)
+			for name, v := range tc.wantEnv {
+				if link.Env[name] != v {
+					t.Fatalf("env %v", link.Env)
 				}
 			}
-			original := testutil.ReadFile(t, p)
-			if err := tc.a.Remove(e); err != nil {
+			original := testutil.ReadFile(t, path)
+			if err := tc.assistant.Remove(env); err != nil {
 				t.Fatal(err)
 			}
 			want := tc.after
-			if got := testutil.ReadFile(t, p); got != want {
+			if got := testutil.ReadFile(t, path); got != want {
 				t.Fatalf("got:\n%q\nwant:\n%q", got, want)
 			}
-			if testutil.ReadFile(t, p+".bak") != original {
+			if testutil.ReadFile(t, path+".bak") != original {
 				t.Fatal("backup differs from the original")
 			}
-			if l := tc.a.Find(e); l.State != assistants.LinkNone {
-				t.Fatalf("still present: %+v", l)
+			if link := tc.assistant.Find(env); link.State != assistants.LinkNone {
+				t.Fatalf("still present: %+v", link)
 			}
 			// Idempotent: nothing left to remove, nothing rewritten.
-			if err := tc.a.Remove(e); err != nil {
+			if err := tc.assistant.Remove(env); err != nil {
 				t.Fatal(err)
 			}
-			if testutil.ReadFile(t, p) != want {
+			if testutil.ReadFile(t, path) != want {
 				t.Fatal("second removal changed the file")
 			}
 		})
@@ -129,33 +133,33 @@ func TestRemoveEveryFileClientKeepsTheRestByteForByte(t *testing.T) {
 }
 
 func TestRemoveClientStates(t *testing.T) {
-	for _, a := range assistants.All() {
-		if a.ID() == "claude-code" {
+	for _, assistant := range assistants.All() {
+		if assistant.ID() == "claude-code" {
 			continue
 		}
-		t.Run(a.ID(), func(t *testing.T) {
-			e := assistantstest.FileEnv(t)
-			if l := a.Find(e); l.State != assistants.LinkNotInstalled {
-				t.Fatalf("%+v", l)
+		t.Run(assistant.ID(), func(t *testing.T) {
+			env := assistantstest.FileEnv(t)
+			if link := assistant.Find(env); link.State != assistants.LinkNotInstalled {
+				t.Fatalf("%+v", link)
 			}
 			var dir string
-			switch a.ID() {
+			switch assistant.ID() {
 			case "claude-desktop":
-				dir = filepath.Dir(userpaths.Claude(e.GOOS, e.Home, e.ConfigDir))
+				dir = filepath.Dir(userpaths.Claude(env.GOOS, env.Home, env.ConfigDir))
 			case "codex":
-				dir = filepath.Join(e.Home, ".codex")
+				dir = filepath.Join(env.Home, ".codex")
 			case "opencode":
-				dir = userpaths.OpenCode(e.Home, "")
+				dir = userpaths.OpenCode(env.Home, "")
 			case "antigravity":
-				dir = filepath.Dir(userpaths.Antigravity(e.Home))
+				dir = filepath.Dir(userpaths.Antigravity(env.Home))
 			}
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if l := a.Find(e); l.State != assistants.LinkNone {
-				t.Fatalf("no file: %+v", l)
+			if link := assistant.Find(env); link.State != assistants.LinkNone {
+				t.Fatalf("no file: %+v", link)
 			}
-			if err := a.Remove(e); err != nil {
+			if err := assistant.Remove(env); err != nil {
 				t.Fatal(err)
 			}
 			if len(mustGlob(t, dir)) != 0 {
@@ -167,11 +171,11 @@ func TestRemoveClientStates(t *testing.T) {
 
 func mustGlob(t *testing.T, dir string) []string {
 	t.Helper()
-	m, err := filepath.Glob(filepath.Join(dir, "*"))
+	matches, err := filepath.Glob(filepath.Join(dir, "*"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m
+	return matches
 }
 
 func TestMalformedFilesAreLeftUntouched(t *testing.T) {
@@ -182,30 +186,30 @@ func TestMalformedFilesAreLeftUntouched(t *testing.T) {
 		"opencode":       "{\n  // comment\n  \"mcp\": {\"servers\": {\"aulaglobal\": {\"type\":\"local\",\"command\":[\"x\"]}}}\n}\n",
 	}
 	for _, tc := range removeCases(t) {
-		content, ok := bad[tc.a.ID()]
+		content, ok := bad[tc.assistant.ID()]
 		if !ok {
 			continue
 		}
-		delete(bad, tc.a.ID()) // once per assistant
-		t.Run(tc.a.ID(), func(t *testing.T) {
-			e := assistantstest.FileEnv(t)
-			p := tc.path(e)
-			testutil.WriteFile(t, p, content)
-			l := tc.a.Find(e)
-			if l.State != assistants.LinkError {
-				t.Fatalf("%+v", l)
+		delete(bad, tc.assistant.ID()) // once per assistant
+		t.Run(tc.assistant.ID(), func(t *testing.T) {
+			env := assistantstest.FileEnv(t)
+			path := tc.path(env)
+			testutil.WriteFile(t, path, content)
+			link := tc.assistant.Find(env)
+			if link.State != assistants.LinkError {
+				t.Fatalf("%+v", link)
 			}
-			if err := tc.a.Remove(e); err == nil {
+			if err := tc.assistant.Remove(env); err == nil {
 				t.Fatal("removal of an unreadable file succeeded")
 			}
-			if testutil.ReadFile(t, p) != content {
+			if testutil.ReadFile(t, path) != content {
 				t.Fatal("file changed")
 			}
-			if _, err := os.Stat(p + ".bak"); err == nil {
+			if _, err := os.Stat(path + ".bak"); err == nil {
 				t.Fatal("backup of an untouched file")
 			}
-			if m := tc.a.ManualRemove(e); !strings.Contains(m, p) || !strings.Contains(m, "aulaglobal") {
-				t.Fatal(m)
+			if instructions := tc.assistant.ManualRemove(env); !strings.Contains(instructions, path) || !strings.Contains(instructions, "aulaglobal") {
+				t.Fatal(instructions)
 			}
 		})
 	}
@@ -249,16 +253,16 @@ func TestJSONMemberRemovalShapes(t *testing.T) {
 }
 
 func TestSymlinkedConfigIsNotReplaced(t *testing.T) {
-	e := assistantstest.FileEnv(t)
-	a := assistantstest.ByID(t, "codex")
-	dir := filepath.Join(e.Home, ".codex")
-	real := filepath.Join(e.Home, "dotfiles", "config.toml")
+	env := assistantstest.FileEnv(t)
+	assistant := assistantstest.ByID(t, "codex")
+	dir := filepath.Join(env.Home, ".codex")
+	real := filepath.Join(env.Home, "dotfiles", "config.toml")
 	testutil.WriteFile(t, real, "[mcp_servers.aulaglobal]\ncommand = \"/x/aulaglobal-mcp\"\n")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	testutil.SymlinkOrSkip(t, real, filepath.Join(dir, "config.toml"))
-	if err := a.Remove(e); err == nil {
+	if err := assistant.Remove(env); err == nil {
 		t.Fatal("a symlinked config was rewritten")
 	}
 	if !strings.Contains(testutil.ReadFile(t, real), "aulaglobal") {

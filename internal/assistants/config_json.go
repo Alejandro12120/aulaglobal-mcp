@@ -12,50 +12,50 @@ import (
 
 // strictJSON rejects duplicate keys as well as invalid JSON: encoding/json
 // would otherwise drop one of the duplicates silently when the file is rewritten.
-func strictJSON(b []byte) error {
-	d := json.NewDecoder(strings.NewReader(string(b)))
+func strictJSON(data []byte) error {
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	var value func() error
 	value = func() error {
-		tok, e := d.Token()
-		if e != nil {
-			return e
+		token, err := decoder.Token()
+		if err != nil {
+			return err
 		}
-		if delim, ok := tok.(json.Delim); ok {
+		if delim, ok := token.(json.Delim); ok {
 			switch delim {
 			case '{':
 				seen := map[string]bool{}
-				for d.More() {
-					k, e := d.Token()
-					if e != nil {
-						return e
+				for decoder.More() {
+					keyToken, err := decoder.Token()
+					if err != nil {
+						return err
 					}
-					s, ok := k.(string)
-					if !ok || seen[s] {
+					name, ok := keyToken.(string)
+					if !ok || seen[name] {
 						return errors.New("duplicate key")
 					}
-					seen[s] = true
-					if e = value(); e != nil {
-						return e
+					seen[name] = true
+					if err = value(); err != nil {
+						return err
 					}
 				}
 			case '[':
-				for d.More() {
-					if e = value(); e != nil {
-						return e
+				for decoder.More() {
+					if err = value(); err != nil {
+						return err
 					}
 				}
 			default:
 				return errors.New("invalid delimiter")
 			}
-			_, e = d.Token()
-			return e
+			_, err = decoder.Token()
+			return err
 		}
 		return nil
 	}
-	if e := value(); e != nil {
-		return e
+	if err := value(); err != nil {
+		return err
 	}
-	if d.More() {
+	if decoder.More() {
 		return errors.New("extra JSON")
 	}
 	return nil
@@ -68,11 +68,11 @@ func strictJSON(b []byte) error {
 func mcpServersConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, error) {
 	root := map[string]json.RawMessage{}
 	if len(old) > 0 {
-		if e := strictJSON(old); e != nil {
-			return nil, false, e
+		if err := strictJSON(old); err != nil {
+			return nil, false, err
 		}
-		if e := json.Unmarshal(old, &root); e != nil {
-			return nil, false, e
+		if err := json.Unmarshal(old, &root); err != nil {
+			return nil, false, err
 		}
 		if root == nil {
 			return nil, false, errors.New("object required")
@@ -80,8 +80,8 @@ func mcpServersConfig(old []byte, entry map[string]any, replace bool) ([]byte, b
 	}
 	servers := map[string]json.RawMessage{}
 	if raw, ok := root["mcpServers"]; ok {
-		if e := json.Unmarshal(raw, &servers); e != nil {
-			return nil, false, e
+		if err := json.Unmarshal(raw, &servers); err != nil {
+			return nil, false, err
 		}
 		if servers == nil {
 			return nil, false, errors.New("object required")
@@ -91,17 +91,17 @@ func mcpServersConfig(old []byte, entry map[string]any, replace bool) ([]byte, b
 	if exists && !replace {
 		return nil, true, nil
 	}
-	b, e := json.Marshal(entry)
-	if e != nil {
-		return nil, exists, e
+	entryJSON, err := json.Marshal(entry)
+	if err != nil {
+		return nil, exists, err
 	}
-	servers[aulaglobalKey] = b
-	root["mcpServers"], e = json.Marshal(servers)
-	if e != nil {
-		return nil, exists, e
+	servers[aulaglobalKey] = entryJSON
+	root["mcpServers"], err = json.Marshal(servers)
+	if err != nil {
+		return nil, exists, err
 	}
-	out, e := json.MarshalIndent(root, "", "  ")
-	return out, exists, e
+	out, err := json.MarshalIndent(root, "", "  ")
+	return out, exists, err
 }
 
 func mcpServersEntry(old []byte) (map[string]any, bool, error) {
@@ -117,31 +117,31 @@ func jsonServerEntry(old []byte, path []string) (map[string]any, bool, error) {
 	if len(bytes.TrimSpace(old)) == 0 {
 		return nil, false, nil
 	}
-	if e := strictJSON(old); e != nil {
-		return nil, false, e
+	if err := strictJSON(old); err != nil {
+		return nil, false, err
 	}
 	var cur any
-	if e := json.Unmarshal(old, &cur); e != nil {
-		return nil, false, e
+	if err := json.Unmarshal(old, &cur); err != nil {
+		return nil, false, err
 	}
-	for _, p := range path {
-		m, ok := cur.(map[string]any)
+	for _, key := range path {
+		object, ok := cur.(map[string]any)
 		if !ok {
 			return nil, false, errors.New("object required")
 		}
-		if cur, ok = m[p]; !ok {
+		if cur, ok = object[key]; !ok {
 			return nil, false, nil
 		}
 	}
-	m, ok := cur.(map[string]any)
+	object, ok := cur.(map[string]any)
 	if !ok {
 		return nil, false, errors.New("object required")
 	}
-	v, ok := m[aulaglobalKey]
+	value, ok := object[aulaglobalKey]
 	if !ok {
 		return nil, false, nil
 	}
-	entry, ok := v.(map[string]any)
+	entry, ok := value.(map[string]any)
 	if !ok {
 		return nil, true, errors.New("unexpected entry")
 	}
@@ -151,14 +151,14 @@ func jsonServerEntry(old []byte, path []string) (map[string]any, bool, error) {
 // jsonRemoveServer removes the aulaglobal member under path. found is false
 // when the entry was not there and nothing needs writing.
 func jsonRemoveServer(old []byte, path []string) ([]byte, bool, error) {
-	if e := strictJSON(old); e != nil {
-		return nil, false, e
+	if err := strictJSON(old); err != nil {
+		return nil, false, err
 	}
-	s, e, found, err := jsonMemberSpan(old, path, aulaglobalKey)
+	start, end, found, err := jsonMemberSpan(old, path, aulaglobalKey)
 	if err != nil || !found {
 		return nil, false, err
 	}
-	out := append(append([]byte{}, old[:s]...), old[e:]...)
+	out := append(append([]byte{}, old[:start]...), old[end:]...)
 	if !json.Valid(out) {
 		return nil, true, errors.New("unsafe removal")
 	}
@@ -168,8 +168,8 @@ func jsonRemoveServer(old []byte, path []string) ([]byte, bool, error) {
 	return out, true, nil
 }
 
-func jsonSkipSpace(b []byte, i int) int {
-	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\n' || b[i] == '\r') {
+func jsonSkipSpace(data []byte, i int) int {
+	for i < len(data) && (data[i] == ' ' || data[i] == '\t' || data[i] == '\n' || data[i] == '\r') {
 		i++
 	}
 	return i
@@ -180,31 +180,31 @@ func jsonSkipSpace(b []byte, i int) int {
 // (same key order, indentation and number formatting). The document must have
 // passed strictJSON, so keys are unique.
 func jsonMemberSpan(data []byte, path []string, key string) (start, end int, found bool, err error) {
-	d := json.NewDecoder(bytes.NewReader(data))
-	if tok, e := d.Token(); e != nil || tok != json.Delim('{') {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return 0, 0, false, errors.New("object required")
 	}
 	for len(path) > 0 {
 		match := false
-		for d.More() {
-			kt, e := d.Token()
-			if e != nil {
-				return 0, 0, false, e
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return 0, 0, false, err
 			}
-			if kt.(string) == path[0] {
-				vt, e := d.Token()
-				if e != nil {
-					return 0, 0, false, e
+			if keyToken.(string) == path[0] {
+				valueToken, err := decoder.Token()
+				if err != nil {
+					return 0, 0, false, err
 				}
-				if vt != json.Delim('{') {
+				if valueToken != json.Delim('{') {
 					return 0, 0, false, fmt.Errorf("%s must be an object", path[0])
 				}
 				match = true
 				break
 			}
 			var skip json.RawMessage
-			if e = d.Decode(&skip); e != nil {
-				return 0, 0, false, e
+			if err = decoder.Decode(&skip); err != nil {
+				return 0, 0, false, err
 			}
 		}
 		if !match {
@@ -212,19 +212,19 @@ func jsonMemberSpan(data []byte, path []string, key string) (start, end int, fou
 		}
 		path = path[1:]
 	}
-	prevEnd := int(d.InputOffset())
+	prevEnd := int(decoder.InputOffset())
 	first := true
-	for d.More() {
-		kt, e := d.Token()
-		if e != nil {
-			return 0, 0, false, e
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return 0, 0, false, err
 		}
 		var raw json.RawMessage
-		if e = d.Decode(&raw); e != nil {
-			return 0, 0, false, e
+		if err = decoder.Decode(&raw); err != nil {
+			return 0, 0, false, err
 		}
-		valEnd := int(d.InputOffset())
-		if kt.(string) != key {
+		valEnd := int(decoder.InputOffset())
+		if keyToken.(string) != key {
 			prevEnd, first = valEnd, false
 			continue
 		}

@@ -41,8 +41,8 @@ func TestFindOpenCode(t *testing.T) {
 				mode = 0600
 			}
 			target := filepath.Join("home", ".opencode", "bin", name)
-			fake := func(p string) (os.FileInfo, error) {
-				if p == target {
+			fake := func(configPath string) (os.FileInfo, error) {
+				if configPath == target {
 					return openCodeFileInfo{mode}, nil
 				}
 				return nil, os.ErrNotExist
@@ -78,8 +78,8 @@ func TestOpenCodeV2PreservesContent(t *testing.T) {
 }
 func TestOpenCodeWindowsNPM(t *testing.T) {
 	target := filepath.Join("profile", "npm", "opencode.cmd")
-	got := assistants.FindOpenCode("windows", "home", "profile", func(string) (string, error) { return "", os.ErrNotExist }, func(p string) (os.FileInfo, error) {
-		if p == target {
+	got := assistants.FindOpenCode("windows", "home", "profile", func(string) (string, error) { return "", os.ErrNotExist }, func(configPath string) (os.FileInfo, error) {
+		if configPath == target {
 			return openCodeFileInfo{0600}, nil
 		}
 		return nil, os.ErrNotExist
@@ -90,29 +90,29 @@ func TestOpenCodeWindowsNPM(t *testing.T) {
 }
 
 func TestOpenCodeConflictsAndV1(t *testing.T) {
-	a := assistantstest.ByID(t, "opencode")
-	e, w, _, _ := assistantstest.Fixture(t, a, true)
-	p := assistantstest.ConfigPath(a, e)
+	assistant := assistantstest.ByID(t, "opencode")
+	env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
+	configPath := assistantstest.ConfigPath(assistant, env)
 	before := []byte(`{"theme":"keep","mcp":{"other":{"type":"local","command":["keep"]},"aulaglobal":{"type":"local","command":["old"]}}}`)
-	os.WriteFile(p, before, 0600)
-	if err := a.Apply(e, w, true); err != nil {
+	os.WriteFile(configPath, before, 0600)
+	if err := assistant.Apply(env, entry, true); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := os.ReadFile(p)
+	after, _ := os.ReadFile(configPath)
 	if !strings.Contains(string(after), `"enabled": true`) || !strings.Contains(string(after), `"other"`) {
 		t.Fatal(string(after))
 	}
-	backup, _ := os.ReadFile(p + ".bak")
+	backup, _ := os.ReadFile(configPath + ".bak")
 	if string(backup) != string(before) {
 		t.Fatal("backup changed")
 	}
-	if err := os.WriteFile(p+"c", []byte(`{}`), 0600); err != nil {
+	if err := os.WriteFile(configPath+"c", []byte(`{}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Apply(e, w, true); err == nil {
+	if err := assistant.Apply(env, entry, true); err == nil {
 		t.Fatal("ambiguous files accepted")
 	}
-	unchanged, _ := os.ReadFile(p)
+	unchanged, _ := os.ReadFile(configPath)
 	if string(after) != string(unchanged) {
 		t.Fatal("changed on conflict")
 	}
@@ -123,22 +123,22 @@ func TestOpenCodeCapabilities(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			for _, mode := range []string{"scriptable", "legacy", "failure", "unverified", "both files"} {
 				t.Run(mode, func(t *testing.T) {
-					a := assistantstest.ByID(t, "opencode")
-					e, w, _, _ := assistantstest.Fixture(t, a, true)
-					e.GOOS = goos
-					p := assistantstest.ConfigPath(a, e)
+					assistant := assistantstest.ByID(t, "opencode")
+					env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
+					env.GOOS = goos
+					configPath := assistantstest.ConfigPath(assistant, env)
 					calls := 0
-					e.LookPath = func(n string) (string, error) {
+					env.LookPath = func(n string) (string, error) {
 						if (goos == "windows" && n == "opencode.exe") || (goos != "windows" && n == "opencode") {
 							return "fake-opencode", nil
 						}
 						return "", os.ErrNotExist
 					}
 					if mode == "both files" {
-						os.WriteFile(p, []byte(`{}`), 0600)
-						os.WriteFile(p+"c", []byte(`{}`), 0600)
+						os.WriteFile(configPath, []byte(`{}`), 0600)
+						os.WriteFile(configPath+"c", []byte(`{}`), 0600)
 					}
-					e.RunOpenCode = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+					env.RunOpenCode = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
 						if _, ok := ctx.Deadline(); !ok {
 							t.Fatal("no deadline")
 						}
@@ -155,16 +155,16 @@ func TestOpenCodeCapabilities(t *testing.T) {
 						if mode == "failure" {
 							return nil, errors.New("private diagnostic")
 						}
-						if !assistants.SameEntry(args, assistants.OpenCodeArgs(w.Exe, w.Extra)) {
+						if !assistants.SameEntry(args, assistants.OpenCodeArgs(entry.Exe, entry.Extra)) {
 							t.Fatal(args)
 						}
 						if mode != "unverified" {
-							b, _, _ := assistants.OpenCodeConfig(nil, assistants.OpenCodeEntry(w.Exe, w.Extra), true)
-							os.WriteFile(p, b, 0600)
+							b, _, _ := assistants.OpenCodeConfig(nil, assistants.OpenCodeEntry(entry.Exe, entry.Extra), true)
+							os.WriteFile(configPath, b, 0600)
 						}
 						return nil, nil
 					}
-					err := configure(a, e, w)
+					err := configure(assistant, env, entry)
 					failure := mode == "failure" || mode == "unverified" || mode == "both files"
 					if (err != nil) != failure {
 						t.Fatal("failure =", failure, "error:", err)
@@ -182,7 +182,7 @@ func TestOpenCodeCapabilities(t *testing.T) {
 						}
 					}
 					if mode == "failure" || mode == "unverified" {
-						if _, err := os.Stat(p); !os.IsNotExist(err) {
+						if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 							t.Fatalf("config fallback after CLI failure: %v", err)
 						}
 					}
@@ -194,13 +194,13 @@ func TestOpenCodeCapabilities(t *testing.T) {
 
 // configure does what setup does for one assistant when the user answers yes
 // to everything: inspect it, then add or replace the entry.
-func configure(a assistants.Assistant, env assistants.Env, entry assistants.Entry) error {
-	inspection := a.Inspect(env, entry)
+func configure(assistant assistants.Assistant, env assistants.Env, entry assistants.Entry) error {
+	inspection := assistant.Inspect(env, entry)
 	if inspection.Err != nil {
 		return inspection.Err
 	}
 	if inspection.State == assistants.Identical {
 		return nil
 	}
-	return a.Apply(env, entry, inspection.State != assistants.Missing)
+	return assistant.Apply(env, entry, inspection.State != assistants.Missing)
 }

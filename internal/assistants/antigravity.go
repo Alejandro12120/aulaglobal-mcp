@@ -22,20 +22,20 @@ func antigravityAssistant() Assistant {
 		id:     "antigravity",
 		name:   "Antigravity",
 		reload: "Recarga /mcp en CLI; usa Restart en Customizations → Installed → MCP Servers, o reinicia el IDE.",
-		path:   func(e Env) (string, error) { return userpaths.Antigravity(e.Home), nil },
-		detect: func(e Env) bool {
-			_, ok := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.LookPath, e.Stat)
-			return ok
+		path:   func(env Env) (string, error) { return userpaths.Antigravity(env.Home), nil },
+		detect: func(env Env) bool {
+			_, installed := findAntigravity(env.GOOS, env.Home, env.LocalAppData, env.LookPath, env.Stat)
+			return installed
 		},
 		merge:      mcpServersConfig,
 		entryOf:    mcpServersEntry,
 		removeFrom: mcpServersRemove,
-		generate: func(e Env, w Entry) (map[string]any, error) {
-			cli, _ := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.LookPath, e.Stat)
+		generate: func(env Env, entry Entry) (map[string]any, error) {
+			cli, _ := findAntigravity(env.GOOS, env.Home, env.LocalAppData, env.LookPath, env.Stat)
 			if cli != "" {
-				return e.GenerateAntigravity(cli, w.Exe, w.Extra)
+				return env.GenerateAntigravity(cli, entry.Exe, entry.Extra)
 			}
-			return w.Config(), nil
+			return entry.Config(), nil
 		},
 		ignoreDisabledFalse: true,
 	}
@@ -44,14 +44,13 @@ func antigravityAssistant() Assistant {
 // findAntigravity returns the path of the `agy` CLI, if any, and whether
 // Antigravity is installed at all (the app, its folders or the CLI). Every
 // file system probe is a parameter so tests can simulate other systems.
-func findAntigravity(goos, home, local string, look func(string) (string, error), stat func(string) (os.FileInfo, error)) (string, bool) {
-	detected := false
+func findAntigravity(goos, home, localAppData string, lookPath func(string) (string, error), stat func(string) (os.FileInfo, error)) (cliPath string, installed bool) {
 	for _, name := range []string{"agy", "antigravity"} {
-		if p, e := look(name); e == nil {
+		if found, err := lookPath(name); err == nil {
 			if name == "agy" {
-				return p, true
+				return found, true
 			}
-			detected = true
+			installed = true
 		}
 	}
 	dirs := []string{filepath.Join(home, ".gemini", "antigravity"), filepath.Dir(userpaths.Antigravity(home))}
@@ -61,68 +60,68 @@ func findAntigravity(goos, home, local string, look func(string) (string, error)
 		apps = []string{filepath.Join(home, ".local", "bin", "agy")}
 	}
 	if goos == "windows" {
-		apps = []string{filepath.Join(local, "Programs", "Antigravity", "Antigravity.exe"), filepath.Join(local, "agy", "bin", "agy.exe"), filepath.Join(home, "AppData", "Local", "Programs", "Antigravity", "Antigravity.exe")}
+		apps = []string{filepath.Join(localAppData, "Programs", "Antigravity", "Antigravity.exe"), filepath.Join(localAppData, "agy", "bin", "agy.exe"), filepath.Join(home, "AppData", "Local", "Programs", "Antigravity", "Antigravity.exe")}
 	}
-	for _, p := range apps {
-		if isExecutable(goos, stat, p) {
-			if filepath.Base(p) == "agy" || filepath.Base(p) == "agy.exe" {
-				return p, true
+	for _, app := range apps {
+		if isExecutable(goos, stat, app) {
+			if filepath.Base(app) == "agy" || filepath.Base(app) == "agy.exe" {
+				return app, true
 			}
-			detected = true
+			installed = true
 		}
 	}
-	for _, p := range dirs {
-		if f, e := stat(p); e == nil && f.IsDir() {
-			detected = true
+	for _, dir := range dirs {
+		if info, err := stat(dir); err == nil && info.IsDir() {
+			installed = true
 		}
 	}
-	return "", detected
+	return "", installed
 }
 
 // antigravityCLIEntry runs `agy mcp add` in a throwaway home directory and
 // returns the entry it wrote. The real configuration is only ever written by
 // our own merge, which keeps unknown keys and makes a backup.
 func antigravityCLIEntry(cli, exe string, extra []string) (map[string]any, error) {
-	home, e := os.MkdirTemp("", "aulaglobal-agy-*")
-	if e != nil {
-		return nil, e
+	tempHome, err := os.MkdirTemp("", "aulaglobal-agy-*")
+	if err != nil {
+		return nil, err
 	}
-	defer os.RemoveAll(home)
+	defer os.RemoveAll(tempHome)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	call := func(args ...string) ([]byte, error) {
-		c := exec.CommandContext(ctx, cli, args...)
-		for _, v := range os.Environ() {
-			k, _, _ := strings.Cut(v, "=")
-			if !strings.EqualFold(k, "HOME") && !strings.EqualFold(k, "USERPROFILE") {
-				c.Env = append(c.Env, v)
+	runAgy := func(args ...string) ([]byte, error) {
+		command := exec.CommandContext(ctx, cli, args...)
+		for _, variable := range os.Environ() {
+			name, _, _ := strings.Cut(variable, "=")
+			if !strings.EqualFold(name, "HOME") && !strings.EqualFold(name, "USERPROFILE") {
+				command.Env = append(command.Env, variable)
 			}
 		}
-		c.Env = append(c.Env, "HOME="+home, "USERPROFILE="+home)
-		c.Dir = home
-		return c.CombinedOutput()
+		command.Env = append(command.Env, "HOME="+tempHome, "USERPROFILE="+tempHome)
+		command.Dir = tempHome
+		return command.CombinedOutput()
 	}
-	help, e := call("mcp", "add", "--help")
-	if e != nil || !strings.Contains(string(help), "--env") || !strings.Contains(string(help), "<commandOrUrl>") {
+	help, err := runAgy("mcp", "add", "--help")
+	if err != nil || !strings.Contains(string(help), "--env") || !strings.Contains(string(help), "<commandOrUrl>") {
 		return nil, errors.New("unsupported CLI")
 	}
 	args := []string{"mcp", "add"}
 	args = append(args, extra...)
 	args = append(args, aulaglobalKey, exe, "--transport", "stdio")
-	if _, e = call(args...); e != nil {
-		return nil, e
+	if _, err = runAgy(args...); err != nil {
+		return nil, err
 	}
-	b, e := os.ReadFile(userpaths.Antigravity(home))
-	if e != nil {
-		return nil, e
+	written, err := os.ReadFile(userpaths.Antigravity(tempHome))
+	if err != nil {
+		return nil, err
 	}
-	var root struct {
+	var config struct {
 		Servers map[string]map[string]any `json:"mcpServers"`
 	}
-	if e = json.Unmarshal(b, &root); e != nil {
-		return nil, e
+	if err = json.Unmarshal(written, &config); err != nil {
+		return nil, err
 	}
-	entry := root.Servers[aulaglobalKey]
+	entry := config.Servers[aulaglobalKey]
 	if entry == nil {
 		return nil, errors.New("missing entry")
 	}

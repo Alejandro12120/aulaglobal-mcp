@@ -33,45 +33,45 @@ func TestRealClaudeRegistration(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	t.Chdir(t.TempDir())
-	e := assistants.RealEnv(runtime.GOOS, home, filepath.Join(home, "config"))
-	realRun := e.RunClaude
-	e.LookPath = func(n string) (string, error) {
+	env := assistants.RealEnv(runtime.GOOS, home, filepath.Join(home, "config"))
+	realRun := env.RunClaude
+	env.LookPath = func(n string) (string, error) {
 		if n == "claude" {
 			return cli, nil
 		}
 		return "", os.ErrNotExist
 	}
-	e.RunClaude = func(ctx context.Context, path string, args ...string) ([]byte, error) {
+	env.RunClaude = func(ctx context.Context, path string, args ...string) ([]byte, error) {
 		if os.Getenv("HOME") != home || home == "" || !strings.HasPrefix(home, os.TempDir()+string(os.PathSeparator)) {
 			t.Fatal("unsafe HOME")
 		}
-		b, err := realRun(ctx, path, args...)
-		t.Logf("claude %s: %s (error %v)", strings.Join(args, " "), strings.TrimSpace(string(b)), err)
-		return b, err
+		output, err := realRun(ctx, path, args...)
+		t.Logf("claude %s: %s (error %v)", strings.Join(args, " "), strings.TrimSpace(string(output)), err)
+		return output, err
 	}
 	call := func(args ...string) string {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		b, err := e.RunClaude(ctx, cli, args...)
+		output, err := env.RunClaude(ctx, cli, args...)
 		if err != nil {
-			t.Fatalf("%s: %s (%v)", args, b, err)
+			t.Fatalf("%s: %s (%v)", args, output, err)
 		}
-		return string(b)
+		return string(output)
 	}
-	a := assistantstest.ByID(t, "claude-code")
-	w := assistants.Entry{Exe: "/bin/true", Extra: []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=" + filepath.Join(home, "notes with spaces")}}
-	if i := a.Inspect(e, w); i.Err != nil || i.State != assistants.Missing {
-		t.Fatal(i)
+	assistant := assistantstest.ByID(t, "claude-code")
+	entry := assistants.Entry{Exe: "/bin/true", Extra: []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=" + filepath.Join(home, "notes with spaces")}}
+	if inspection := assistant.Inspect(env, entry); inspection.Err != nil || inspection.State != assistants.Missing {
+		t.Fatal(inspection)
 	}
 	for _, scope := range []string{"local", "project"} {
 		call("mcp", "add", "--scope", scope, "aulaglobal", "--", "/bin/true")
-		i := a.Inspect(e, w)
-		if i.Err != nil || i.State != assistants.OtherScope || i.Scope != scope {
-			t.Fatal(i)
+		inspection := assistant.Inspect(env, entry)
+		if inspection.Err != nil || inspection.State != assistants.OtherScope || inspection.Scope != scope {
+			t.Fatal(inspection)
 		}
 		project, _ := os.ReadFile(".mcp.json")
-		if err := a.Apply(e, w, true); err != nil {
+		if err := assistant.Apply(env, entry, true); err != nil {
 			t.Fatal(err)
 		}
 		if scope == "project" {
@@ -81,16 +81,16 @@ func TestRealClaudeRegistration(t *testing.T) {
 			}
 			call("mcp", "remove", "aulaglobal", "--scope", "project")
 		}
-		b := call("mcp", "get", "aulaglobal")
-		if !strings.Contains(b, "Scope: User config (available in all your projects)") {
-			t.Fatal(b)
+		output := call("mcp", "get", "aulaglobal")
+		if !strings.Contains(output, "Scope: User config (available in all your projects)") {
+			t.Fatal(output)
 		}
 		// /bin/true has no args, whereas desired entry does, so update then inspect.
-		if err := a.Apply(e, w, true); err != nil {
+		if err := assistant.Apply(env, entry, true); err != nil {
 			t.Fatal(err)
 		}
-		if i := a.Inspect(e, w); i.Err != nil || i.State != assistants.Identical {
-			t.Fatal(i)
+		if inspection := assistant.Inspect(env, entry); inspection.Err != nil || inspection.State != assistants.Identical {
+			t.Fatal(inspection)
 		}
 		call("mcp", "remove", "aulaglobal", "--scope", "user")
 	}

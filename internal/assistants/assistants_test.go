@@ -11,9 +11,9 @@ import (
 )
 
 func TestSelect(t *testing.T) {
-	for _, a := range assistants.All() {
-		got, err := assistants.Select(a.ID())
-		if err != nil || len(got) != 1 || got[0].ID() != a.ID() {
+	for _, assistant := range assistants.All() {
+		got, err := assistants.Select(assistant.ID())
+		if err != nil || len(got) != 1 || got[0].ID() != assistant.ID() {
 			t.Fatal(got, err)
 		}
 	}
@@ -27,27 +27,27 @@ func TestSelect(t *testing.T) {
 }
 
 func TestNewEntryDefaults(t *testing.T) {
-	w, err := assistants.NewEntry("server", "token", "data", "token", "data")
-	if err != nil || !filepath.IsAbs(w.Exe) || w.Config()["env"] != nil {
-		t.Fatal(w, err)
+	entry, err := assistants.NewEntry("server", "token", "data", "token", "data")
+	if err != nil || !filepath.IsAbs(entry.Exe) || entry.Config()["env"] != nil {
+		t.Fatal(entry, err)
 	}
-	w, err = assistants.NewEntry("server", "private", "notes", "token", "data")
-	if err != nil || len(w.Config()["env"].(map[string]string)) != 2 {
-		t.Fatal(w, err)
+	entry, err = assistants.NewEntry("server", "private", "notes", "token", "data")
+	if err != nil || len(entry.Config()["env"].(map[string]string)) != 2 {
+		t.Fatal(entry, err)
 	}
 }
 
 func TestNoHostMetadataForSimulatedOS(t *testing.T) {
 	// Explicit fake directories also exercise Detect without host permission bits.
-	for _, a := range assistants.All() {
-		e, _, _, _ := assistantstest.Fixture(t, a, false)
-		e.GOOS = "windows"
-		e.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
-		e.Stat = func(string) (os.FileInfo, error) {
+	for _, assistant := range assistants.All() {
+		env, _, _, _ := assistantstest.Fixture(t, assistant, false)
+		env.GOOS = "windows"
+		env.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
+		env.Stat = func(string) (os.FileInfo, error) {
 			return fstest.MapFS{"dir": &fstest.MapFile{Mode: os.ModeDir | 0600}}.Stat("dir")
 		}
-		if a.ID() != "claude-code" && !a.Detect(e) {
-			t.Fatal(a.ID())
+		if assistant.ID() != "claude-code" && !assistant.Detect(env) {
+			t.Fatal(assistant.ID())
 		}
 	}
 }

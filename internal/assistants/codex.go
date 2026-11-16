@@ -16,8 +16,8 @@ func codexAssistant() Assistant {
 		name:   "Codex / ChatGPT",
 		reload: "Reinicia Codex / ChatGPT o abre una sesión nueva.",
 		toml:   true,
-		path:   func(e Env) (string, error) { return filepath.Join(e.Home, ".codex", "config.toml"), nil },
-		detect: func(e Env) bool { return dirExists(e, filepath.Join(e.Home, ".codex")) },
+		path:   func(env Env) (string, error) { return filepath.Join(env.Home, ".codex", "config.toml"), nil },
+		detect: func(env Env) bool { return dirExists(env, filepath.Join(env.Home, ".codex")) },
 
 		merge:      codexConfig,
 		entryOf:    codexEntry,
@@ -32,17 +32,17 @@ func codexAssistant() Assistant {
 // that unusual file by hand.
 func codexConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, error) {
 	var root map[string]any
-	if e := toml.Unmarshal(old, &root); e != nil {
-		return nil, false, e
+	if err := toml.Unmarshal(old, &root); err != nil {
+		return nil, false, err
 	}
 	servers, _ := root["mcp_servers"].(map[string]any)
 	_, exists := servers[aulaglobalKey]
 	if exists && !replace {
 		return nil, true, nil
 	}
-	block, e := toml.Marshal(map[string]any{"mcp_servers": map[string]any{aulaglobalKey: entry}})
-	if e != nil {
-		return nil, exists, e
+	block, err := toml.Marshal(map[string]any{"mcp_servers": map[string]any{aulaglobalKey: entry}})
+	if err != nil {
+		return nil, exists, err
 	}
 	// When replacing, the parent table header is already in the file.
 	block = []byte(strings.TrimPrefix(string(block), "[mcp_servers]\n"))
@@ -50,36 +50,36 @@ func codexConfig(old []byte, entry map[string]any, replace bool) ([]byte, bool, 
 		out := append(append([]byte{}, old...), '\n')
 		out = append(out, block...)
 		var check map[string]any
-		e = toml.Unmarshal(out, &check)
-		return out, false, e
+		err = toml.Unmarshal(out, &check)
+		return out, false, err
 	}
 	if hasMultilineString(old) {
 		return nil, true, errors.New("El TOML contiene texto multilínea. Añade aulaglobal manualmente; no se ha cambiado nada.")
 	}
-	lines, found, _, e := withoutCodexTable(old)
-	if e != nil {
-		return nil, true, e
+	lines, found, _, err := withoutCodexTable(old)
+	if err != nil {
+		return nil, true, err
 	}
 	if !found {
 		return nil, true, errors.New("Formato TOML no sustituible con seguridad; edítalo manualmente")
 	}
 	out := joinLines(lines) + string(block)
 	var check map[string]any
-	e = toml.Unmarshal([]byte(out), &check)
-	return []byte(out), true, e
+	err = toml.Unmarshal([]byte(out), &check)
+	return []byte(out), true, err
 }
 
 func codexEntry(old []byte) (map[string]any, bool, error) {
 	var root map[string]any
-	if e := toml.Unmarshal(old, &root); e != nil {
-		return nil, false, e
+	if err := toml.Unmarshal(old, &root); err != nil {
+		return nil, false, err
 	}
 	servers, _ := root["mcp_servers"].(map[string]any)
-	v, ok := servers[aulaglobalKey]
+	value, ok := servers[aulaglobalKey]
 	if !ok {
 		return nil, false, nil
 	}
-	entry, ok := v.(map[string]any)
+	entry, ok := value.(map[string]any)
 	if !ok {
 		return nil, true, errors.New("unexpected entry")
 	}
@@ -107,29 +107,29 @@ func codexRemove(old []byte) ([]byte, bool, error) {
 		}
 	}
 	out := joinLines(lines)
-	if _, still, e := codexEntry([]byte(out)); e != nil || still {
+	if _, still, err := codexEntry([]byte(out)); err != nil || still {
 		return nil, true, errors.New("unsupported TOML layout")
 	}
 	return []byte(out), true, nil
 }
 
-func hasMultilineString(b []byte) bool {
-	return bytes.Contains(b, []byte(`"""`)) || bytes.Contains(b, []byte("'''"))
+func hasMultilineString(data []byte) bool {
+	return bytes.Contains(data, []byte(`"""`)) || bytes.Contains(data, []byte("'''"))
 }
 
 // withoutCodexTable returns the lines of old except the [mcp_servers.aulaglobal]
 // table and its sub-tables. found reports whether such a table was there, and
 // atEnd whether it was the last thing in the file.
 func withoutCodexTable(old []byte) (kept []string, found, atEnd bool, err error) {
-	sc := bufio.NewScanner(bytes.NewReader(old))
-	sc.Buffer(make([]byte, 4096), 4<<20)
+	scanner := bufio.NewScanner(bytes.NewReader(old))
+	scanner.Buffer(make([]byte, 4096), 4<<20)
 	skipping := false
-	for sc.Scan() {
-		line := sc.Text()
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.HasPrefix(strings.TrimSpace(line), "[") {
 			var header map[string]any
-			if e := toml.Unmarshal([]byte(line+"\n"), &header); e != nil {
-				return nil, false, false, e
+			if err := toml.Unmarshal([]byte(line+"\n"), &header); err != nil {
+				return nil, false, false, err
 			}
 			servers, _ := header["mcp_servers"].(map[string]any)
 			_, skipping = servers[aulaglobalKey]
@@ -139,7 +139,7 @@ func withoutCodexTable(old []byte) (kept []string, found, atEnd bool, err error)
 			kept = append(kept, line)
 		}
 	}
-	return kept, found, skipping, sc.Err()
+	return kept, found, skipping, scanner.Err()
 }
 
 // joinLines is the inverse of splitting a file into lines: every line ends

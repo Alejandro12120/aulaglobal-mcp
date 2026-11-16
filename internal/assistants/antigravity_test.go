@@ -36,15 +36,15 @@ func TestFindAntigravity(t *testing.T) {
 			}{filepath.Join(local, "Programs", "Antigravity", "Antigravity.exe"), 0644})
 		}
 		look := func(string) (string, error) { return "", os.ErrNotExist }
-		for _, c := range candidates {
+		for _, candidate := range candidates {
 			stat := func(p string) (os.FileInfo, error) {
-				if p != c.path {
+				if p != candidate.path {
 					return nil, os.ErrNotExist
 				}
-				return fstest.MapFS{"x": &fstest.MapFile{Mode: c.mode}}.Stat("x")
+				return fstest.MapFS{"x": &fstest.MapFile{Mode: candidate.mode}}.Stat("x")
 			}
 			if _, ok := assistants.FindAntigravity(goos, home, local, look, stat); !ok {
-				t.Fatal(goos, c)
+				t.Fatal(goos, candidate)
 			}
 		}
 		missing := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
@@ -68,16 +68,16 @@ func TestRealAntigravity(t *testing.T) {
 	if cli == "" {
 		t.Skip("set AULAGLOBAL_TEST_AGY to isolated binary")
 	}
-	entry, e := assistants.AntigravityCLIEntry(cli, "/bin/true", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
-	if e != nil || entry["command"] != "/bin/true" || entry["disabled"] != false {
-		t.Fatal(entry, e)
+	entry, err := assistants.AntigravityCLIEntry(cli, "/bin/true", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
+	if err != nil || entry["command"] != "/bin/true" || entry["disabled"] != false {
+		t.Fatal(entry, err)
 	}
 	t.Logf("real CLI generated entry: %v", entry)
 }
 
 func TestAntigravityHelpFixture(t *testing.T) {
-	b, e := os.ReadFile("testdata/agy-1.5.9-mcp-add-help.txt")
-	if e != nil || !strings.Contains(string(b), "<commandOrUrl>") || !strings.Contains(string(b), "--env") {
-		t.Fatal("unexpected real CLI help", e)
+	help, err := os.ReadFile("testdata/agy-1.5.9-mcp-add-help.txt")
+	if err != nil || !strings.Contains(string(help), "<commandOrUrl>") || !strings.Contains(string(help), "--env") {
+		t.Fatal("unexpected real CLI help", err)
 	}
 }

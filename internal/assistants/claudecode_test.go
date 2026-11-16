@@ -79,48 +79,48 @@ func TestClientCLIArgumentsAndManual(t *testing.T) {
 }
 
 func TestClaudeCodeFindAndRemove(t *testing.T) {
-	a := assistantstest.ByID(t, "claude-code")
-	f := &assistantstest.FakeClaude{Scope: "user", Command: "/x/aulaglobal-mcp", Env: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/notes"}}
-	e := assistantstest.ClaudeEnv(t, f)
-	l := a.Find(e)
-	if l.State != assistants.LinkPresent || l.Command != "/x/aulaglobal-mcp" || l.Env["AULAGLOBAL_DOWNLOAD_DIR"] != "/notes" || !strings.Contains(l.Detail, "claude mcp remove --scope user aulaglobal") {
-		t.Fatalf("%+v", l)
+	assistant := assistantstest.ByID(t, "claude-code")
+	fake := &assistantstest.FakeClaude{Scope: "user", Command: "/x/aulaglobal-mcp", Env: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/notes"}}
+	env := assistantstest.ClaudeEnv(t, fake)
+	link := assistant.Find(env)
+	if link.State != assistants.LinkPresent || link.Command != "/x/aulaglobal-mcp" || link.Env["AULAGLOBAL_DOWNLOAD_DIR"] != "/notes" || !strings.Contains(link.Detail, "claude mcp remove --scope user aulaglobal") {
+		t.Fatalf("%+v", link)
 	}
-	if err := a.Remove(e); err != nil {
+	if err := assistant.Remove(env); err != nil {
 		t.Fatal(err)
 	}
-	if f.Scope != "" {
+	if fake.Scope != "" {
 		t.Fatal("entry remains")
 	}
-	last := f.Calls[len(f.Calls)-2]
+	last := fake.Calls[len(fake.Calls)-2]
 	if strings.Join(last, " ") != "mcp remove --scope user aulaglobal" {
-		t.Fatalf("calls %v", f.Calls)
+		t.Fatalf("calls %v", fake.Calls)
 	}
-	if l := a.Find(e); l.State != assistants.LinkNone {
-		t.Fatalf("%+v", l)
+	if link := assistant.Find(env); link.State != assistants.LinkNone {
+		t.Fatalf("%+v", link)
 	}
-	n := len(f.Calls)
-	if err := a.Remove(e); err != nil || len(f.Calls) != n+1 { // only the lookup
-		t.Fatalf("second removal ran commands: %v", f.Calls[n:])
+	n := len(fake.Calls)
+	if err := assistant.Remove(env); err != nil || len(fake.Calls) != n+1 { // only the lookup
+		t.Fatalf("second removal ran commands: %v", fake.Calls[n:])
 	}
 }
 
 func TestClaudeCodeLocalAndProjectScopesAreNeverTouched(t *testing.T) {
-	a := assistantstest.ByID(t, "claude-code")
+	assistant := assistantstest.ByID(t, "claude-code")
 	for _, scope := range []string{"local", "project"} {
-		f := &assistantstest.FakeClaude{Scope: scope, Command: "/x/aulaglobal-mcp"}
-		e := assistantstest.ClaudeEnv(t, f)
-		l := a.Find(e)
-		if l.State != assistants.LinkElsewhere || l.Detail == "" {
-			t.Fatalf("%s: %+v", scope, l)
+		fake := &assistantstest.FakeClaude{Scope: scope, Command: "/x/aulaglobal-mcp"}
+		env := assistantstest.ClaudeEnv(t, fake)
+		link := assistant.Find(env)
+		if link.State != assistants.LinkElsewhere || link.Detail == "" {
+			t.Fatalf("%s: %+v", scope, link)
 		}
-		if scope == "project" && !strings.Contains(l.Detail, ".mcp.json") || scope == "local" && !strings.Contains(l.Detail, "--scope local") {
-			t.Fatal(l.Detail)
+		if scope == "project" && !strings.Contains(link.Detail, ".mcp.json") || scope == "local" && !strings.Contains(link.Detail, "--scope local") {
+			t.Fatal(link.Detail)
 		}
-		if err := a.Remove(e); err == nil {
+		if err := assistant.Remove(env); err == nil {
 			t.Fatal("removed a non-user scope")
 		}
-		for _, c := range f.Calls {
+		for _, c := range fake.Calls {
 			if c[1] == "remove" {
 				t.Fatalf("%s: remove was called: %v", scope, c)
 			}
@@ -129,36 +129,36 @@ func TestClaudeCodeLocalAndProjectScopesAreNeverTouched(t *testing.T) {
 }
 
 func TestClaudeCodeRemoveFailureAndUnknown(t *testing.T) {
-	a := assistantstest.ByID(t, "claude-code")
-	f := &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "private diagnostic"}
-	if err := a.Remove(assistantstest.ClaudeEnv(t, f)); err == nil || strings.Contains(err.Error(), "private") {
+	assistant := assistantstest.ByID(t, "claude-code")
+	fake := &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "private diagnostic"}
+	if err := assistant.Remove(assistantstest.ClaudeEnv(t, fake)); err == nil || strings.Contains(err.Error(), "private") {
 		t.Fatalf("%v", err)
 	}
 	// The entry vanished between get and remove: not an error.
-	f = &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "No MCP server found with name: aulaglobal in user config"}
-	e := assistantstest.ClaudeEnv(t, f)
-	e.RunClaude = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+	fake = &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "No MCP server found with name: aulaglobal in user config"}
+	env := assistantstest.ClaudeEnv(t, fake)
+	env.RunClaude = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
 		if args[1] == "remove" {
-			f.Scope = ""
+			fake.Scope = ""
 		}
-		return f.Run(ctx, cli, args...)
+		return fake.Run(ctx, cli, args...)
 	}
-	if err := a.Remove(e); err != nil {
+	if err := assistant.Remove(env); err != nil {
 		t.Fatal(err)
 	}
 	// Unknown scope and offline CLI are errors, never guesses.
-	e.RunClaude = func(context.Context, string, ...string) ([]byte, error) { return []byte("Scope: Weird"), nil }
-	if l := a.Find(e); l.State != assistants.LinkError {
-		t.Fatalf("%+v", l)
+	env.RunClaude = func(context.Context, string, ...string) ([]byte, error) { return []byte("Scope: Weird"), nil }
+	if link := assistant.Find(env); link.State != assistants.LinkError {
+		t.Fatalf("%+v", link)
 	}
-	e.RunClaude = func(context.Context, string, ...string) ([]byte, error) {
+	env.RunClaude = func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("private diagnostic"), errors.New("x")
 	}
-	if l := a.Find(e); l.State != assistants.LinkError || strings.Contains(l.Detail, "private") {
-		t.Fatalf("%+v", l)
+	if link := assistant.Find(env); link.State != assistants.LinkError || strings.Contains(link.Detail, "private") {
+		t.Fatalf("%+v", link)
 	}
-	e.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
-	if l := a.Find(e); l.State != assistants.LinkNotInstalled {
-		t.Fatalf("%+v", l)
+	env.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	if link := assistant.Find(env); link.State != assistants.LinkNotInstalled {
+		t.Fatalf("%+v", link)
 	}
 }

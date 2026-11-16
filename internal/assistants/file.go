@@ -28,180 +28,180 @@ type fileAssistant struct {
 	ignoreDisabledFalse bool
 }
 
-func (a fileAssistant) ID() string        { return a.id }
-func (a fileAssistant) Name() string      { return a.name }
-func (a fileAssistant) Reload() string    { return a.reload }
-func (a fileAssistant) Detect(e Env) bool { return a.detect(e) }
+func (a fileAssistant) ID() string          { return a.id }
+func (a fileAssistant) Name() string        { return a.name }
+func (a fileAssistant) Reload() string      { return a.reload }
+func (a fileAssistant) Detect(env Env) bool { return a.detect(env) }
 
 // loadConfig reads an assistant's configuration file. When the answer is already
-// known (not installed, or unreadable) done is true and early holds it. A missing
-// file is not an error: old is then empty.
-func loadConfig(e Env, detected bool, path func(Env) (string, error)) (p string, old []byte, early Inspection, done bool) {
-	if !detected {
-		return "", nil, Inspection{State: NotInstalled}, true
+// known (not installed, or unreadable) it returns it as known. A missing file
+// is not an error: the content is then empty.
+func loadConfig(env Env, installed bool, configPath func(Env) (string, error)) (path string, content []byte, known *Inspection) {
+	if !installed {
+		return "", nil, &Inspection{State: NotInstalled}
 	}
-	p, err := path(e)
+	path, err := configPath(env)
 	if err != nil {
-		return p, nil, Inspection{Err: err}, true
+		return path, nil, &Inspection{Err: err}
 	}
-	old, err = os.ReadFile(p)
+	content, err = os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return p, nil, Inspection{Err: err}, true
+		return path, nil, &Inspection{Err: err}
 	}
-	return p, old, Inspection{}, false
+	return path, content, nil
 }
 
-func (a fileAssistant) read(e Env, w Entry) (string, []byte, Inspection) {
-	p, old, early, done := loadConfig(e, a.Detect(e), a.path)
-	if done {
-		return p, old, early
+func (a fileAssistant) read(env Env, want Entry) (string, []byte, Inspection) {
+	path, content, known := loadConfig(env, a.Detect(env), a.path)
+	if known != nil {
+		return path, content, *known
 	}
-	_, exists, err := a.merge(old, w.Config(), false)
+	_, exists, err := a.merge(content, want.Config(), false)
 	if err != nil {
-		return p, old, Inspection{Err: err}
+		return path, content, Inspection{Err: err}
 	}
 	if !exists {
-		return p, old, Inspection{State: Missing}
+		return path, content, Inspection{State: Missing}
 	}
 	var root map[string]any
-	key := "mcpServers"
+	serversKey := "mcpServers"
 	if a.toml {
-		key = "mcp_servers"
-		err = toml.Unmarshal(old, &root)
+		serversKey = "mcp_servers"
+		err = toml.Unmarshal(content, &root)
 	} else {
-		err = json.Unmarshal(old, &root)
+		err = json.Unmarshal(content, &root)
 	}
-	servers, _ := root[key].(map[string]any)
-	entry := servers[aulaglobalKey]
-	if sameEntry(entry, w.Config()) {
-		return p, old, Inspection{State: Identical}
+	servers, _ := root[serversKey].(map[string]any)
+	current := servers[aulaglobalKey]
+	if sameEntry(current, want.Config()) {
+		return path, content, Inspection{State: Identical}
 	}
 	if a.ignoreDisabledFalse {
-		if m, ok := entry.(map[string]any); ok && m["disabled"] == false {
-			delete(m, "disabled")
-			if sameEntry(m, w.Config()) {
-				return p, old, Inspection{State: Identical}
+		if currentObject, ok := current.(map[string]any); ok && currentObject["disabled"] == false {
+			delete(currentObject, "disabled")
+			if sameEntry(currentObject, want.Config()) {
+				return path, content, Inspection{State: Identical}
 			}
 		}
 	}
 	detail := "entrada existente"
-	if m, ok := entry.(map[string]any); ok {
-		if command, ok := m["command"].(string); ok {
+	if currentObject, ok := current.(map[string]any); ok {
+		if command, ok := currentObject["command"].(string); ok {
 			detail = "comando " + fmt.Sprintf("%q", command)
 		}
 	}
-	return p, old, Inspection{State: Different, Detail: detail, Err: err}
+	return path, content, Inspection{State: Different, Detail: detail, Err: err}
 }
 
-func (a fileAssistant) Inspect(e Env, w Entry) Inspection {
-	_, _, i := a.read(e, w)
-	return i
+func (a fileAssistant) Inspect(env Env, want Entry) Inspection {
+	_, _, inspection := a.read(env, want)
+	return inspection
 }
 
-func (a fileAssistant) Apply(e Env, w Entry, replace bool) error {
-	p, old, i := a.read(e, w)
-	if i.Err != nil {
-		return i.Err
+func (a fileAssistant) Apply(env Env, want Entry, replace bool) error {
+	path, content, inspection := a.read(env, want)
+	if inspection.Err != nil {
+		return inspection.Err
 	}
-	if i.State == NotInstalled {
+	if inspection.State == NotInstalled {
 		return errors.New("not installed")
 	}
-	if i.State == Identical {
+	if inspection.State == Identical {
 		return nil
 	}
-	if i.State == Different && !replace {
+	if inspection.State == Different && !replace {
 		return errors.New("replacement not authorized")
 	}
-	entry := w.Config()
+	entry := want.Config()
 	if a.generate != nil {
 		var err error
-		entry, err = a.generate(e, w)
+		entry, err = a.generate(env, want)
 		if err != nil {
 			return err
 		}
 	}
-	b, _, err := a.merge(old, entry, replace)
+	merged, _, err := a.merge(content, entry, replace)
 	if err != nil {
 		return err
 	}
-	return e.write(p, b)
+	return env.write(path, merged)
 }
 
-func (a fileAssistant) Manual(w Entry) string {
-	b, _, _ := a.merge(nil, w.Config(), true)
-	return "Alternativa manual · " + a.name + ":\n" + string(b)
+func (a fileAssistant) Manual(want Entry) string {
+	example, _, _ := a.merge(nil, want.Config(), true)
+	return "Alternativa manual · " + a.name + ":\n" + string(example)
 }
 
-func (a fileAssistant) Find(e Env) Link {
-	return findInConfig(e, a.Detect(e), a.path, a.entryOf, "no se puede interpretar con seguridad")
+func (a fileAssistant) Find(env Env) Link {
+	return findInConfig(env, a.Detect(env), a.path, a.entryOf, "no se puede interpretar con seguridad")
 }
 
-func (a fileAssistant) Remove(e Env) error {
-	return removeFromConfig(e, a.path, a.removeFrom)
+func (a fileAssistant) Remove(env Env) error {
+	return removeFromConfig(env, a.path, a.removeFrom)
 }
 
-func (a fileAssistant) ManualRemove(e Env) string {
-	p, _ := a.path(e)
-	if p == "" {
-		p = a.name
+func (a fileAssistant) ManualRemove(env Env) string {
+	path, _ := a.path(env)
+	if path == "" {
+		path = a.name
 	}
 	if a.toml {
-		return "Alternativa manual · " + a.name + ": abre " + p + " y borra la tabla [mcp_servers.aulaglobal] (y [mcp_servers.aulaglobal.env] si existe)."
+		return "Alternativa manual · " + a.name + ": abre " + path + " y borra la tabla [mcp_servers.aulaglobal] (y [mcp_servers.aulaglobal.env] si existe)."
 	}
-	return "Alternativa manual · " + a.name + ": abre " + p + " y borra la clave «aulaglobal» dentro de «mcpServers»."
+	return "Alternativa manual · " + a.name + ": abre " + path + " y borra la clave «aulaglobal» dentro de «mcpServers»."
 }
 
 // findInConfig is Find for an assistant with one configuration file. entryOf
 // returns the aulaglobal entry in the file's bytes, and unsafeDetail explains
 // why a file it cannot interpret is left alone.
-func findInConfig(e Env, detected bool, path func(Env) (string, error), entryOf func([]byte) (map[string]any, bool, error), unsafeDetail string) Link {
-	if !detected {
+func findInConfig(env Env, installed bool, configPath func(Env) (string, error), entryOf func([]byte) (map[string]any, bool, error), unsafeDetail string) Link {
+	if !installed {
 		return Link{State: LinkNotInstalled}
 	}
-	p, err := path(e)
+	path, err := configPath(env)
 	if err != nil {
 		return Link{State: LinkError, Detail: err.Error()}
 	}
-	old, err := os.ReadFile(p)
+	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return Link{State: LinkNone, Location: p}
+		return Link{State: LinkNone, Location: path}
 	}
 	if err != nil {
-		return Link{State: LinkError, Location: p, Detail: err.Error()}
+		return Link{State: LinkError, Location: path, Detail: err.Error()}
 	}
-	entry, ok, err := entryOf(old)
+	entry, found, err := entryOf(content)
 	if err != nil {
-		return Link{State: LinkError, Location: p, Detail: unsafeDetail}
+		return Link{State: LinkError, Location: path, Detail: unsafeDetail}
 	}
-	if !ok {
-		return Link{State: LinkNone, Location: p}
+	if !found {
+		return Link{State: LinkNone, Location: path}
 	}
-	l := linkFromEntry(entry)
-	l.Location = p
-	return l
+	link := linkFromEntry(entry)
+	link.Location = path
+	return link
 }
 
 // removeFromConfig is Remove for an assistant with one configuration file.
 // removeFrom drops the aulaglobal entry from the file's bytes and reports
 // whether it was there; a file without the entry is left untouched.
-func removeFromConfig(e Env, path func(Env) (string, error), removeFrom func([]byte) ([]byte, bool, error)) error {
-	p, err := path(e)
+func removeFromConfig(env Env, configPath func(Env) (string, error), removeFrom func([]byte) ([]byte, bool, error)) error {
+	path, err := configPath(env)
 	if err != nil {
 		return err
 	}
-	old, err := os.ReadFile(p)
+	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	b, found, err := removeFrom(old)
+	remaining, found, err := removeFrom(content)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return nil
 	}
-	return e.write(p, b)
+	return env.write(path, remaining)
 }
