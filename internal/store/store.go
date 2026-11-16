@@ -179,70 +179,14 @@ func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File
 		defer resp.Body.Close()
 		br := bufio.NewReader(resp.Body)
 		peek, _ := br.Peek(4096)
-		typ, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		sniff := http.DetectContentType(peek)
-		if typ == "text/html" || strings.HasPrefix(sniff, "text/html") {
-			if f.Mimetype != "text/html" {
-				return errors.New("HTML login/error page refused")
+		if e = refuseNonFile(ctx, c, f, resp.Header.Get("Content-Type"), peek); e != nil {
+			if errors.Is(e, aulaglobal.ErrTokenExpired) {
+				fatal = e
 			}
-			low := strings.ToLower(string(peek))
-			if strings.Contains(low, "login") || strings.Contains(low, "moodleexception") {
-				return errors.New("HTML login/error page refused")
-			}
-		}
-		if typ == "application/json" || strings.HasPrefix(strings.TrimSpace(string(peek)), "{") {
-			var problem struct{ Exception, Errorcode string }
-			if (json.Unmarshal(peek, &problem) == nil && (problem.Exception != "" || problem.Errorcode != "")) || regexp.MustCompile(`"(exception|errorcode)"\s*:`).Match(peek) {
-				if api := c.ClassifyAPIError(ctx, "", problem.Errorcode); errors.Is(api, aulaglobal.ErrTokenExpired) {
-					fatal = api
-					return api
-				}
-				return errors.New("Moodle JSON file error (token may be invalid or expired)")
-			}
-			if f.Mimetype != "application/json" && typ == "application/json" {
-				return errors.New("unexpected JSON download refused")
-			}
-		}
-		dir := filepath.Dir(res.Path)
-		if e = s.Root.MkdirAll(dir, 0700); e != nil {
 			return e
 		}
-		var nonce [16]byte
-		if _, e = rand.Read(nonce[:]); e != nil {
-			return e
-		}
-		tmp := filepath.Join(dir, ".partial-"+hex.EncodeToString(nonce[:]))
-		fd, e := s.Root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		n, e := s.save(ctx, res.Path, br, f)
 		if e != nil {
-			return e
-		}
-		defer s.Root.Remove(tmp)
-		defer fd.Close()
-		n, e := io.Copy(fd, io.LimitReader(br, s.MaxFile+1))
-		if e != nil {
-			return errors.New("download stream failed")
-		}
-		if n > s.MaxFile {
-			return errors.New("file exceeds size limit")
-		}
-		if f.Size != nil && n != *f.Size {
-			return errors.New("download size differs from Moodle filesize")
-		}
-		if e = ctx.Err(); e != nil {
-			return e
-		}
-		if e = fd.Sync(); e != nil {
-			return e
-		}
-		if e = fd.Close(); e != nil {
-			return e
-		}
-		if f.Modified > 0 {
-			if e = s.Root.Chtimes(tmp, time.Now(), time.Unix(f.Modified, 0)); e != nil {
-				return e
-			}
-		}
-		if e = s.Root.Rename(tmp, res.Path); e != nil {
 			return e
 		}
 		res.Bytes = n
@@ -253,6 +197,87 @@ func (s *Store) one(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File
 		res.Error = e.Error()
 	}
 	return
+}
+
+// refuseNonFile rejects a response that is not the file: a login or error page
+// that Moodle served with HTTP 200, or a JSON error. peek holds its first bytes.
+// The error wraps aulaglobal.ErrTokenExpired when the JSON error means the token
+// is dead.
+func refuseNonFile(ctx context.Context, c *aulaglobal.Client, f aulaglobal.File, contentType string, peek []byte) error {
+	typ, _, _ := mime.ParseMediaType(contentType)
+	sniff := http.DetectContentType(peek)
+	if typ == "text/html" || strings.HasPrefix(sniff, "text/html") {
+		if f.Mimetype != "text/html" {
+			return errors.New("HTML login/error page refused")
+		}
+		low := strings.ToLower(string(peek))
+		if strings.Contains(low, "login") || strings.Contains(low, "moodleexception") {
+			return errors.New("HTML login/error page refused")
+		}
+	}
+	if typ == "application/json" || strings.HasPrefix(strings.TrimSpace(string(peek)), "{") {
+		var problem struct{ Exception, Errorcode string }
+		if (json.Unmarshal(peek, &problem) == nil && (problem.Exception != "" || problem.Errorcode != "")) || regexp.MustCompile(`"(exception|errorcode)"\s*:`).Match(peek) {
+			if api := c.ClassifyAPIError(ctx, "", problem.Errorcode); errors.Is(api, aulaglobal.ErrTokenExpired) {
+				return api
+			}
+			return errors.New("Moodle JSON file error (token may be invalid or expired)")
+		}
+		if f.Mimetype != "application/json" && typ == "application/json" {
+			return errors.New("unexpected JSON download refused")
+		}
+	}
+	return nil
+}
+
+// save writes body to dest through a temporary file, so a failed or oversized
+// download never leaves a partial file under the final name. The file gets
+// Moodle's modification time, which is what a later run compares to skip it.
+// It returns the number of bytes written.
+func (s *Store) save(ctx context.Context, dest string, body io.Reader, f aulaglobal.File) (int64, error) {
+	dir := filepath.Dir(dest)
+	if e := s.Root.MkdirAll(dir, 0700); e != nil {
+		return 0, e
+	}
+	var nonce [16]byte
+	if _, e := rand.Read(nonce[:]); e != nil {
+		return 0, e
+	}
+	tmp := filepath.Join(dir, ".partial-"+hex.EncodeToString(nonce[:]))
+	fd, e := s.Root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		return 0, e
+	}
+	defer s.Root.Remove(tmp)
+	defer fd.Close()
+	n, e := io.Copy(fd, io.LimitReader(body, s.MaxFile+1))
+	if e != nil {
+		return 0, errors.New("download stream failed")
+	}
+	if n > s.MaxFile {
+		return 0, errors.New("file exceeds size limit")
+	}
+	if f.Size != nil && n != *f.Size {
+		return 0, errors.New("download size differs from Moodle filesize")
+	}
+	if e = ctx.Err(); e != nil {
+		return 0, e
+	}
+	if e = fd.Sync(); e != nil {
+		return 0, e
+	}
+	if e = fd.Close(); e != nil {
+		return 0, e
+	}
+	if f.Modified > 0 {
+		if e = s.Root.Chtimes(tmp, time.Now(), time.Unix(f.Modified, 0)); e != nil {
+			return 0, e
+		}
+	}
+	if e = s.Root.Rename(tmp, dest); e != nil {
+		return 0, e
+	}
+	return n, nil
 }
 
 type ReadResult struct {
