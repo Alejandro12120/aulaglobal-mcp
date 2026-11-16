@@ -65,8 +65,8 @@ var markers = map[string][]string{
 func modules(root string) (map[module]map[string]bool, map[module]string, error) {
 	sets := map[module]map[string]bool{}
 	dirs := map[module]string{}
-	for _, tg := range targets {
-		goos, goarch, _ := strings.Cut(tg, "/")
+	for _, target := range targets {
+		goos, goarch, _ := strings.Cut(target, "/")
 		cmd := exec.Command("go", "list", "-deps", "-f",
 			"{{if .Module}}{{if .Module.Version}}{{.Module.Path}} {{.Module.Version}} {{.Module.Dir}}{{end}}{{end}}", "./cmd/aulaglobal-mcp")
 		cmd.Dir = root
@@ -76,28 +76,28 @@ func modules(root string) (map[module]map[string]bool, map[module]string, error)
 			if ee, ok := err.(*exec.ExitError); ok {
 				err = fmt.Errorf("%w: %s", err, ee.Stderr)
 			}
-			return nil, nil, fmt.Errorf("go list for %s: %w", tg, err)
+			return nil, nil, fmt.Errorf("go list for %s: %w", target, err)
 		}
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			f := strings.Fields(line)
-			if len(f) < 3 {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
 				continue
 			}
-			m := module{f[0], f[1]}
-			if sets[m] == nil {
-				sets[m] = map[string]bool{}
+			mod := module{fields[0], fields[1]}
+			if sets[mod] == nil {
+				sets[mod] = map[string]bool{}
 			}
-			sets[m][tg] = true
-			dirs[m] = strings.Join(f[2:], " ")
+			sets[mod][target] = true
+			dirs[mod] = strings.Join(fields[2:], " ")
 		}
 	}
 	return sets, dirs, nil
 }
 
 func isLegalFile(name string) bool {
-	n := strings.ToUpper(name)
-	for _, p := range []string{"LICENSE", "LICENCE", "COPYING", "NOTICE", "PATENTS"} {
-		if strings.HasPrefix(n, p) {
+	upper := strings.ToUpper(name)
+	for _, candidate := range []string{"LICENSE", "LICENCE", "COPYING", "NOTICE", "PATENTS"} {
+		if strings.HasPrefix(upper, candidate) {
 			return true
 		}
 	}
@@ -112,39 +112,39 @@ func legalFiles(dir string) ([]legalFile, error) {
 		return nil, err
 	}
 	var files []legalFile
-	for _, e := range entries {
-		if e.IsDir() || !isLegalFile(e.Name()) {
+	for _, entry := range entries {
+		if entry.IsDir() || !isLegalFile(entry.Name()) {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, legalFile{e.Name(), strings.TrimSpace(strings.ReplaceAll(string(b), "\r\n", "\n"))})
+		files = append(files, legalFile{entry.Name(), strings.TrimSpace(strings.ReplaceAll(string(content), "\r\n", "\n"))})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	return files, nil
 }
 
 // verify checks that the licence files back the recorded SPDX expression.
-func verify(m module, spdx string, files []legalFile) error {
+func verify(mod module, spdx string, files []legalFile) error {
 	var license string
-	for _, f := range files {
-		if strings.HasPrefix(strings.ToUpper(f.Name), "LICEN") || strings.HasPrefix(strings.ToUpper(f.Name), "COPYING") {
-			license += f.Text + "\n"
+	for _, file := range files {
+		if strings.HasPrefix(strings.ToUpper(file.Name), "LICEN") || strings.HasPrefix(strings.ToUpper(file.Name), "COPYING") {
+			license += file.Text + "\n"
 		}
 	}
 	if license == "" {
-		return fmt.Errorf("%s: no LICENSE file found", m.Path)
+		return fmt.Errorf("%s: no LICENSE file found", mod.Path)
 	}
 	for _, id := range strings.Split(spdx, " AND ") {
 		want, ok := markers[id]
 		if !ok {
-			return fmt.Errorf("%s: no verification markers for %s", m.Path, id)
+			return fmt.Errorf("%s: no verification markers for %s", mod.Path, id)
 		}
 		for _, phrase := range want {
 			if !strings.Contains(license, phrase) {
-				return fmt.Errorf("%s: LICENSE does not look like %s (missing %q); read it and update spdxOf", m.Path, id, phrase)
+				return fmt.Errorf("%s: LICENSE does not look like %s (missing %q); read it and update spdxOf", mod.Path, id, phrase)
 			}
 		}
 	}
@@ -152,16 +152,16 @@ func verify(m module, spdx string, files []legalFile) error {
 }
 
 func fence(text string) string {
-	f := "````"
-	for strings.Contains(text, f) {
-		f += "`"
+	ticks := "````"
+	for strings.Contains(text, ticks) {
+		ticks += "`"
 	}
-	return f
+	return ticks
 }
 
-func block(b *strings.Builder, title string, text string) {
-	f := fence(text)
-	fmt.Fprintf(b, "%s\n\n%stext\n%s\n%s\n\n", title, f, text, f)
+func block(out *strings.Builder, title string, text string) {
+	ticks := fence(text)
+	fmt.Fprintf(out, "%s\n\n%stext\n%s\n%s\n\n", title, ticks, text, ticks)
 }
 
 func generate(root string) (string, error) {
@@ -170,15 +170,15 @@ func generate(root string) (string, error) {
 		return "", err
 	}
 	var list []module
-	for m := range sets {
-		list = append(list, m)
+	for mod := range sets {
+		list = append(list, mod)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Path < list[j].Path })
 
-	var b strings.Builder
-	b.WriteString(preamble)
+	var out strings.Builder
+	out.WriteString(preamble)
 	if !strings.HasSuffix(preamble, "\n") {
-		b.WriteString("\n")
+		out.WriteString("\n")
 	}
 
 	goroot, err := exec.Command("go", "env", "GOROOT").Output()
@@ -199,27 +199,27 @@ func generate(root string) (string, error) {
 	if err := verify(module{Path: "Go standard library"}, "BSD-3-Clause", std); err != nil {
 		return "", err
 	}
-	fmt.Fprintf(&b, "\n## Go standard library and runtime\n\nStatically linked into every binary. License: BSD-3-Clause. Copyright 2009 The Go Authors. Source: https://go.dev/ (toolchain %s).\n\n", strings.TrimSpace(string(goversion)))
+	fmt.Fprintf(&out, "\n## Go standard library and runtime\n\nStatically linked into every binary. License: BSD-3-Clause. Copyright 2009 The Go Authors. Source: https://go.dev/ (toolchain %s).\n\n", strings.TrimSpace(string(goversion)))
 	for _, f := range std {
-		block(&b, "**"+f.Name+"**", f.Text)
+		block(&out, "**"+f.Name+"**", f.Text)
 	}
 
-	b.WriteString("\n## Go modules\n\nEvery module below is compiled into the release binaries (`go list -deps` of `./cmd/aulaglobal-mcp` with `CGO_ENABLED=0`, for linux, darwin and windows on amd64 and arm64). Test-only dependencies are not linked and not listed. Regenerate with `scripts/gen-third-party-notices.sh`; CI fails if this list and the build disagree.\n\n")
-	for _, m := range list {
-		spdx, ok := spdxOf[m.Path]
+	out.WriteString("\n## Go modules\n\nEvery module below is compiled into the release binaries (`go list -deps` of `./cmd/aulaglobal-mcp` with `CGO_ENABLED=0`, for linux, darwin and windows on amd64 and arm64). Test-only dependencies are not linked and not listed. Regenerate with `scripts/gen-third-party-notices.sh`; CI fails if this list and the build disagree.\n\n")
+	for _, mod := range list {
+		spdx, ok := spdxOf[mod.Path]
 		if !ok {
-			return "", fmt.Errorf("%s: licence not recorded in spdxOf; read its LICENSE, then add it", m)
+			return "", fmt.Errorf("%s: licence not recorded in spdxOf; read its LICENSE, then add it", mod)
 		}
-		files, err := legalFiles(dirs[m])
+		files, err := legalFiles(dirs[mod])
 		if err != nil {
 			return "", err
 		}
-		if err := verify(m, spdx, files); err != nil {
+		if err := verify(mod, spdx, files); err != nil {
 			return "", err
 		}
 		var tg []string
 		for _, t := range targets {
-			if sets[m][t] {
+			if sets[mod][t] {
 				tg = append(tg, t)
 			}
 		}
@@ -227,12 +227,12 @@ func generate(root string) (string, error) {
 		if len(tg) != len(targets) {
 			compiled = strings.Join(tg, ", ")
 		}
-		fmt.Fprintf(&b, "### %s %s\n\n- License: %s\n- Source: https://pkg.go.dev/%s@%s\n- Compiled into: %s\n\n", m.Path, m.Version, spdx, m.Path, m.Version, compiled)
+		fmt.Fprintf(&out, "### %s %s\n\n- License: %s\n- Source: https://pkg.go.dev/%s@%s\n- Compiled into: %s\n\n", mod.Path, mod.Version, spdx, mod.Path, mod.Version, compiled)
 		for _, f := range files {
-			block(&b, "**"+f.Name+"**", f.Text)
+			block(&out, "**"+f.Name+"**", f.Text)
 		}
 	}
-	return strings.TrimRight(b.String(), "\n") + "\n", nil
+	return strings.TrimRight(out.String(), "\n") + "\n", nil
 }
 
 func main() {
