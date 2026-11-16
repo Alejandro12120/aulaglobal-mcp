@@ -3,6 +3,7 @@ package assistants_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -49,5 +50,34 @@ func TestNoHostMetadataForSimulatedOS(t *testing.T) {
 		if assistant.ID() != "claude-code" && !assistant.Detect(env) {
 			t.Fatal(assistant.ID())
 		}
+	}
+}
+
+func TestIDsListEveryAssistantInSetupOrder(t *testing.T) {
+	want := "claude-code,claude-desktop,codex,opencode,antigravity"
+	if got := assistants.IDs(); got != want {
+		t.Errorf("IDs() = %q, want %q", got, want)
+	}
+	all := assistants.All()
+	if len(all) != 5 {
+		t.Fatalf("%d assistants registered, want 5", len(all))
+	}
+	for i, id := range strings.Split(want, ",") {
+		if all[i].ID() != id {
+			t.Errorf("assistant %d is %q, want %q", i, all[i].ID(), id)
+		}
+	}
+}
+
+// Anything in Extra other than the two variables this program defines must
+// never reach an assistant's configuration.
+func TestEntryConfigDropsUnapprovedVariables(t *testing.T) {
+	entry := assistants.Entry{Exe: "/server", Extra: []string{"-e", "SECRET=never", "-e", "AULAGLOBAL_TOKEN_FILE=/token"}}
+	env, _ := entry.Config()["env"].(map[string]string)
+	if len(env) != 1 || env["AULAGLOBAL_TOKEN_FILE"] != "/token" {
+		t.Errorf("env = %v, want only AULAGLOBAL_TOKEN_FILE", env)
+	}
+	if _, found := env["SECRET"]; found {
+		t.Error("an unapproved variable was kept")
 	}
 }
