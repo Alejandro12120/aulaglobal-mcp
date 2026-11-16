@@ -190,8 +190,8 @@ func dirEntries(t *testing.T, dir string) []string {
 		t.Fatal(err)
 	}
 	var n []string
-	for _, e := range es {
-		n = append(n, e.Name())
+	for _, err := range es {
+		n = append(n, err.Name())
 	}
 	return n
 }

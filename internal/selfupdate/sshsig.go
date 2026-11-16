@@ -22,54 +22,54 @@ const (
 	keyType       = "ssh-ed25519"
 )
 
-func sigErr(format string, a ...any) error {
-	return fmt.Errorf("%w: %s", ErrSignature, fmt.Sprintf(format, a...))
+func sigErr(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrSignature, fmt.Sprintf(format, args...))
 }
 
-type sshReader struct{ b []byte }
+type sshReader struct{ rest []byte }
 
 func (r *sshReader) u32() (uint32, bool) {
-	if len(r.b) < 4 {
+	if len(r.rest) < 4 {
 		return 0, false
 	}
-	n := binary.BigEndian.Uint32(r.b)
-	r.b = r.b[4:]
-	return n, true
+	length := binary.BigEndian.Uint32(r.rest)
+	r.rest = r.rest[4:]
+	return length, true
 }
 
 func (r *sshReader) str() ([]byte, bool) {
-	n, ok := r.u32()
-	if !ok || uint64(n) > uint64(len(r.b)) {
+	length, ok := r.u32()
+	if !ok || uint64(length) > uint64(len(r.rest)) {
 		return nil, false
 	}
-	s := r.b[:n]
-	r.b = r.b[n:]
-	return s, true
+	field := r.rest[:length]
+	r.rest = r.rest[length:]
+	return field, true
 }
 
-func appendString(dst, s []byte) []byte {
-	dst = binary.BigEndian.AppendUint32(dst, uint32(len(s)))
-	return append(dst, s...)
+func appendString(dst, field []byte) []byte {
+	dst = binary.BigEndian.AppendUint32(dst, uint32(len(field)))
+	return append(dst, field...)
 }
 
 // parsePublicKey reads an authorized_keys style ssh-ed25519 line and returns
 // the wire-format blob plus the raw key.
 func parsePublicKey(line string) ([]byte, ed25519.PublicKey, error) {
-	f := strings.Fields(line)
-	if len(f) < 2 || f[0] != keyType {
+	fields := strings.Fields(line)
+	if len(fields) < 2 || fields[0] != keyType {
 		return nil, nil, errors.New("trusted key must be an ssh-ed25519 public key")
 	}
-	blob, err := base64.StdEncoding.DecodeString(f[1])
+	blob, err := base64.StdEncoding.DecodeString(fields[1])
 	if err != nil {
 		return nil, nil, errors.New("trusted key is not valid base64")
 	}
 	r := sshReader{blob}
 	t, ok1 := r.str()
-	k, ok2 := r.str()
-	if !ok1 || !ok2 || string(t) != keyType || len(k) != ed25519.PublicKeySize || len(r.b) != 0 {
+	keyBytes, ok2 := r.str()
+	if !ok1 || !ok2 || string(t) != keyType || len(keyBytes) != ed25519.PublicKeySize || len(r.rest) != 0 {
 		return nil, nil, errors.New("trusted key blob is malformed")
 	}
-	return blob, ed25519.PublicKey(k), nil
+	return blob, ed25519.PublicKey(keyBytes), nil
 }
 
 func decodeArmor(armored []byte) ([]byte, error) {
@@ -78,8 +78,8 @@ func decodeArmor(armored []byte) ([]byte, error) {
 		return nil, sigErr("not an SSH signature")
 	}
 	var b strings.Builder
-	for _, l := range lines[1 : len(lines)-1] {
-		b.WriteString(strings.TrimSpace(l))
+	for _, line := range lines[1 : len(lines)-1] {
+		b.WriteString(strings.TrimSpace(line))
 	}
 	raw, err := base64.StdEncoding.DecodeString(b.String())
 	if err != nil {
@@ -108,39 +108,39 @@ func VerifySSHSig(trustedKey, namespace string, armored, message []byte) error {
 	if !ok || version != 1 {
 		return sigErr("unsupported version")
 	}
-	pk, ok1 := r.str()
-	ns, ok2 := r.str()
+	publicKey, ok1 := r.str()
+	namespaceBytes, ok2 := r.str()
 	reserved, ok3 := r.str()
 	hashAlg, ok4 := r.str()
 	sig, ok5 := r.str()
-	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || len(r.b) != 0 {
+	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || len(r.rest) != 0 {
 		return sigErr("malformed structure")
 	}
-	if !bytes.Equal(pk, trustedBlob) {
+	if !bytes.Equal(publicKey, trustedBlob) {
 		return sigErr("signed with an untrusted key")
 	}
-	if string(ns) != namespace {
+	if string(namespaceBytes) != namespace {
 		return sigErr("wrong namespace")
 	}
 	var digest []byte
 	switch string(hashAlg) {
 	case "sha512":
-		h := sha512.Sum512(message)
-		digest = h[:]
+		digestHash := sha512.Sum512(message)
+		digest = digestHash[:]
 	case "sha256":
-		h := sha256.Sum256(message)
-		digest = h[:]
+		digestHash := sha256.Sum256(message)
+		digest = digestHash[:]
 	default:
 		return sigErr("unsupported hash algorithm")
 	}
-	sr := sshReader{sig}
-	format, ok1 := sr.str()
-	value, ok2 := sr.str()
-	if !ok1 || !ok2 || len(sr.b) != 0 || string(format) != keyType || len(value) != ed25519.SignatureSize {
+	sigReader := sshReader{sig}
+	format, ok1 := sigReader.str()
+	value, ok2 := sigReader.str()
+	if !ok1 || !ok2 || len(sigReader.rest) != 0 || string(format) != keyType || len(value) != ed25519.SignatureSize {
 		return sigErr("unsupported signature format")
 	}
 	signed := []byte(sigMagic)
-	signed = appendString(signed, ns)
+	signed = appendString(signed, namespaceBytes)
 	signed = appendString(signed, reserved)
 	signed = appendString(signed, hashAlg)
 	signed = appendString(signed, digest)
