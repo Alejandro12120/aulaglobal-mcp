@@ -16,38 +16,38 @@ func TestClientTranscripts(t *testing.T) {
 	for _, scenario := range []string{"local-and-codex", "configure-all", "already-configured", "failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			a := assistantstest.ByID(t, "claude-code")
-			e, w, state, fail := assistantstest.Fixture(t, a, true)
+			env, entry, state, fail := assistantstest.Fixture(t, a, true)
 			// Stable desired command makes golden files independent of OS and temp path.
-			w = assistants.Entry{Exe: "/installed/aulaglobal-mcp"}
+			entry = assistants.Entry{Exe: "/installed/aulaglobal-mcp"}
 			input := "e\ns\nn\n"
 			list := assistants.All()
 			switch scenario {
 			case "local-and-codex":
 				*state = "local"
-				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
-				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), e, w, "different")
+				os.MkdirAll(filepath.Join(env.Home, ".codex"), 0700)
+				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), env, entry, "different")
 			case "configure-all":
 				input = "\n"
-				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
+				os.MkdirAll(filepath.Join(env.Home, ".codex"), 0700)
 			case "already-configured":
 				*state = "identical"
 				list = []assistants.Assistant{assistantstest.ByID(t, "codex")}
-				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
-				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), e, w, "identical")
+				os.MkdirAll(filepath.Join(env.Home, ".codex"), 0700)
+				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), env, entry, "identical")
 			case "failure":
 				*fail = true
 				list = []assistants.Assistant{a}
 				input = "s\n"
 			}
 			var out strings.Builder
-			connectAssistants(termui.UI{In: strings.NewReader(input), Out: &out}, e, w, list, false)
+			connectAssistants(termui.UI{In: strings.NewReader(input), Out: &out}, env, entry, list, false)
 			got := strings.ReplaceAll(out.String(), "\r\n", "\n")
 			if !strings.Contains(got, "── Paso 4 de 4 · Conectar con tus asistentes ──\n\n"+privacyNotice+"\nAsistentes encontrados") {
 				t.Fatalf("step 4 must show the privacy notice before the assistants:\n%s", got)
 			}
 			lines := strings.Split(got, "\n")
-			for i := range lines {
-				lines[i] = strings.TrimRight(lines[i], " \t")
+			for index := range lines {
+				lines[index] = strings.TrimRight(lines[index], " \t")
 			}
 			got = strings.Join(lines, "\n")
 			// Manual command quoting is shell-specific; failure golden checks the stable
@@ -74,26 +74,26 @@ func TestSetupOnlyClientsFlags(t *testing.T) {
 	}
 	// Redirect to a file, not a pipe: setup must run without a terminal and without
 	// waiting for input. No token exists and no network can be needed in this mode.
-	f, err := os.CreateTemp(home, "transcript")
+	info, err := os.CreateTemp(home, "transcript")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer info.Close()
 	stdout := os.Stdout
-	os.Stdout = f
+	os.Stdout = info
 	defer func() { os.Stdout = stdout }()
-	for i := 0; i < 2; i++ {
+	for index := 0; index < 2; index++ {
 		if err := Run([]string{"--only-clients", "--clients", "codex", "--yes"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	b, err := os.ReadFile(f.Name())
+	b, err := os.ReadFile(info.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
-	if !strings.Contains(s, "añadido") || !strings.Contains(s, "ya está configurado") || strings.Contains(s, "Claude") || strings.Contains(s, "›") {
-		t.Fatal(s)
+	output := string(b)
+	if !strings.Contains(output, "añadido") || !strings.Contains(output, "ya está configurado") || strings.Contains(output, "Claude") || strings.Contains(output, "›") {
+		t.Fatal(output)
 	}
 	if err := Run([]string{"--clients", "invalid"}); err == nil {
 		t.Fatal("invalid flag accepted")

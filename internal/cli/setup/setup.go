@@ -24,39 +24,39 @@ import (
 // the folders, get a token from the user's session cookie, check the token and
 // connect the AI assistants.
 func Run(args []string) (result error) {
-	token, data, e := userpaths.Defaults()
-	if e != nil {
-		return e
+	tokenFile, dataDir, err := userpaths.Defaults()
+	if err != nil {
+		return err
 	}
-	token = env.Or("AULAGLOBAL_TOKEN_FILE", token)
-	data = env.Or("AULAGLOBAL_DOWNLOAD_DIR", data)
+	tokenFile = env.Or("AULAGLOBAL_TOKEN_FILE", tokenFile)
+	dataDir = env.Or("AULAGLOBAL_DOWNLOAD_DIR", dataDir)
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
-	secrets := flags.String("secrets-dir", "", "Carpeta privada para el token (prioridad sobre la variable de entorno)")
-	downloads := flags.String("data-dir", data, "Carpeta de apuntes")
-	clients := flags.String("clients", "", "Asistentes separados por comas: "+assistants.IDs())
+	secretsDir := flags.String("secrets-dir", "", "Carpeta privada para el token (prioridad sobre la variable de entorno)")
+	dataDirFlag := flags.String("data-dir", dataDir, "Carpeta de apuntes")
+	clientIDs := flags.String("clients", "", "Asistentes separados por comas: "+assistants.IDs())
 	yes := flags.Bool("yes", false, "Aceptar las opciones predeterminadas de los asistentes")
 	onlyClients := flags.Bool("only-clients", false, "Configurar solo los asistentes, sin obtener ni comprobar el token")
 	noPause := flags.Bool("no-pause", false, "Salir sin esperar Enter")
-	if e = flags.Parse(args); e != nil {
-		return e
+	if err = flags.Parse(args); err != nil {
+		return err
 	}
-	selected, err := assistants.Select(*clients)
+	selected, err := assistants.Select(*clientIDs)
 	if err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("setup no acepta argumentos adicionales")
 	}
-	if *secrets != "" {
-		token = filepath.Join(*secrets, "token")
+	if *secretsDir != "" {
+		tokenFile = filepath.Join(*secretsDir, "token")
 	}
-	token, e = filepath.Abs(token)
-	if e != nil {
-		return e
+	tokenFile, err = filepath.Abs(tokenFile)
+	if err != nil {
+		return err
 	}
-	data, e = filepath.Abs(*downloads)
-	if e != nil {
-		return e
+	dataDir, err = filepath.Abs(*dataDirFlag)
+	if err != nil {
+		return err
 	}
 	ui := termui.UI{In: os.Stdin, Out: os.Stdout, Password: func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) }}
 	if !term.IsTerminal(int(os.Stdin.Fd())) && !*yes {
@@ -73,45 +73,45 @@ func Run(args []string) (result error) {
 	}
 	if !*onlyClients {
 		if *yes {
-			if f, err := os.Stat(token); err != nil || !f.Mode().IsRegular() {
+			if info, err := os.Stat(tokenFile); err != nil || !info.Mode().IsRegular() {
 				return errors.New("Primero ejecuta setup en una terminal para guardar el token, o usa --only-clients")
 			}
-			checkToken(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, ui)
+			checkToken(context.Background(), aulaglobal.New(aulaglobal.Site, nil), tokenFile, ui)
 		} else {
-			if e := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), token, data, ui); e != nil {
-				return e
+			if err := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), tokenFile, dataDir, ui); err != nil {
+				return err
 			}
 		}
 	}
-	return connectThisComputer(ui, token, data, selected, *yes)
+	return connectThisComputer(ui, tokenFile, dataDir, selected, *yes)
 }
 
 // connectThisComputer is step 4 with the real machine: this executable, the
 // user's home and configuration folders.
-func connectThisComputer(ui termui.UI, token, data string, selected []assistants.Assistant, yes bool) error {
-	exe, e := os.Executable()
-	if e != nil {
-		return e
+func connectThisComputer(ui termui.UI, tokenFile, dataDir string, selected []assistants.Assistant, yes bool) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
 	}
-	exe, e = filepath.EvalSymlinks(exe)
-	if e != nil {
-		return e
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return err
 	}
-	home, e := os.UserHomeDir()
-	if e != nil {
-		return e
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
 	}
-	config, e := os.UserConfigDir()
-	if e != nil {
-		return e
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return err
 	}
-	defaultToken, defaultData, e := userpaths.Defaults()
-	if e != nil {
-		return e
+	defaultToken, defaultData, err := userpaths.Defaults()
+	if err != nil {
+		return err
 	}
-	want, e := assistants.NewEntry(exe, token, data, defaultToken, defaultData)
-	if e != nil {
-		return e
+	want, err := assistants.NewEntry(exe, tokenFile, dataDir, defaultToken, defaultData)
+	if err != nil {
+		return err
 	}
 	if connectAssistants(ui, assistants.RealEnv(runtime.GOOS, home, config), want, selected, yes) {
 		return errors.New("Algunos asistentes no se pudieron configurar; consulta las instrucciones anteriores")
@@ -146,74 +146,74 @@ const cookieInstructions = `1. Entra en https://aulaglobal.uc3m.es e inicia sesi
 // acquire runs steps 1 to 3: it shows the folders, gets a token from the
 // user's session cookie, saves it and checks it. If the user keeps the token
 // already saved, it only checks that one.
-func acquire(ctx context.Context, api *aulaglobal.Client, token, data string, ui termui.UI) error {
-	if e := os.MkdirAll(filepath.Dir(token), 0700); e != nil {
-		return e
+func acquire(ctx context.Context, api *aulaglobal.Client, tokenFile, dataDir string, ui termui.UI) error {
+	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
+		return err
 	}
-	if e := os.MkdirAll(data, 0700); e != nil {
-		return e
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return err
 	}
 	step(ui, 1, "Carpetas")
-	fmt.Fprintln(ui.Out, "Tu token se guarda en:\n  "+token+"\n\nTus apuntes se guardarán en:\n  "+data)
+	fmt.Fprintln(ui.Out, "Tu token se guarda en:\n  "+tokenFile+"\n\nTus apuntes se guardarán en:\n  "+dataDir)
 	step(ui, 2, "Tu cuenta de AulaGlobal")
 	force := false
-	if _, e := os.Lstat(token); e == nil {
-		if keepExistingToken(ctx, api, token, ui) {
+	if _, err := os.Lstat(tokenFile); err == nil {
+		if keepExistingToken(ctx, api, tokenFile, ui) {
 			return nil
 		}
 		force = true
-	} else if !os.IsNotExist(e) {
-		return e
+	} else if !os.IsNotExist(err) {
+		return err
 	} else {
 		fmt.Fprintln(ui.Out, "Se limpiarán los restos incompletos de un token anterior.")
-		if e := cleanup(token); e != nil {
-			return e
+		if err := cleanup(tokenFile); err != nil {
+			return err
 		}
 	}
 	fmt.Fprintln(ui.Out, cookieInstructions)
-	cookie, e := askCookie(ui)
-	if e != nil {
-		return e
+	cookie, err := askCookie(ui)
+	if err != nil {
+		return err
 	}
-	tokenValue, private, e := api.TokenFromCookie(ctx, cookie)
-	if errors.Is(e, aulaglobal.ErrRateLimited) {
-		return e
+	tokenValue, privateToken, err := api.TokenFromCookie(ctx, cookie)
+	if errors.Is(err, aulaglobal.ErrRateLimited) {
+		return err
 	}
-	if e != nil {
+	if err != nil {
 		return errors.New("No se pudo obtener el token. Cierra sesión, vuelve a entrar en AulaGlobal y repite setup.")
 	}
-	if e = aulaglobal.SaveSecret(token, tokenValue, force); e != nil {
-		return e
+	if err = aulaglobal.SaveSecret(tokenFile, tokenValue, force); err != nil {
+		return err
 	}
-	if private != "" {
-		if e = aulaglobal.SaveSecret(token+".private", private, force); e != nil {
-			return e
+	if privateToken != "" {
+		if err = aulaglobal.SaveSecret(tokenFile+".private", privateToken, force); err != nil {
+			return err
 		}
 	} else if force {
-		if e = os.Remove(token + ".private"); e != nil && !os.IsNotExist(e) {
-			return e
+		if err = os.Remove(tokenFile + ".private"); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
-	if e = saveTokenMeta(token, force); e != nil {
-		return e
+	if err = saveTokenMeta(tokenFile, force); err != nil {
+		return err
 	}
-	checkToken(ctx, api, token, ui)
+	checkToken(ctx, api, tokenFile, ui)
 	return nil
 }
 
 // keepExistingToken tells the user about the token already saved, checks it and
 // reports whether the user keeps it. An expired token is never kept: it needs
 // no question, only a new cookie.
-func keepExistingToken(ctx context.Context, api *aulaglobal.Client, token string, ui termui.UI) bool {
+func keepExistingToken(ctx context.Context, api *aulaglobal.Client, tokenFile string, ui termui.UI) bool {
 	fmt.Fprintln(ui.Out, "Ya tienes un token guardado.")
 	var meta struct {
 		ObtainedAt string `json:"obtained_at"`
 	}
-	b, _ := os.ReadFile(token + ".meta.json")
-	if json.Unmarshal(b, &meta) == nil && meta.ObtainedAt != "" {
+	savedMeta, _ := os.ReadFile(tokenFile + ".meta.json")
+	if json.Unmarshal(savedMeta, &meta) == nil && meta.ObtainedAt != "" {
 		fmt.Fprintln(ui.Out, "Obtenido el:", meta.ObtainedAt)
 	}
-	api.Tokens = aulaglobal.StaticToken{File: token}
+	api.Tokens = aulaglobal.StaticToken{File: tokenFile}
 	auth, err := api.Auth(ctx)
 	if errors.Is(err, aulaglobal.ErrTokenExpired) {
 		fmt.Fprintln(ui.Out, "! Tu token ha caducado o ya no es válido. Vamos a renovarlo.")
@@ -240,13 +240,13 @@ func askCookie(ui termui.UI) (string, error) {
 	var cookie string
 	for i := 1; i <= 3; i++ {
 		fmt.Fprintf(ui.Out, "\n› Pega la cookie y pulsa Enter (intento %d/3): ", i)
-		b, e := ui.Password()
+		typed, err := ui.Password()
 		fmt.Fprintln(ui.Out)
-		if e != nil {
+		if err != nil {
 			return "", errors.New("No se pudo leer. Abre una terminal y ejecuta el programa con setup.")
 		}
-		cookie = normalizeCookie(string(b))
-		clear(b)
+		cookie = normalizeCookie(string(typed))
+		clear(typed)
 		if cookie != "" {
 			return cookie, nil
 		}
@@ -257,30 +257,30 @@ func askCookie(ui termui.UI) (string, error) {
 
 // normalizeCookie strips the whitespace, quotes and "MoodleSessionag=" prefix
 // that people copy along with the value.
-func normalizeCookie(s string) string {
+func normalizeCookie(raw string) string {
 	for i := 0; i < 3; i++ {
-		s = strings.TrimSpace(s)
-		if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-			s = s[1 : len(s)-1]
+		raw = strings.TrimSpace(raw)
+		if len(raw) >= 2 && ((raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'')) {
+			raw = raw[1 : len(raw)-1]
 		}
-		s = strings.TrimPrefix(s, "MoodleSessionag=")
+		raw = strings.TrimPrefix(raw, "MoodleSessionag=")
 	}
-	return strings.TrimSpace(s)
+	return strings.TrimSpace(raw)
 }
 
 // checkToken is step 3: ask Moodle whether the saved token works.
-func checkToken(ctx context.Context, api *aulaglobal.Client, token string, ui termui.UI) {
-	api.Tokens = aulaglobal.StaticToken{File: token}
-	auth, e := api.Auth(ctx)
-	reportToken(ui, auth, e)
+func checkToken(ctx context.Context, api *aulaglobal.Client, tokenFile string, ui termui.UI) {
+	api.Tokens = aulaglobal.StaticToken{File: tokenFile}
+	auth, err := api.Auth(ctx)
+	reportToken(ui, auth, err)
 }
 
-func reportToken(ui termui.UI, auth aulaglobal.Auth, e error) {
+func reportToken(ui termui.UI, auth aulaglobal.Auth, err error) {
 	step(ui, 3, "Comprobación")
 	switch {
-	case errors.Is(e, aulaglobal.ErrTokenExpired):
+	case errors.Is(err, aulaglobal.ErrTokenExpired):
 		fmt.Fprintln(ui.Out, "! El token ha caducado o ya no es válido.\n  Repite setup para renovarlo.")
-	case e != nil:
+	case err != nil:
 		fmt.Fprintln(ui.Out, "! No se pudo confirmar el token.\n  Comprueba auth_status o repite setup.")
 	default:
 		fmt.Fprintln(ui.Out, "✓ Token válido. Hola, "+auth.Fullname)
@@ -288,31 +288,31 @@ func reportToken(ui termui.UI, auth aulaglobal.Auth, e error) {
 }
 
 // saveTokenMeta records when the token was obtained, next to the token file.
-func saveTokenMeta(token string, force bool) error {
+func saveTokenMeta(tokenFile string, force bool) error {
 	meta, _ := json.Marshal(map[string]string{"obtained_at": time.Now().UTC().Format(time.RFC3339)})
-	return aulaglobal.SaveSecret(token+".meta.json", string(meta), force)
+	return aulaglobal.SaveSecret(tokenFile+".meta.json", string(meta), force)
 }
 
 // cleanup deletes what an interrupted setup left next to a missing token.
-func cleanup(token string) error {
-	paths := []string{token + ".meta.json", token + ".private"}
-	temps, e := filepath.Glob(filepath.Join(filepath.Dir(token), ".token-*"))
-	if e != nil {
-		return e
+func cleanup(tokenFile string) error {
+	paths := []string{tokenFile + ".meta.json", tokenFile + ".private"}
+	temps, err := filepath.Glob(filepath.Join(filepath.Dir(tokenFile), ".token-*"))
+	if err != nil {
+		return err
 	}
 	paths = append(paths, temps...)
-	for _, p := range paths {
-		if e := os.Remove(p); e != nil && !os.IsNotExist(e) {
-			return e
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	return nil
 }
 
 // step prints the header of one of the four setup steps, in bold on a terminal.
-func step(ui termui.UI, n int, title string) {
-	header := fmt.Sprintf("── Paso %d de 4 · %s ──", n, title)
-	if f, ok := ui.Out.(*os.File); ok && runtime.GOOS != "windows" && term.IsTerminal(int(f.Fd())) {
+func step(ui termui.UI, number int, title string) {
+	header := fmt.Sprintf("── Paso %d de 4 · %s ──", number, title)
+	if info, ok := ui.Out.(*os.File); ok && runtime.GOOS != "windows" && term.IsTerminal(int(info.Fd())) {
 		if _, disabled := os.LookupEnv("NO_COLOR"); !disabled {
 			header = "\033[1m" + header + "\033[0m"
 		}

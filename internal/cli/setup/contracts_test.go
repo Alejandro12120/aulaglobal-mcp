@@ -15,8 +15,8 @@ import (
 )
 
 func TestAssistantContracts(t *testing.T) {
-	for _, a := range assistants.All() {
-		t.Run(a.ID(), func(t *testing.T) {
+	for _, assistant := range assistants.All() {
+		t.Run(assistant.ID(), func(t *testing.T) {
 			for _, tc := range []struct {
 				name, state, input, want string
 				present, yes, fail       bool
@@ -31,32 +31,32 @@ func TestAssistantContracts(t *testing.T) {
 				{"failure", "missing", "\n", "✗", true, false, true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					e, w, state, fail := assistantstest.Fixture(t, a, tc.present)
+					env, entry, state, fail := assistantstest.Fixture(t, assistant, tc.present)
 					*state = tc.state
 					if tc.present && (tc.state == "different" || tc.state == "identical") {
-						assistantstest.Seed(t, a, e, w, tc.state)
+						assistantstest.Seed(t, assistant, env, entry, tc.state)
 					}
 					if tc.fail {
 						*fail = true
-						e.WriteConfig = func(string, []byte) error { return errors.New("write failure") }
+						env.WriteConfig = func(string, []byte) error { return errors.New("write failure") }
 					}
 					var out strings.Builder
-					configureClients(termui.UI{In: strings.NewReader(tc.input), Out: &out}, e, w, []assistants.Assistant{a}, tc.yes)
-					s := out.String()
-					if !strings.Contains(s, tc.want) {
-						t.Fatal(s)
+					configureClients(termui.UI{In: strings.NewReader(tc.input), Out: &out}, env, entry, []assistants.Assistant{assistant}, tc.yes)
+					output := out.String()
+					if !strings.Contains(output, tc.want) {
+						t.Fatal(output)
 					}
-					if tc.fail && (!strings.Contains(s, "Alternativa manual") || strings.Contains(s, "private diagnostic")) {
-						t.Fatal(s)
+					if tc.fail && (!strings.Contains(output, "Alternativa manual") || strings.Contains(output, "private diagnostic")) {
+						t.Fatal(output)
 					}
-					if tc.state == "identical" && strings.Contains(s, "›") {
-						t.Fatal("prompt for identical", s)
+					if tc.state == "identical" && strings.Contains(output, "›") {
+						t.Fatal("prompt for identical", output)
 					}
-					if tc.yes && strings.Contains(s, "›") {
-						t.Fatal("prompt with --yes", s)
+					if tc.yes && strings.Contains(output, "›") {
+						t.Fatal("prompt with --yes", output)
 					}
-					if (tc.want == "actualizado" || tc.want == "añadido") && a.Inspect(e, w).State != assistants.Identical {
-						t.Fatal("not identical after apply", a.Inspect(e, w))
+					if (tc.want == "actualizado" || tc.want == "añadido") && assistant.Inspect(env, entry).State != assistants.Identical {
+						t.Fatal("not identical after apply", assistant.Inspect(env, entry))
 					}
 				})
 			}
@@ -65,28 +65,28 @@ func TestAssistantContracts(t *testing.T) {
 }
 
 func TestUnsafeFilesAndBackups(t *testing.T) {
-	for _, a := range assistants.All() {
-		if a.ID() == "claude-code" {
+	for _, assistant := range assistants.All() {
+		if assistant.ID() == "claude-code" {
 			continue
 		}
 		for _, bad := range []string{"{ // private\n}", `{"x":1,"x":2}`, `null`, `[]`, `{"mcpServers":null}`, `{"mcp":null}`} {
-			if a.ID() == "codex" {
+			if assistant.ID() == "codex" {
 				bad = "[broken"
 			}
-			t.Run(a.ID()+bad, func(t *testing.T) {
-				e, w, _, _ := assistantstest.Fixture(t, a, true)
-				p := assistantstest.ConfigPath(a, e)
+			t.Run(assistant.ID()+bad, func(t *testing.T) {
+				env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
+				configPath := assistantstest.ConfigPath(assistant, env)
 				// Skip shapes that are valid unrelated keys for this particular client.
-				if a.ID() == "opencode" && bad == `{"mcpServers":null}` {
+				if assistant.ID() == "opencode" && bad == `{"mcpServers":null}` {
 					return
 				}
-				if a.ID() != "opencode" && bad == `{"mcp":null}` {
+				if assistant.ID() != "opencode" && bad == `{"mcp":null}` {
 					return
 				}
-				os.WriteFile(p, []byte(bad), 0600)
+				os.WriteFile(configPath, []byte(bad), 0600)
 				var out strings.Builder
-				configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, e, w, []assistants.Assistant{a}, true)
-				after, _ := os.ReadFile(p)
+				configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, env, entry, []assistants.Assistant{assistant}, true)
+				after, _ := os.ReadFile(configPath)
 				if string(after) != bad || !strings.Contains(out.String(), "✗") {
 					t.Fatal(out.String(), string(after))
 				}
@@ -95,15 +95,15 @@ func TestUnsafeFilesAndBackups(t *testing.T) {
 				}
 			})
 		}
-		t.Run(a.ID()+" backup", func(t *testing.T) {
-			e, w, _, _ := assistantstest.Fixture(t, a, true)
-			assistantstest.Seed(t, a, e, w, "different")
-			p := assistantstest.ConfigPath(a, e)
-			before, _ := os.ReadFile(p)
-			if err := a.Apply(e, w, true); err != nil {
+		t.Run(assistant.ID()+" backup", func(t *testing.T) {
+			env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
+			assistantstest.Seed(t, assistant, env, entry, "different")
+			configPath := assistantstest.ConfigPath(assistant, env)
+			before, _ := os.ReadFile(configPath)
+			if err := assistant.Apply(env, entry, true); err != nil {
 				t.Fatal(err)
 			}
-			backup, err := os.ReadFile(p + ".bak")
+			backup, err := os.ReadFile(configPath + ".bak")
 			if err != nil || string(backup) != string(before) {
 				t.Fatal("backup mismatch", err)
 			}
@@ -115,11 +115,11 @@ func TestOtherClaudeScopes(t *testing.T) {
 	for _, scope := range []string{"local", "project"} {
 		for _, answer := range []string{"\n", "n\n"} {
 			t.Run(scope+answer, func(t *testing.T) {
-				a := assistantstest.ByID(t, "claude-code")
-				e, w, state, _ := assistantstest.Fixture(t, a, true)
+				assistant := assistantstest.ByID(t, "claude-code")
+				env, entry, state, _ := assistantstest.Fixture(t, assistant, true)
 				*state = scope
 				var out strings.Builder
-				configureClients(termui.UI{In: strings.NewReader(answer), Out: &out}, e, w, []assistants.Assistant{a}, false)
+				configureClients(termui.UI{In: strings.NewReader(answer), Out: &out}, env, entry, []assistants.Assistant{assistant}, false)
 				want := "actualizado"
 				if answer == "n\n" {
 					want = "omitido"
@@ -140,12 +140,12 @@ func TestClaudeUnknownInspection(t *testing.T) {
 		output string
 		err    error
 	}{{"Scope: Unknown config", nil}, {"private diagnostic", errors.New("offline")}} {
-		a := assistantstest.ByID(t, "claude-code")
-		e, w, _, _ := assistantstest.Fixture(t, a, true)
+		assistant := assistantstest.ByID(t, "claude-code")
+		env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
 		calls := 0
-		e.RunClaude = func(context.Context, string, ...string) ([]byte, error) { calls++; return []byte(tc.output), tc.err }
+		env.RunClaude = func(context.Context, string, ...string) ([]byte, error) { calls++; return []byte(tc.output), tc.err }
 		var out strings.Builder
-		configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, e, w, []assistants.Assistant{a}, true)
+		configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, env, entry, []assistants.Assistant{assistant}, true)
 		if calls != 1 || !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
 			t.Fatal(out.String(), calls)
 		}
@@ -153,36 +153,36 @@ func TestClaudeUnknownInspection(t *testing.T) {
 }
 
 func TestAntigravityGeneratorFailure(t *testing.T) {
-	a := assistantstest.ByID(t, "antigravity")
-	e, w, _, _ := assistantstest.Fixture(t, a, true)
-	e.LookPath = func(n string) (string, error) {
+	assistant := assistantstest.ByID(t, "antigravity")
+	env, entry, _, _ := assistantstest.Fixture(t, assistant, true)
+	env.LookPath = func(n string) (string, error) {
 		if n == "agy" {
 			return "fake-agy", nil
 		}
 		return "", os.ErrNotExist
 	}
-	e.GenerateAntigravity = func(string, string, []string) (map[string]any, error) { return nil, errors.New("private diagnostic") }
+	env.GenerateAntigravity = func(string, string, []string) (map[string]any, error) { return nil, errors.New("private diagnostic") }
 	var out strings.Builder
-	configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, e, w, []assistants.Assistant{a}, true)
+	configureClients(termui.UI{In: strings.NewReader(""), Out: &out}, env, entry, []assistants.Assistant{assistant}, true)
 	if !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
 		t.Fatal(out.String())
 	}
-	p := assistantstest.ConfigPath(a, e)
-	if _, err := os.Stat(p); !os.IsNotExist(err) {
+	configPath := assistantstest.ConfigPath(assistant, env)
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		t.Fatal("written after generator failure")
 	}
 }
 
 func TestOpenCodeJSONCIsLeftAlone(t *testing.T) {
-	e, w, _, _ := assistantstest.Fixture(t, assistantstest.ByID(t, "opencode"), true)
-	dir := userpaths.OpenCode(e.Home, e.XDGConfigHome)
+	env, entry, _, _ := assistantstest.Fixture(t, assistantstest.ByID(t, "opencode"), true)
+	dir := userpaths.OpenCode(env.Home, env.XDGConfigHome)
 	path := filepath.Join(dir, "opencode.jsonc")
 	old := []byte("{ // keep\n}")
-	if e := os.WriteFile(path, old, 0600); e != nil {
-		t.Fatal(e)
+	if err := os.WriteFile(path, old, 0600); err != nil {
+		t.Fatal(err)
 	}
 	var out strings.Builder
-	configureClients(termui.UI{In: strings.NewReader("\n"), Out: &out}, e, w, []assistants.Assistant{assistantstest.ByID(t, "opencode")}, false)
+	configureClients(termui.UI{In: strings.NewReader("\n"), Out: &out}, env, entry, []assistants.Assistant{assistantstest.ByID(t, "opencode")}, false)
 	b, _ := os.ReadFile(path)
 	if string(b) != string(old) || !strings.Contains(out.String(), "Alternativa manual") {
 		t.Fatal(out.String())

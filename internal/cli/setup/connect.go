@@ -22,42 +22,44 @@ const privacyNotice = `· Privacidad:
 
 // connectAssistants is step 4 of setup: the privacy notice, then detection and
 // configuration. It reports whether any assistant failed.
-func connectAssistants(ui termui.UI, e assistants.Env, want assistants.Entry, selected []assistants.Assistant, yes bool) bool {
+func connectAssistants(ui termui.UI, env assistants.Env, want assistants.Entry, selected []assistants.Assistant, yes bool) bool {
 	step(ui, 4, "Conectar con tus asistentes")
 	fmt.Fprint(ui.Out, privacyNotice+"\n")
-	return configureClients(ui, e, want, selected, yes)
+	return configureClients(ui, env, want, selected, yes)
 }
 
 // foundClient is an assistant detected on this computer, with what setup found
 // in its configuration and what it ended up doing.
 type foundClient struct {
-	a       assistants.Assistant
-	i       assistants.Inspection
-	outcome string
-	changed bool
+	assistant  assistants.Assistant
+	inspection assistants.Inspection
+	outcome    string
+	changed    bool
 }
 
-func (c *foundClient) needsChange() bool { return c.i.State != assistants.Identical && c.i.Err == nil }
+func (client *foundClient) needsChange() bool {
+	return client.inspection.State != assistants.Identical && client.inspection.Err == nil
+}
 
-// configureClients detects the assistants in list and adds or updates the
+// configureClients detects the assistants in candidates and adds or updates the
 // aulaglobal entry in each one the user agrees to. It reports whether any
 // assistant failed.
-func configureClients(ui termui.UI, e assistants.Env, w assistants.Entry, list []assistants.Assistant, yes bool) bool {
-	clients := listFoundClients(ui, e, w, list)
+func configureClients(ui termui.UI, env assistants.Env, want assistants.Entry, candidates []assistants.Assistant, yes bool) bool {
+	clients := listFoundClients(ui, env, want, candidates)
 	all := yes
 	if !yes && countNeedingChange(clients) >= 2 {
 		all = askConfigureAll(ui, clients)
 	}
 	failed := false
-	for _, c := range clients {
+	for _, client := range clients {
 		fmt.Fprintln(ui.Out)
-		if c.configure(ui, e, w, all) {
+		if client.configure(ui, env, want, all) {
 			failed = true
 		}
 	}
 	fmt.Fprintln(ui.Out, "\nResumen:")
-	for _, c := range clients {
-		fmt.Fprintln(ui.Out, "  "+c.a.Name()+": "+c.outcome)
+	for _, client := range clients {
+		fmt.Fprintln(ui.Out, "  "+client.assistant.Name()+": "+client.outcome)
 	}
 	changed := printReloadHints(ui, clients)
 	if changed {
@@ -68,17 +70,17 @@ func configureClients(ui termui.UI, e assistants.Env, w assistants.Entry, list [
 	return failed
 }
 
-func listFoundClients(ui termui.UI, e assistants.Env, w assistants.Entry, list []assistants.Assistant) []*foundClient {
+func listFoundClients(ui termui.UI, env assistants.Env, want assistants.Entry, candidates []assistants.Assistant) []*foundClient {
 	var clients []*foundClient
 	var absent []string
 	fmt.Fprintln(ui.Out, "Asistentes encontrados en este ordenador:")
-	for _, a := range list {
-		if !a.Detect(e) {
-			absent = append(absent, a.Name())
+	for _, assistant := range candidates {
+		if !assistant.Detect(env) {
+			absent = append(absent, assistant.Name())
 			continue
 		}
-		clients = append(clients, &foundClient{a: a, i: a.Inspect(e, w)})
-		fmt.Fprintln(ui.Out, "  ✓ "+a.Name())
+		clients = append(clients, &foundClient{assistant: assistant, inspection: assistant.Inspect(env, want)})
+		fmt.Fprintln(ui.Out, "  ✓ "+assistant.Name())
 	}
 	if len(clients) == 0 {
 		fmt.Fprintln(ui.Out, "  Ninguno.")
@@ -90,13 +92,13 @@ func listFoundClients(ui termui.UI, e assistants.Env, w assistants.Entry, list [
 }
 
 func countNeedingChange(clients []*foundClient) int {
-	n := 0
-	for _, c := range clients {
-		if c.needsChange() {
-			n++
+	count := 0
+	for _, client := range clients {
+		if client.needsChange() {
+			count++
 		}
 	}
-	return n
+	return count
 }
 
 // askConfigureAll asks once for all assistants. Answering "n" skips every
@@ -106,9 +108,9 @@ func askConfigureAll(ui termui.UI, clients []*foundClient) bool {
 	answer := strings.ToLower(strings.TrimSpace(ui.Line()))
 	fmt.Fprintln(ui.Out)
 	if answer == "n" {
-		for _, c := range clients {
-			if c.needsChange() {
-				c.outcome = "omitido"
+		for _, client := range clients {
+			if client.needsChange() {
+				client.outcome = "omitido"
 			}
 		}
 	}
@@ -117,49 +119,49 @@ func askConfigureAll(ui termui.UI, clients []*foundClient) bool {
 
 // configure explains what it found, asks (unless all is set) and applies the
 // change. It reports whether the assistant could not be configured.
-func (c *foundClient) configure(ui termui.UI, e assistants.Env, w assistants.Entry, all bool) (failed bool) {
-	a, i := c.a, c.i
+func (client *foundClient) configure(ui termui.UI, env assistants.Env, want assistants.Entry, all bool) (failed bool) {
+	assistant, inspection := client.assistant, client.inspection
 	fail := func() bool {
-		c.outcome = "falló (ver instrucciones arriba)"
-		fmt.Fprintln(ui.Out, "✗ "+a.Name()+": no se pudo configurar con seguridad.")
-		fmt.Fprintln(ui.Out, a.Manual(w))
+		client.outcome = "falló (ver instrucciones arriba)"
+		fmt.Fprintln(ui.Out, "✗ "+assistant.Name()+": no se pudo configurar con seguridad.")
+		fmt.Fprintln(ui.Out, assistant.Manual(want))
 		return true
 	}
-	if i.Err != nil {
+	if inspection.Err != nil {
 		return fail()
 	}
-	if i.State == assistants.Identical {
-		c.outcome = "ya estaba"
-		fmt.Fprintln(ui.Out, "✓ "+a.Name()+": ya está configurado.")
+	if inspection.State == assistants.Identical {
+		client.outcome = "ya estaba"
+		fmt.Fprintln(ui.Out, "✓ "+assistant.Name()+": ya está configurado.")
 		return false
 	}
-	q := "¿Añadir AulaGlobal a " + a.Name() + "?"
-	if i.State == assistants.Different {
-		fmt.Fprintln(ui.Out, "! "+a.Name()+": configuración diferente ("+i.Detail+").")
-		fmt.Fprintln(ui.Out, "  Se usará: "+w.Exe+" --transport stdio")
-		q = "¿Actualizarlo?"
-	} else if i.State == assistants.OtherScope {
-		fmt.Fprintln(ui.Out, "! "+a.Name()+": "+i.Detail)
-		if i.Scope == "local" {
-			q = "¿Mover AulaGlobal al ámbito de usuario?"
+	question := "¿Añadir AulaGlobal a " + assistant.Name() + "?"
+	if inspection.State == assistants.Different {
+		fmt.Fprintln(ui.Out, "! "+assistant.Name()+": configuración diferente ("+inspection.Detail+").")
+		fmt.Fprintln(ui.Out, "  Se usará: "+want.Exe+" --transport stdio")
+		question = "¿Actualizarlo?"
+	} else if inspection.State == assistants.OtherScope {
+		fmt.Fprintln(ui.Out, "! "+assistant.Name()+": "+inspection.Detail)
+		if inspection.Scope == "local" {
+			question = "¿Mover AulaGlobal al ámbito de usuario?"
 		} else {
-			q = "¿Añadir también AulaGlobal al ámbito de usuario?"
+			question = "¿Añadir también AulaGlobal al ámbito de usuario?"
 		}
 	}
-	if c.outcome == "omitido" || !ui.Confirm(q, all) {
-		c.outcome = "omitido"
-		fmt.Fprintln(ui.Out, "· "+a.Name()+": omitido.")
+	if client.outcome == "omitido" || !ui.Confirm(question, all) {
+		client.outcome = "omitido"
+		fmt.Fprintln(ui.Out, "· "+assistant.Name()+": omitido.")
 		return false
 	}
-	if err := a.Apply(e, w, i.State != assistants.Missing); err != nil {
+	if err := assistant.Apply(env, want, inspection.State != assistants.Missing); err != nil {
 		return fail()
 	}
-	c.changed = true
-	c.outcome = "añadido"
-	if i.State != assistants.Missing {
-		c.outcome = "actualizado"
+	client.changed = true
+	client.outcome = "añadido"
+	if inspection.State != assistants.Missing {
+		client.outcome = "actualizado"
 	}
-	fmt.Fprintln(ui.Out, "✓ "+a.Name()+": "+c.outcome+".")
+	fmt.Fprintln(ui.Out, "✓ "+assistant.Name()+": "+client.outcome+".")
 	return false
 }
 
@@ -167,13 +169,13 @@ func (c *foundClient) configure(ui termui.UI, e assistants.Env, w assistants.Ent
 // the new entry. It reports whether any assistant was changed.
 func printReloadHints(ui termui.UI, clients []*foundClient) bool {
 	changed := false
-	for _, c := range clients {
-		if c.changed {
+	for _, client := range clients {
+		if client.changed {
 			if !changed {
 				fmt.Fprintln(ui.Out)
 			}
 			changed = true
-			fmt.Fprintln(ui.Out, c.a.Name()+": "+c.a.Reload())
+			fmt.Fprintln(ui.Out, client.assistant.Name()+": "+client.assistant.Reload())
 		}
 	}
 	return changed
