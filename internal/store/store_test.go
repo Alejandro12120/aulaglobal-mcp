@@ -16,8 +16,8 @@ import (
 )
 
 func TestSanitizeAndCollisions(t *testing.T) {
-	for _, s := range []string{"../../etc/passwd", "\\..\\evil", "..hidden", "NUL", "CON.txt", "a\x00\nb", strings.Repeat("x", 300)} {
-		got := Sanitize(s)
+	for _, store := range []string{"../../etc/passwd", "\\..\\evil", "..hidden", "NUL", "CON.txt", "a\x00\nb", strings.Repeat("x", 300)} {
+		got := Sanitize(store)
 		if strings.ContainsAny(got, "/\\\x00\n") || strings.Contains(got, "..") || strings.HasPrefix(got, ".") || len(got) > 101 {
 			t.Fatalf("unsafe %q", got)
 		}
@@ -36,7 +36,7 @@ func TestSanitizeAndCollisions(t *testing.T) {
 }
 func TestManyDownloads(t *testing.T) {
 	var active, peak atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := active.Add(1)
 		defer active.Add(-1)
 		for p := peak.Load(); n > p; p = peak.Load() {
@@ -48,24 +48,24 @@ func TestManyDownloads(t *testing.T) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, "hello")
 	}))
-	defer ts.Close()
-	s, e := Open(t.TempDir(), 1024, 4)
-	if e != nil {
-		t.Fatal(e)
+	defer moodle.Close()
+	store, err := Open(t.TempDir(), 1024, 4)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer s.Root.Close()
-	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
-	if e := c.SetMaxRPS(aulaglobal.MaxMaxRPS); e != nil { // 200 files must not wait on the default politeness limit
-		t.Fatal(e)
+	defer store.Root.Close()
+	client := aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"})
+	if err := client.SetMaxRPS(aulaglobal.MaxMaxRPS); err != nil { // 200 files must not wait on the default politeness limit
+		t.Fatal(err)
 	}
 	files := []aulaglobal.File{}
 	size := int64(5)
 	for i := 0; i < 200; i++ {
-		files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "../../a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/file", Size: &size, Modified: 1700000000})
+		files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "../../a.txt", Handle: fmt.Sprint(i), URL: moodle.URL + "/file", Size: &size, Modified: 1700000000})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for _, r := range dl(s, ctx, c, files) {
+	for _, r := range dl(store, ctx, client, files) {
 		if r.Status != "downloaded" {
 			t.Fatalf("%+v", r)
 		}
@@ -73,13 +73,13 @@ func TestManyDownloads(t *testing.T) {
 	if peak.Load() > 4 {
 		t.Fatal("unbounded concurrency")
 	}
-	for _, r := range dl(s, ctx, c, files) {
+	for _, r := range dl(store, ctx, client, files) {
 		if r.Status != "skipped" {
 			t.Fatalf("%+v", r)
 		}
 	}
 	cancel()
-	if r := dl(s, ctx, c, files[:1])[0]; r.Status != "error" {
+	if r := dl(store, ctx, client, files[:1])[0]; r.Status != "error" {
 		t.Fatal("cancellation ignored")
 	}
 }
@@ -90,89 +90,89 @@ func TestRejectBadDownloads(t *testing.T) {
 	}{
 		{"text/html", "<html>login", 11}, {"application/json", `{"errorcode":"invalidtoken","exception":"x"}`, 42}, {"text/plain", "short", 100},
 	} {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", tc.typ)
 			fmt.Fprint(w, tc.body)
 		}))
-		s, e := Open(t.TempDir(), 1024, 2)
-		if e != nil {
-			t.Fatal(e)
+		store, err := Open(t.TempDir(), 1024, 2)
+		if err != nil {
+			t.Fatal(err)
 		}
-		f := aulaglobal.File{Filename: "x.pdf", Handle: "x", URL: ts.URL, Size: &tc.size}
-		defer s.Root.Close()
-		defer ts.Close()
-		r := dl(s, context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
+		f := aulaglobal.File{Filename: "x.pdf", Handle: "x", URL: moodle.URL, Size: &tc.size}
+		defer store.Root.Close()
+		defer moodle.Close()
+		r := dl(store, context.Background(), aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
 		if r.Status != "error" {
 			t.Fatalf("saved invalid file %+v", r)
 		}
-		if _, e = s.Root.Stat(r.Path); !os.IsNotExist(e) {
+		if _, err = store.Root.Stat(r.Path); !os.IsNotExist(err) {
 			t.Fatal("destination exists")
 		}
-		s.Root.Close()
-		ts.Close()
+		store.Root.Close()
+		moodle.Close()
 	}
 }
 func TestRootConfinement(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0600)
-	if e := os.Symlink(outside, filepath.Join(root, "escape")); e != nil {
-		t.Skipf("symlink unavailable: %v", e)
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
 	}
-	s, e := Open(root, 1024, 1)
-	if e != nil {
-		t.Fatal(e)
+	store, err := Open(root, 1024, 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer s.Root.Close()
+	defer store.Root.Close()
 	for _, p := range []string{"../secret.txt", filepath.Join(outside, "secret.txt"), "escape/secret.txt"} {
-		if _, e := s.Read(context.Background(), p, 0, 100); e == nil {
+		if _, err := store.Read(context.Background(), p, 0, 100); err == nil {
 			t.Fatalf("escaped via %s", p)
 		}
 	}
-	if e = s.Root.MkdirAll("escape/new", 0700); e == nil {
+	if err = store.Root.MkdirAll("escape/new", 0700); err == nil {
 		t.Fatal("write escape")
 	}
 	os.WriteFile(filepath.Join(root, "ok.txt"), []byte("alpha hello world"), 0600)
-	matches, e := s.Search(context.Background(), "hello", false, 10)
-	if e != nil || len(matches) != 1 {
-		t.Fatalf("%v %v", matches, e)
+	matches, err := store.Search(context.Background(), "hello", false, 10)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("%v %v", matches, err)
 	}
 }
 
 func TestReadingPagingAndSearchLimits(t *testing.T) {
 	dir := t.TempDir()
-	s, e := Open(dir, 1024, 1)
-	if e != nil {
-		t.Fatal(e)
+	store, err := Open(dir, 1024, 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer s.Root.Close()
+	defer store.Root.Close()
 	for name, content := range map[string]string{"unicode.txt": "ábc", "page.html": "<script>bad</script><p>hola &amp; mundo</p>", "file.pdf": "%PDF-fake", "large.txt": strings.Repeat("a", 10000)} {
-		if e := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); e != nil {
-			t.Fatal(e)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
 		}
 	}
 	ctx := context.Background()
-	r, e := s.Read(ctx, "unicode.txt", 0, 2)
-	if e != nil || r.Text != "á" || r.NextOffset != 2 {
-		t.Fatalf("%+v %v", r, e)
+	r, err := store.Read(ctx, "unicode.txt", 0, 2)
+	if err != nil || r.Text != "á" || r.NextOffset != 2 {
+		t.Fatalf("%+v %v", r, err)
 	}
-	if _, e = s.Read(ctx, "unicode.txt", 1, 2); e == nil {
+	if _, err = store.Read(ctx, "unicode.txt", 1, 2); err == nil {
 		t.Fatal("accepted partial UTF-8 offset")
 	}
-	if _, e = s.Read(ctx, "unicode.txt", 0, 1); e == nil {
+	if _, err = store.Read(ctx, "unicode.txt", 0, 1); err == nil {
 		t.Fatal("accepted non-progressing page")
 	}
-	r, e = s.Read(ctx, "page.html", 0, 100)
-	if e != nil || strings.Contains(r.Text, "bad") || !strings.Contains(r.Text, "hola & mundo") {
-		t.Fatalf("%+v %v", r, e)
+	r, err = store.Read(ctx, "page.html", 0, 100)
+	if err != nil || strings.Contains(r.Text, "bad") || !strings.Contains(r.Text, "hola & mundo") {
+		t.Fatalf("%+v %v", r, err)
 	}
-	r, e = s.Read(ctx, "file.pdf", 0, 100)
-	if e != nil || r.Text != "" || r.Note == "" {
-		t.Fatalf("%+v %v", r, e)
+	r, err = store.Read(ctx, "file.pdf", 0, 100)
+	if err != nil || r.Text != "" || r.Note == "" {
+		t.Fatalf("%+v %v", r, err)
 	}
-	matches, e := s.Search(ctx, "a+", true, 100)
-	if e != nil {
-		t.Fatal(e)
+	matches, err := store.Search(ctx, "a+", true, 100)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, m := range matches {
 		if len(m.Snippet) > 240 {
@@ -184,63 +184,63 @@ func TestReadingPagingAndSearchLimits(t *testing.T) {
 // A manifest written by an older Windows build must also work on Unix.
 func TestManifestPortablePaths(t *testing.T) {
 	dir := t.TempDir()
-	s, e := Open(dir, 1024, 1)
-	if e != nil {
-		t.Fatal(e)
+	store, err := Open(dir, 1024, 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer s.Root.Close()
-	if e = s.atomic(".aulaglobal-cache/manifest.json", []byte(`{"h":{"path":"Course\\Section\\notes.txt","size":null,"timemodified":0}}`)); e != nil {
-		t.Fatal(e)
+	defer store.Root.Close()
+	if err = store.atomic(".aulaglobal-cache/manifest.json", []byte(`{"h":{"path":"Course\\Section\\notes.txt","size":null,"timemodified":0}}`)); err != nil {
+		t.Fatal(err)
 	}
-	paths, e := s.paths([]aulaglobal.File{{Handle: "h", CourseID: 1, Filename: "notes.txt"}})
-	if e != nil || paths["h"] != "Course/Section/notes.txt" {
-		t.Fatal(paths, e)
+	paths, err := store.paths([]aulaglobal.File{{Handle: "h", CourseID: 1, Filename: "notes.txt"}})
+	if err != nil || paths["h"] != "Course/Section/notes.txt" {
+		t.Fatal(paths, err)
 	}
-	b, e := s.cacheRead(".aulaglobal-cache/manifest.json")
-	if e != nil || strings.Contains(string(b), `\\`) {
-		t.Fatal(string(b), e)
+	b, err := store.cacheRead(".aulaglobal-cache/manifest.json")
+	if err != nil || strings.Contains(string(b), `\\`) {
+		t.Fatal(string(b), err)
 	}
 }
 
 func TestPortablePathRoundTrip(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "portable needle")
 	}))
-	defer ts.Close()
-	s, err := Open(t.TempDir(), 1024, 1)
+	defer moodle.Close()
+	store, err := Open(t.TempDir(), 1024, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Root.Close()
-	f := aulaglobal.File{Handle: "portable", CourseID: 1, CourseName: "Course", Section: "Section", Filename: "notes.txt", URL: ts.URL}
+	defer store.Root.Close()
+	f := aulaglobal.File{Handle: "portable", CourseID: 1, CourseName: "Course", Section: "Section", Filename: "notes.txt", URL: moodle.URL}
 	const want = "Course/Section/notes.txt"
 	if got := Path(f); got != want {
 		t.Fatalf("Path = %q, want %q", got, want)
 	}
-	result := dl(s, context.Background(), aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
+	result := dl(store, context.Background(), aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"}), []aulaglobal.File{f})[0]
 	if result.Status != "downloaded" || result.Path != want {
 		t.Fatalf("download: %+v", result)
 	}
 	for _, prefix := range []string{"", "Course/Section", want} {
-		matches, err := s.Search(context.Background(), "needle", false, 10, prefix)
+		matches, err := store.Search(context.Background(), "needle", false, 10, prefix)
 		if err != nil || len(matches) != 1 || matches[0].Path != want {
 			t.Fatalf("search prefix %q: %+v, %v", prefix, matches, err)
 		}
-		r, err := s.Read(context.Background(), matches[0].Path, 0, 100)
+		r, err := store.Read(context.Background(), matches[0].Path, 0, 100)
 		if err != nil || r.Path != want || r.Text != "portable needle" {
 			t.Fatalf("read: %+v, %v", r, err)
 		}
 	}
 	// Native Windows input is also accepted, while returned paths stay portable.
-	r, err := s.Read(context.Background(), filepath.FromSlash(want), 0, 100)
+	r, err := store.Read(context.Background(), filepath.FromSlash(want), 0, 100)
 	if err != nil || r.Path != want || r.Text != "portable needle" {
 		t.Fatalf("native read: %+v, %v", r, err)
 	}
 }
 
 // dl drops the batch-level error for tests that only inspect per-file results.
-func dl(s *Store, ctx context.Context, c *aulaglobal.Client, files []aulaglobal.File) []Result {
-	r, _ := s.Download(ctx, c, files)
+func dl(store *Store, ctx context.Context, client *aulaglobal.Client, files []aulaglobal.File) []Result {
+	r, _ := store.Download(ctx, client, files)
 	return r
 }
 
@@ -256,7 +256,7 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var fileCalls atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.HasSuffix(r.URL.Path, "/server.php") {
 					fmt.Fprint(w, tc.siteInfo)
 					return
@@ -265,22 +265,22 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprintf(w, `{"errorcode":%q,"exception":"x"}`, tc.fileCode)
 			}))
-			defer ts.Close()
-			s, e := Open(t.TempDir(), 1024, 2)
-			if e != nil {
-				t.Fatal(e)
+			defer moodle.Close()
+			store, err := Open(t.TempDir(), 1024, 2)
+			if err != nil {
+				t.Fatal(err)
 			}
-			defer s.Root.Close()
+			defer store.Root.Close()
 			files := []aulaglobal.File{}
 			for i := 0; i < 40; i++ {
-				files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/pluginfile.php/f"})
+				files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: moodle.URL + "/pluginfile.php/f"})
 			}
-			c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
-			_ = c.SetMaxRPS(aulaglobal.MaxMaxRPS) // 40 files: do not wait on the default politeness limit
-			res, e := s.Download(context.Background(), c, files)
+			client := aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"})
+			_ = client.SetMaxRPS(aulaglobal.MaxMaxRPS) // 40 files: do not wait on the default politeness limit
+			res, err := store.Download(context.Background(), client, files)
 			if !tc.abort {
-				if e != nil || len(res) != len(files) || fileCalls.Load() != int32(len(files)) {
-					t.Fatalf("per-file errors expected: %v, %d results, %d calls", e, len(res), fileCalls.Load())
+				if err != nil || len(res) != len(files) || fileCalls.Load() != int32(len(files)) {
+					t.Fatalf("per-file errors expected: %v, %d results, %d calls", err, len(res), fileCalls.Load())
 				}
 				for _, r := range res {
 					if r.Status != "error" || r.Error == "" {
@@ -289,8 +289,8 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(e, aulaglobal.ErrTokenExpired) || strings.Contains(e.Error(), "secret") {
-				t.Fatalf("want token expired error, got %v", e)
+			if !errors.Is(err, aulaglobal.ErrTokenExpired) || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("want token expired error, got %v", err)
 			}
 			if n := fileCalls.Load(); n > 4 {
 				t.Fatalf("batch not short-circuited: %d file requests", n)
@@ -303,25 +303,25 @@ func TestDownloadAbortsOnDeadToken(t *testing.T) {
 // grinding through every remaining file.
 func TestDownloadAbortsWhenRateLimited(t *testing.T) {
 	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Retry-After", "1") // real time: two 1 s pauses before giving up
 		w.WriteHeader(429)
 	}))
-	defer ts.Close()
-	s, e := Open(t.TempDir(), 1024, 2)
-	if e != nil {
-		t.Fatal(e)
+	defer moodle.Close()
+	store, err := Open(t.TempDir(), 1024, 2)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer s.Root.Close()
+	defer store.Root.Close()
 	files := []aulaglobal.File{}
 	for i := 0; i < 20; i++ {
-		files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: ts.URL + "/pluginfile.php/f"})
+		files = append(files, aulaglobal.File{CourseID: 1, ModuleID: 1, Filename: "a.txt", Handle: fmt.Sprint(i), URL: moodle.URL + "/pluginfile.php/f"})
 	}
-	c := aulaglobal.New(ts.URL, aulaglobal.StaticToken{Value: "secret"})
-	_, e = s.Download(context.Background(), c, files)
-	if !errors.Is(e, aulaglobal.ErrRateLimited) || !strings.Contains(e.Error(), "AulaGlobal está limitando las peticiones") || strings.Contains(e.Error(), "secret") {
-		t.Fatalf("got %v", e)
+	client := aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"})
+	_, err = store.Download(context.Background(), client, files)
+	if !errors.Is(err, aulaglobal.ErrRateLimited) || !strings.Contains(err.Error(), "AulaGlobal está limitando las peticiones") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("got %v", err)
 	}
 	if n := calls.Load(); n > 6 {
 		t.Fatalf("%d requests: the batch kept going after being throttled", n)

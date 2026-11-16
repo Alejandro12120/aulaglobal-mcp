@@ -33,40 +33,40 @@ type document struct {
 // A stuck third-party parser occupies a slot, rather than allowing unlimited goroutines.
 var extractionSlots = make(chan struct{}, 2)
 
-func supported(p string) bool {
-	switch strings.ToLower(filepath.Ext(p)) {
+func supported(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
 	case ".pdf", ".docx", ".pptx", ".odt", ".odp":
 		return true
 	}
-	return textLike(p)
+	return textLike(path)
 }
 func (s *Store) extract(ctx context.Context, path string) (document, error) {
-	var d document
-	if e := valid(path); e != nil {
-		return d, e
+	var doc document
+	if err := valid(path); err != nil {
+		return doc, err
 	}
-	f, e := s.Root.Open(path)
-	if e != nil {
-		return d, errors.New("cannot open file inside download root")
+	file, err := s.Root.Open(path)
+	if err != nil {
+		return doc, errors.New("cannot open file inside download root")
 	}
-	st, e := f.Stat()
-	if e != nil || !st.Mode().IsRegular() {
-		f.Close()
-		return d, errors.New("regular file required")
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		file.Close()
+		return doc, errors.New("regular file required")
 	}
 	if !supported(path) {
-		f.Close()
-		return d, nil
+		file.Close()
+		return doc, nil
 	}
-	if st.Size() > 64<<20 {
-		f.Close()
-		return d, errors.New("extraction input exceeds 64 MiB")
+	if info.Size() > 64<<20 {
+		file.Close()
+		return doc, errors.New("extraction input exceeds 64 MiB")
 	}
-	key := sha256.Sum256([]byte(fmt.Sprintf("v1:%s:%d:%d", path, st.Size(), st.ModTime().UnixNano())))
+	key := sha256.Sum256([]byte(fmt.Sprintf("v1:%s:%d:%d", path, info.Size(), info.ModTime().UnixNano())))
 	cache := filepath.Join(".aulaglobal-cache", hex.EncodeToString(key[:])+".json")
-	if b, err := s.cacheRead(cache); err == nil && json.Unmarshal(b, &d) == nil {
-		f.Close()
-		return d, nil
+	if content, err := s.cacheRead(cache); err == nil && json.Unmarshal(content, &doc) == nil {
+		file.Close()
+		return doc, nil
 	}
 	budget := s.ExtractTimeout
 	if budget <= 0 {
@@ -78,45 +78,45 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 	select {
 	case extractionSlots <- struct{}{}:
 	case <-ctx.Done():
-		f.Close()
-		return d, extractionWaitError(ctx)
+		file.Close()
+		return doc, extractionWaitError(ctx)
 	}
 	type result struct {
-		d document
-		e error
+		doc document
+		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		defer func() { <-extractionSlots; f.Close() }()
-		r := result{}
+		defer func() { <-extractionSlots; file.Close() }()
+		result := result{}
 		defer func() {
 			if recover() != nil {
-				r.e = errors.New("malformed document refused")
+				result.err = errors.New("malformed document refused")
 			}
-			if r.e == nil {
-				b, err := json.Marshal(r.d)
+			if result.err == nil {
+				content, err := json.Marshal(result.doc)
 				if err == nil {
-					err = s.atomic(cache, b)
+					err = s.atomic(cache, content)
 				}
-				r.e = err
+				result.err = err
 			}
-			done <- r
+			done <- result
 		}()
-		b, err := io.ReadAll(io.LimitReader(f, 64<<20+1))
+		content, err := io.ReadAll(io.LimitReader(file, 64<<20+1))
 		if err != nil {
-			r.e = err
+			result.err = err
 			return
 		}
-		r.d, r.e = s.decodeDocument(parseCtx, path, b)
+		result.doc, result.err = s.decodeDocument(parseCtx, path, content)
 	}()
 	select {
 	case <-ctx.Done():
-		return d, extractionWaitError(ctx)
-	case r := <-done:
-		if r.e != nil {
-			return d, r.e
+		return doc, extractionWaitError(ctx)
+	case result := <-done:
+		if result.err != nil {
+			return doc, result.err
 		}
-		return r.d, nil
+		return result.doc, nil
 	}
 }
 func extractionWaitError(ctx context.Context) error {
@@ -125,90 +125,90 @@ func extractionWaitError(ctx context.Context) error {
 	}
 	return errors.New("extraction in progress, retry shortly")
 }
-func decodeDocument(ctx context.Context, path string, b []byte) (document, error) {
-	return (&Store{}).decodeDocument(ctx, path, b)
+func decodeDocument(ctx context.Context, path string, content []byte) (document, error) {
+	return (&Store{}).decodeDocument(ctx, path, content)
 }
-func (s *Store) decodeDocument(ctx context.Context, path string, b []byte) (document, error) {
-	d := document{Pages: []Page{}}
+func (s *Store) decodeDocument(ctx context.Context, path string, content []byte) (document, error) {
+	doc := document{Pages: []Page{}}
 	add := func(page int, text string) error {
 		total := len(text)
-		for _, p := range d.Pages {
+		for _, p := range doc.Pages {
 			total += len(p.Text)
 		}
 		if total > textCap {
 			return errors.New("extracted text exceeds 8 MiB")
 		}
-		d.Pages = append(d.Pages, Page{page, strings.ToValidUTF8(text, "�")})
+		doc.Pages = append(doc.Pages, Page{page, strings.ToValidUTF8(text, "�")})
 		return nil
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".pdf":
 		if s.pdfExtractor != nil {
-			return s.pdfExtractor(ctx, b)
+			return s.pdfExtractor(ctx, content)
 		}
-		r, e := pdf.NewReader(bytes.NewReader(b), int64(len(b)))
-		if e != nil {
-			return d, errors.New("invalid PDF")
+		reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+		if err != nil {
+			return doc, errors.New("invalid PDF")
 		}
-		n := r.NumPage()
-		if n > 500 {
-			return d, errors.New("PDF exceeds 500 pages")
+		pageCount := reader.NumPage()
+		if pageCount > 500 {
+			return doc, errors.New("PDF exceeds 500 pages")
 		}
-		for i := 1; i <= n; i++ {
-			if e := ctx.Err(); e != nil {
-				return d, e
+		for i := 1; i <= pageCount; i++ {
+			if err := ctx.Err(); err != nil {
+				return doc, err
 			}
-			text, e := r.Page(i).GetPlainText(nil)
-			if e != nil {
-				return d, errors.New("PDF text extraction failed")
+			text, err := reader.Page(i).GetPlainText(nil)
+			if err != nil {
+				return doc, errors.New("PDF text extraction failed")
 			}
-			if e = add(i, text); e != nil {
-				return d, e
+			if err = add(i, text); err != nil {
+				return doc, err
 			}
 		}
 	case ".docx", ".pptx", ".odt", ".odp":
-		z, e := zip.NewReader(bytes.NewReader(b), int64(len(b)))
-		if e != nil {
-			return d, errors.New("invalid ZIP document")
+		archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+		if err != nil {
+			return doc, errors.New("invalid ZIP document")
 		}
-		if len(z.File) > 2048 {
-			return d, errors.New("ZIP entry limit")
+		if len(archive.File) > 2048 {
+			return doc, errors.New("ZIP entry limit")
 		}
 		var total uint64
-		for _, f := range z.File {
-			if f.UncompressedSize64 > 32<<20 || f.UncompressedSize64 > max(uint64(1), f.CompressedSize64)*200 {
-				return d, errors.New("ZIP expansion refused")
+		for _, entry := range archive.File {
+			if entry.UncompressedSize64 > 32<<20 || entry.UncompressedSize64 > max(uint64(1), entry.CompressedSize64)*200 {
+				return doc, errors.New("ZIP expansion refused")
 			}
-			total += f.UncompressedSize64
+			total += entry.UncompressedSize64
 			if total > 64<<20 {
-				return d, errors.New("ZIP size limit")
+				return doc, errors.New("ZIP size limit")
 			}
 		}
-		sort.Slice(z.File, func(i, j int) bool { return z.File[i].Name < z.File[j].Name })
-		for _, f := range z.File {
-			name := f.Name
+		sort.Slice(archive.File, func(i, j int) bool { return archive.File[i].Name < archive.File[j].Name })
+		for _, entry := range archive.File {
+			name := entry.Name
 			selected := name == "word/document.xml" || name == "content.xml" || (strings.HasPrefix(name, "ppt/slides/slide") && strings.HasSuffix(name, ".xml"))
 			if !selected {
 				continue
 			}
-			fd, e := f.Open()
-			if e != nil {
-				return d, e
+			entryFile, err := entry.Open()
+			if err != nil {
+				return doc, err
 			}
-			dec := xml.NewDecoder(io.LimitReader(fd, 32<<20+1))
+			decoder := xml.NewDecoder(io.LimitReader(entryFile, 32<<20+1))
 			var text strings.Builder
 			for {
-				if e = ctx.Err(); e != nil {
-					fd.Close()
-					return d, e
+				if err = ctx.Err(); err != nil {
+					entryFile.Close()
+					return doc, err
 				}
-				tok, err := dec.Token()
+				tok, err := decoder.Token()
 				if err == io.EOF {
 					break
 				}
 				if err != nil {
-					fd.Close()
-					return d, errors.New("invalid document XML")
+					entryFile.Close()
+					return doc, errors.New("invalid document XML")
 				}
 				switch t := tok.(type) {
 				case xml.CharData:
@@ -219,56 +219,56 @@ func (s *Store) decodeDocument(ctx context.Context, path string, b []byte) (docu
 					}
 				}
 				if text.Len() > textCap {
-					fd.Close()
-					return d, errors.New("XML output limit")
+					entryFile.Close()
+					return doc, errors.New("XML output limit")
 				}
 			}
-			fd.Close()
+			entryFile.Close()
 			number := 0
 			if strings.HasPrefix(name, "ppt/slides/slide") {
 				fmt.Sscanf(name, "ppt/slides/slide%d.xml", &number)
 			}
-			if e = add(number, text.String()); e != nil {
-				return d, e
+			if err = add(number, text.String()); err != nil {
+				return doc, err
 			}
 		}
 	default:
-		if len(b) > textCap {
-			return d, errors.New("text exceeds 8 MiB")
+		if len(content) > textCap {
+			return doc, errors.New("text exceeds 8 MiB")
 		}
-		if !utf8.Valid(b) || bytes.IndexByte(b, 0) >= 0 {
-			return d, nil
+		if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+			return doc, nil
 		}
-		text := string(b)
+		text := string(content)
 		if ext := strings.ToLower(filepath.Ext(path)); ext == ".html" || ext == ".htm" {
 			text = PlainHTML(text)
 		}
-		if e := add(0, text); e != nil {
-			return d, e
+		if err := add(0, text); err != nil {
+			return doc, err
 		}
 	}
-	return d, nil
+	return doc, nil
 }
 func (d document) text() string {
-	var b strings.Builder
-	for _, p := range d.Pages {
-		if p.Number > 0 {
-			fmt.Fprintf(&b, "\n[Page %d]\n", p.Number)
+	var builder strings.Builder
+	for _, page := range d.Pages {
+		if page.Number > 0 {
+			fmt.Fprintf(&builder, "\n[Page %d]\n", page.Number)
 		}
-		b.WriteString(p.Text)
+		builder.WriteString(page.Text)
 	}
-	return b.String()
+	return builder.String()
 }
 
 func (s *Store) cacheRead(path string) ([]byte, error) {
-	f, e := s.Root.Open(path)
-	if e != nil {
-		return nil, e
+	file, err := s.Root.Open(path)
+	if err != nil {
+		return nil, err
 	}
-	defer f.Close()
-	b, e := io.ReadAll(io.LimitReader(f, 2*textCap+1))
-	if len(b) > 2*textCap {
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, 2*textCap+1))
+	if len(content) > 2*textCap {
 		return nil, errors.New("cache too large")
 	}
-	return b, e
+	return content, err
 }
