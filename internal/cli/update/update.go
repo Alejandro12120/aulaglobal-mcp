@@ -35,18 +35,18 @@ func Run(args []string, version string) error {
 	return runUpdate(ctx, args, os.Stdin, os.Stdout, selfupdate.New(version), selfupdate.InContainer())
 }
 
-func runUpdate(ctx context.Context, args []string, in io.Reader, out io.Writer, u *selfupdate.Updater, inContainer bool) error {
+func runUpdate(ctx context.Context, args []string, input io.Reader, out io.Writer, updater *selfupdate.Updater, inContainer bool) error {
 	flags := flag.NewFlagSet("update", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	check := flags.Bool("check", false, "")
 	yes := flags.Bool("yes", false, "")
 	force := flags.Bool("force", false, "")
-	if e := flags.Parse(args); e != nil {
-		if errors.Is(e, flag.ErrHelp) {
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(out, updateUsage)
 			return nil
 		}
-		return fmt.Errorf("%w\n\n%s", e, updateUsage)
+		return fmt.Errorf("%w\n\n%s", err, updateUsage)
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("argumento inesperado %q\n\n%s", flags.Arg(0), updateUsage)
@@ -55,11 +55,11 @@ func runUpdate(ctx context.Context, args []string, in io.Reader, out io.Writer, 
 		return errors.New("este programa se ejecuta en un contenedor y no se actualiza por sí mismo; descarga la imagen nueva (docker pull) y vuelve a crear el contenedor")
 	}
 
-	current, comparable := selfupdate.ParseVersion(u.Current)
+	current, comparable := selfupdate.ParseVersion(updater.Current)
 	if comparable {
 		fmt.Fprintf(out, "· Versión instalada: %s\n", current)
 	} else {
-		fmt.Fprintf(out, "· Versión instalada: %s (compilación local, no comparable)\n", u.Current)
+		fmt.Fprintf(out, "· Versión instalada: %s (compilación local, no comparable)\n", updater.Current)
 		if !*check && !*force {
 			return errors.New("esta es una compilación local y no se puede comparar con las versiones publicadas; usa --force para instalar de todos modos la última versión publicada")
 		}
@@ -67,18 +67,18 @@ func runUpdate(ctx context.Context, args []string, in io.Reader, out io.Writer, 
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	rel, e := u.Latest(ctx)
-	if e != nil {
-		return fmt.Errorf("no se pudo consultar la última versión: %w", e)
+	release, err := updater.Latest(ctx)
+	if err != nil {
+		return fmt.Errorf("no se pudo consultar la última versión: %w", err)
 	}
-	latest := rel.Version()
+	latest := release.Version()
 	fmt.Fprintf(out, "· Última versión publicada: %s\n", latest)
 	if comparable {
-		switch c := latest.Compare(current); {
-		case c == 0:
+		switch comparison := latest.Compare(current); {
+		case comparison == 0:
 			fmt.Fprintln(out, "✓ Ya tienes la última versión.")
 			return nil
-		case c < 0:
+		case comparison < 0:
 			fmt.Fprintln(out, "✓ La versión instalada es más reciente que la publicada; no se cambia nada.")
 			return nil
 		}
@@ -89,23 +89,23 @@ func runUpdate(ctx context.Context, args []string, in io.Reader, out io.Writer, 
 		}
 		return nil
 	}
-	if !*yes && !confirm(in, out, fmt.Sprintf("¿Instalar %s? [S/n]", latest)) {
+	if !*yes && !confirm(input, out, fmt.Sprintf("¿Instalar %s? [S/n]", latest)) {
 		fmt.Fprintln(out, "· Actualización cancelada.")
 		return nil
 	}
 
-	if e := u.Install(ctx, rel, func(s string) { fmt.Fprintln(out, s) }); e != nil {
-		return e
+	if err := updater.Install(ctx, release, func(progressLine string) { fmt.Fprintln(out, progressLine) }); err != nil {
+		return err
 	}
-	fmt.Fprintf(out, "✓ Actualizado: %s → %s\n", strings.TrimSpace(u.Current), latest)
+	fmt.Fprintf(out, "✓ Actualizado: %s → %s\n", strings.TrimSpace(updater.Current), latest)
 	fmt.Fprintln(out, "· Reinicia el asistente para usar la versión nueva.")
 	return nil
 }
 
 // confirm asks a yes/no question; Enter means yes, closed input means no.
-func confirm(in io.Reader, out io.Writer, q string) bool {
-	fmt.Fprint(out, "\n› "+q+" ")
-	line, err := bufio.NewReader(io.LimitReader(in, 1024)).ReadString('\n')
+func confirm(input io.Reader, out io.Writer, question string) bool {
+	fmt.Fprint(out, "\n› "+question+" ")
+	line, err := bufio.NewReader(io.LimitReader(input, 1024)).ReadString('\n')
 	if err != nil && line == "" {
 		fmt.Fprintln(out)
 		return false

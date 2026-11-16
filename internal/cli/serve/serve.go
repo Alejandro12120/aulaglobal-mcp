@@ -31,37 +31,37 @@ func Run(ctx context.Context, api *aulaglobal.Client, defaultData, version strin
 	hosts := flag.String("allowed-hosts", os.Getenv("MCP_ALLOWED_HOSTS"), "comma separated exact Host headers; default localhost:8080,127.0.0.1:8080")
 	origins := flag.String("allowed-origins", os.Getenv("MCP_ALLOWED_ORIGINS"), "comma separated exact allowed Origin headers; default none")
 	flag.Parse()
-	workers, e := number("AULAGLOBAL_CONCURRENCY", 4)
-	if e != nil {
-		return e
+	workers, err := number("AULAGLOBAL_CONCURRENCY", 4)
+	if err != nil {
+		return err
 	}
-	maxBytes, e := number("AULAGLOBAL_MAX_FILE_BYTES", 256<<20)
-	if e != nil {
-		return e
+	maxBytes, err := number("AULAGLOBAL_MAX_FILE_BYTES", 256<<20)
+	if err != nil {
+		return err
 	}
-	stall, e := number("AULAGLOBAL_DOWNLOAD_STALL_SECONDS", 60)
-	if e != nil {
-		return e
+	stall, err := number("AULAGLOBAL_DOWNLOAD_STALL_SECONDS", 60)
+	if err != nil {
+		return err
 	}
 	if stall < 1 || stall > 3600 {
 		return errors.New("stall seconds must be 1..3600")
 	}
 	api.StallTimeout = time.Duration(stall) * time.Second
-	if v := os.Getenv("AULAGLOBAL_MAX_RPS"); v != "" {
-		rps, e := aulaglobal.ParseMaxRPS(v)
-		if e != nil {
-			return e
+	if maxRPSText := os.Getenv("AULAGLOBAL_MAX_RPS"); maxRPSText != "" {
+		rps, err := aulaglobal.ParseMaxRPS(maxRPSText)
+		if err != nil {
+			return err
 		}
-		if e = api.SetMaxRPS(rps); e != nil {
-			return e
+		if err = api.SetMaxRPS(rps); err != nil {
+			return err
 		}
 	}
-	st, e := store.Open(env.Or("AULAGLOBAL_DOWNLOAD_DIR", defaultData), maxBytes, int(workers))
-	if e != nil {
-		return e
+	dataStore, err := store.Open(env.Or("AULAGLOBAL_DOWNLOAD_DIR", defaultData), maxBytes, int(workers))
+	if err != nil {
+		return err
 	}
-	defer st.Root.Close()
-	server := mcpserver.New(api, st, startUpdateCheck(ctx, version))
+	defer dataStore.Root.Close()
+	server := mcpserver.New(api, dataStore, startUpdateCheck(ctx, version))
 	switch *transport {
 	case "stdio":
 		return server.Run(ctx, &mcp.StdioTransport{})
@@ -73,28 +73,28 @@ func Run(ctx context.Context, api *aulaglobal.Client, defaultData, version strin
 }
 
 // number reads an integer from the environment variable k, or returns d.
-func number(k string, d int64) (int64, error) {
-	v := os.Getenv(k)
-	if v == "" {
-		return d, nil
+func number(name string, fallback int64) (int64, error) {
+	text := os.Getenv(name)
+	if text == "" {
+		return fallback, nil
 	}
-	n, e := strconv.ParseInt(v, 10, 64)
-	if e != nil {
-		return 0, fmt.Errorf("invalid %s", k)
+	value, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s", name)
 	}
-	return n, nil
+	return value, nil
 }
 
 // serveHTTP serves the MCP endpoint at /mcp. Unless unsafe is set it requires
 // the bearer token from MCP_HTTP_AUTH_TOKEN or MCP_HTTP_AUTH_TOKEN_FILE.
 func serveHTTP(ctx context.Context, server *mcp.Server, addr, hosts, origins string, unsafe bool) error {
 	token := strings.TrimSpace(os.Getenv("MCP_HTTP_AUTH_TOKEN"))
-	if f := os.Getenv("MCP_HTTP_AUTH_TOKEN_FILE"); f != "" {
-		b, e := os.ReadFile(f)
-		if e != nil {
+	if tokenFile := os.Getenv("MCP_HTTP_AUTH_TOKEN_FILE"); tokenFile != "" {
+		content, err := os.ReadFile(tokenFile)
+		if err != nil {
 			return errors.New("cannot read HTTP auth token file")
 		}
-		token = strings.TrimSpace(string(b))
+		token = strings.TrimSpace(string(content))
 	}
 	if !unsafe && token == "" {
 		return errors.New("HTTP requires MCP_HTTP_AUTH_TOKEN or MCP_HTTP_AUTH_TOKEN_FILE")
@@ -102,9 +102,9 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, hosts, origins str
 	if unsafe {
 		slog.Warn("DANGER: HTTP authentication disabled; clients can access all downloaded course files")
 	}
-	_, port, e := net.SplitHostPort(addr)
-	if e != nil {
-		return e
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
 	}
 	allowed := []string{net.JoinHostPort("localhost", port), net.JoinHostPort("127.0.0.1", port)}
 	if hosts != "" {
