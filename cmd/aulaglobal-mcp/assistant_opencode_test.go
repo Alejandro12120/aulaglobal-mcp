@@ -2,6 +2,7 @@ package main
 
 import (
 	"aulaglobal-mcp/internal/userpaths"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -96,5 +97,108 @@ func TestOpenCodeWindowsNPM(t *testing.T) {
 	})
 	if got != target {
 		t.Fatal(got)
+	}
+}
+func TestOpenCodeCapabilities(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		t.Run(goos, func(t *testing.T) {
+			for _, mode := range []string{"scriptable", "legacy", "failure", "unverified", "both files"} {
+				t.Run(mode, func(t *testing.T) {
+					a := openCodeAssistant{}
+					e, w, _, _ := clientFixture(t, a, true)
+					e.GOOS = goos
+					p, _ := a.path(e)
+					calls := 0
+					e.Look = func(n string) (string, error) {
+						if (goos == "windows" && n == "opencode.exe") || (goos != "windows" && n == "opencode") {
+							return "fake-opencode", nil
+						}
+						return "", os.ErrNotExist
+					}
+					if mode == "both files" {
+						os.WriteFile(p, []byte(`{}`), 0600)
+						os.WriteFile(p+"c", []byte(`{}`), 0600)
+					}
+					e.OpenRun = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+						if _, ok := ctx.Deadline(); !ok {
+							t.Fatal("no deadline")
+						}
+						calls++
+						if cli != "fake-opencode" {
+							t.Fatalf("unexpected CLI %q", cli)
+						}
+						if args[len(args)-1] == "--help" {
+							if mode == "legacy" {
+								return os.ReadFile("testdata/opencode-add-help.txt")
+							}
+							return []byte("--global\r\n--env\r\n"), nil
+						}
+						if mode == "failure" {
+							return nil, errors.New("private diagnostic")
+						}
+						if !sameEntry(args, openCodeArgs(w.Exe, w.Extra)) {
+							t.Fatal(args)
+						}
+						if mode != "unverified" {
+							b, _, _ := openCodeConfig(nil, openCodeEntry(w.Exe, w.Extra), true)
+							os.WriteFile(p, b, 0600)
+						}
+						return nil, nil
+					}
+					var out strings.Builder
+					configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
+					failure := mode == "failure" || mode == "unverified" || mode == "both files"
+					if strings.Contains(out.String(), "✗") != failure {
+						t.Fatal(out.String())
+					}
+					if mode == "both files" && calls != 0 {
+						t.Fatal("called CLI despite conflicting files")
+					}
+					if mode != "both files" {
+						wantCalls := 2 // Capability probe followed by registration.
+						if mode == "legacy" {
+							wantCalls = 1 // Unsupported CLI uses the config writer.
+						}
+						if calls != wantCalls {
+							t.Fatalf("CLI calls = %d, want %d", calls, wantCalls)
+						}
+					}
+					if mode == "failure" || mode == "unverified" {
+						if _, err := os.Stat(p); !os.IsNotExist(err) {
+							t.Fatalf("config fallback after CLI failure: %v", err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestOpenCodeConflictsAndV1(t *testing.T) {
+	a := openCodeAssistant{}
+	e, w, _, _ := clientFixture(t, a, true)
+	p, _ := a.path(e)
+	before := []byte(`{"theme":"keep","mcp":{"other":{"type":"local","command":["keep"]},"aulaglobal":{"type":"local","command":["old"]}}}`)
+	os.WriteFile(p, before, 0600)
+	if err := a.Apply(e, w, true); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(p)
+	if !strings.Contains(string(after), `"enabled": true`) || !strings.Contains(string(after), `"other"`) {
+		t.Fatal(string(after))
+	}
+	backup, _ := os.ReadFile(p + ".bak")
+	if string(backup) != string(before) {
+		t.Fatal("backup changed")
+	}
+	if err := os.WriteFile(p+"c", []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Apply(e, w, true); err == nil {
+		t.Fatal("ambiguous files accepted")
+	}
+	unchanged, _ := os.ReadFile(p)
+	if string(after) != string(unchanged) {
+		t.Fatal("changed on conflict")
 	}
 }

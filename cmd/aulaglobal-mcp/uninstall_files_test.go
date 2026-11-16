@@ -300,3 +300,24 @@ func TestRemoveBinaryWindowsMovesAsideAndSchedules(t *testing.T) {
 		t.Fatal(st, msg)
 	}
 }
+func TestPointsToProgram(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "aulaglobal-mcp")
+	for _, tc := range []struct {
+		cmd  string
+		want bool
+	}{
+		{exe, true},
+		{"/opt/old/aulaglobal-mcp", true},
+		{`C:\Users\Ana\AppData\Local\Programs\aulaglobal-mcp\aulaglobal-mcp.exe`, true},
+		{`C:\X\AULAGLOBAL-MCP.EXE`, true},
+		{"aulaglobal-mcp", true},
+		{"/usr/bin/node", false},
+		{"/home/a/aulaglobal-mcp-fork/server", false},
+		{"my-aulaglobal-mcp", false},
+		{"", false},
+	} {
+		if got := pointsToProgram(tc.cmd, exe, false); got != tc.want {
+			t.Errorf("%q = %v", tc.cmd, got)
+		}
+	}
+}

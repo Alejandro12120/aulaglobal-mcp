@@ -2,6 +2,7 @@ package main
 
 import (
 	"aulaglobal-mcp/internal/userpaths"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,5 +78,25 @@ func TestAntigravityHelpFixture(t *testing.T) {
 	b, e := os.ReadFile("testdata/agy-1.5.9-mcp-add-help.txt")
 	if e != nil || !strings.Contains(string(b), "<commandOrUrl>") || !strings.Contains(string(b), "--env") {
 		t.Fatal("unexpected real CLI help", e)
+	}
+}
+func TestAntigravityGeneratorFailure(t *testing.T) {
+	a := antigravityAssistant()
+	e, w, _, _ := clientFixture(t, a, true)
+	e.Look = func(n string) (string, error) {
+		if n == "agy" {
+			return "fake-agy", nil
+		}
+		return "", os.ErrNotExist
+	}
+	e.GenerateAG = func(string, string, []string) (map[string]any, error) { return nil, errors.New("private diagnostic") }
+	var out strings.Builder
+	configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
+	if !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
+		t.Fatal(out.String())
+	}
+	p := userpaths.Antigravity(e.Home)
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("written after generator failure")
 	}
 }
