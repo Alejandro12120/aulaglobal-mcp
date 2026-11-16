@@ -1,4 +1,4 @@
-package main
+package assistants_test
 
 import (
 	"context"
@@ -8,6 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/assistants/assistantstest"
 )
 
 // Compiled with Docker, executed on the host so Claude is available. Every
@@ -29,38 +33,41 @@ func TestRealClaudeRegistration(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	t.Chdir(t.TempDir())
-	e := realClientEnv(runtime.GOOS, home, filepath.Join(home, "config"))
-	e.Look = func(n string) (string, error) {
+	e := assistants.RealEnv(runtime.GOOS, home, filepath.Join(home, "config"))
+	realRun := e.RunClaude
+	e.LookPath = func(n string) (string, error) {
 		if n == "claude" {
 			return cli, nil
 		}
 		return "", os.ErrNotExist
 	}
-	e.Run = func(ctx context.Context, path string, args ...string) ([]byte, error) {
+	e.RunClaude = func(ctx context.Context, path string, args ...string) ([]byte, error) {
 		if os.Getenv("HOME") != home || home == "" || !strings.HasPrefix(home, os.TempDir()+string(os.PathSeparator)) {
 			t.Fatal("unsafe HOME")
 		}
-		b, err := runClaude(ctx, path, args...)
+		b, err := realRun(ctx, path, args...)
 		t.Logf("claude %s: %s (error %v)", strings.Join(args, " "), strings.TrimSpace(string(b)), err)
 		return b, err
 	}
 	call := func(args ...string) string {
 		t.Helper()
-		b, err := e.call(e.Run, cli, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		b, err := e.RunClaude(ctx, cli, args...)
 		if err != nil {
 			t.Fatalf("%s: %s (%v)", args, b, err)
 		}
 		return string(b)
 	}
-	a := claudeAssistant{}
-	w := desiredEntry{Exe: "/bin/true", Extra: []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=" + filepath.Join(home, "notes with spaces")}}
-	if i := a.Inspect(e, w); i.err != nil || i.state != missing {
+	a := assistantstest.ByID(t, "claude-code")
+	w := assistants.Entry{Exe: "/bin/true", Extra: []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=" + filepath.Join(home, "notes with spaces")}}
+	if i := a.Inspect(e, w); i.Err != nil || i.State != assistants.Missing {
 		t.Fatal(i)
 	}
 	for _, scope := range []string{"local", "project"} {
 		call("mcp", "add", "--scope", scope, "aulaglobal", "--", "/bin/true")
 		i := a.Inspect(e, w)
-		if i.err != nil || i.state != otherScope || i.scope != scope {
+		if i.Err != nil || i.State != assistants.OtherScope || i.Scope != scope {
 			t.Fatal(i)
 		}
 		project, _ := os.ReadFile(".mcp.json")
@@ -82,7 +89,7 @@ func TestRealClaudeRegistration(t *testing.T) {
 		if err := a.Apply(e, w, true); err != nil {
 			t.Fatal(err)
 		}
-		if i := a.Inspect(e, w); i.err != nil || i.state != identical {
+		if i := a.Inspect(e, w); i.Err != nil || i.State != assistants.Identical {
 			t.Fatal(i)
 		}
 		call("mcp", "remove", "aulaglobal", "--scope", "user")

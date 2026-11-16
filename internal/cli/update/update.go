@@ -1,9 +1,6 @@
-package main
+package update
 
 import (
-	"aulaglobal-mcp/internal/mcpserver"
-	"aulaglobal-mcp/internal/selfupdate"
-	"aulaglobal-mcp/internal/userpaths"
 	"bufio"
 	"context"
 	"errors"
@@ -15,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"aulaglobal-mcp/internal/selfupdate"
 )
 
 const updateUsage = `Uso: aulaglobal-mcp update [--check] [--yes] [--force]
@@ -28,8 +27,9 @@ versión y el checksum del archivo descargado.
   --force   permite actualizar una compilación local (versión «dev»)
 `
 
-// update is the `aulaglobal-mcp update` entry point.
-func update(args []string) error {
+// Run is the `aulaglobal-mcp update` command. version is the version of the
+// running program.
+func Run(args []string, version string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	return runUpdate(ctx, args, os.Stdin, os.Stdout, selfupdate.New(version), selfupdate.InContainer())
@@ -115,19 +115,4 @@ func confirm(in io.Reader, out io.Writer, q string) bool {
 		return true
 	}
 	return false
-}
-
-// startUpdateCheck launches the single background check for the MCP server and
-// returns the notifier, or nil when checks are disabled.
-func startUpdateCheck(ctx context.Context) mcpserver.Updates {
-	if !selfupdate.CheckEnabled(version) {
-		return nil
-	}
-	cache, _ := userpaths.UpdateCache() // an error just disables caching
-	c, e := selfupdate.NewChecker(version, cache)
-	if e != nil {
-		return nil
-	}
-	go c.Run(ctx)
-	return c
 }

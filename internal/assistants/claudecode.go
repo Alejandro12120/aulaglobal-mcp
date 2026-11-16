@@ -1,9 +1,10 @@
-package main
+package assistants
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,10 +21,10 @@ func (claudeAssistant) Name() string { return "Claude Code" }
 func (claudeAssistant) Reload() string {
 	return "Abre una sesión nueva y usa /mcp para comprobar la conexión."
 }
-func (claudeAssistant) cli(e clientEnv) string {
-	return findClaude(e.GOOS, e.Home, e.AppData, e.Look, e.Stat)
+func (claudeAssistant) cli(e Env) string {
+	return findClaude(e.GOOS, e.Home, e.AppData, e.LookPath, e.Stat)
 }
-func (a claudeAssistant) Detect(e clientEnv) bool { return a.cli(e) != "" }
+func (a claudeAssistant) Detect(e Env) bool { return a.cli(e) != "" }
 
 func runClaude(ctx context.Context, path string, args ...string) ([]byte, error) {
 	// On Windows the npm shim is a .cmd file. Run its script with node directly
@@ -106,8 +107,8 @@ func parseClaudeGet(output string) claudeEntry {
 
 // get asks Claude for the aulaglobal entry. found is false when Claude says
 // there is no such server. Any other failure is an error.
-func (a claudeAssistant) get(e clientEnv, cli string) (entry claudeEntry, found bool, err error) {
-	b, err := e.call(e.Run, cli, "mcp", "get", aulaglobalKey)
+func (a claudeAssistant) get(e Env, cli string) (entry claudeEntry, found bool, err error) {
+	b, err := e.call(e.RunClaude, cli, "mcp", "get", aulaglobalKey)
 	if err != nil {
 		lower := strings.ToLower(string(b))
 		if strings.Contains(lower, "no mcp server named") || strings.Contains(lower, "no mcp server found") {
@@ -118,113 +119,113 @@ func (a claudeAssistant) get(e clientEnv, cli string) (entry claudeEntry, found 
 	return parseClaudeGet(string(b)), true, nil
 }
 
-func (a claudeAssistant) Inspect(e clientEnv, w desiredEntry) inspection {
+func (a claudeAssistant) Inspect(e Env, w Entry) Inspection {
 	cli := a.cli(e)
 	if cli == "" {
-		return inspection{state: notInstalledHere}
+		return Inspection{State: NotInstalled}
 	}
 	c, found, err := a.get(e, cli)
 	if err != nil {
-		return inspection{err: errors.New("cannot inspect Claude")}
+		return Inspection{Err: errors.New("cannot inspect Claude")}
 	}
 	if !found {
-		return inspection{state: missing}
+		return Inspection{State: Missing}
 	}
 	if c.scope == "" {
-		return inspection{err: errors.New("unknown Claude scope")}
+		return Inspection{Err: errors.New("unknown Claude scope")}
 	}
 	if c.scope == "local" {
-		return inspection{state: otherScope, scope: c.scope, detail: "configurado solo en este proyecto (local). Se moverá a usuario para todos tus proyectos."}
+		return Inspection{State: OtherScope, Scope: c.scope, Detail: "configurado solo en este proyecto (local). Se moverá a usuario para todos tus proyectos."}
 	}
 	if c.scope == "project" {
-		return inspection{state: otherScope, scope: c.scope, detail: "definido por este proyecto en .mcp.json; ese archivo se conservará."}
+		return Inspection{State: OtherScope, Scope: c.scope, Detail: "definido por este proyecto en .mcp.json; ese archivo se conservará."}
 	}
-	wantEnv, _ := w.entry()["env"].(map[string]string)
+	wantEnv, _ := w.Config()["env"].(map[string]string)
 	if wantEnv == nil {
 		wantEnv = map[string]string{}
 	}
 	if c.fields["Type"] == "stdio" && c.fields["Command"] == w.Exe && c.fields["Args"] == "--transport stdio" && sameEntry(c.env, wantEnv) {
-		return inspection{state: identical, scope: c.scope}
+		return Inspection{State: Identical, Scope: c.scope}
 	}
-	return inspection{state: different, scope: c.scope, detail: "comando " + fmt.Sprintf("%q", c.fields["Command"])}
+	return Inspection{State: Different, Scope: c.scope, Detail: "comando " + fmt.Sprintf("%q", c.fields["Command"])}
 }
 
-func (a claudeAssistant) Apply(e clientEnv, w desiredEntry, replace bool) error {
+func (a claudeAssistant) Apply(e Env, w Entry, replace bool) error {
 	i := a.Inspect(e, w)
-	if i.err != nil {
-		return i.err
+	if i.Err != nil {
+		return i.Err
 	}
-	if i.state == identical {
+	if i.State == Identical {
 		return nil
 	}
-	if i.state == notInstalledHere {
+	if i.State == NotInstalled {
 		return errors.New("not installed")
 	}
-	if i.state != missing && !replace {
+	if i.State != Missing && !replace {
 		return errors.New("replacement not authorized")
 	}
 	cli := a.cli(e)
 	// get, remove and add must run in the same working directory: a local entry
 	// belongs to the project the process runs in.
-	if i.scope == "local" || i.scope == "user" {
-		if _, err := e.call(e.Run, cli, "mcp", "remove", aulaglobalKey, "--scope", i.scope); err != nil {
+	if i.Scope == "local" || i.Scope == "user" {
+		if _, err := e.call(e.RunClaude, cli, "mcp", "remove", aulaglobalKey, "--scope", i.Scope); err != nil {
 			return errors.New("remove failed")
 		}
 	}
-	_, err := e.call(e.Run, cli, codeArgs(w.Exe, w.Extra)...)
+	_, err := e.call(e.RunClaude, cli, codeArgs(w.Exe, w.Extra)...)
 	return err
 }
 
-func (a claudeAssistant) Manual(w desiredEntry) string {
+func (a claudeAssistant) Manual(w Entry) string {
 	var out strings.Builder
-	manualCode(setupUI{out: &out}, "claude", w.Exe, w.Extra)
+	manualCode(&out, "claude", w.Exe, w.Extra)
 	return strings.TrimSpace(out.String())
 }
 
-func (a claudeAssistant) Find(e clientEnv) link {
+func (a claudeAssistant) Find(e Env) Link {
 	cli := a.cli(e)
 	if cli == "" {
-		return link{state: linkNotInstalled}
+		return Link{State: LinkNotInstalled}
 	}
 	c, found, err := a.get(e, cli)
 	if err != nil {
-		return link{state: linkError, detail: "no se puede consultar a Claude Code"}
+		return Link{State: LinkError, Detail: "no se puede consultar a Claude Code"}
 	}
 	if !found {
-		return link{state: linkNone}
+		return Link{State: LinkNone}
 	}
 	command := c.fields["Command"]
 	switch c.scope {
 	case "user":
-		return link{state: linkPresent, command: command, env: c.env, detail: "claude mcp remove --scope user aulaglobal"}
+		return Link{State: LinkPresent, Command: command, Env: c.env, Detail: "claude mcp remove --scope user aulaglobal"}
 	case "local":
-		return link{state: linkElsewhere, command: command, detail: "está configurado solo para un proyecto (ámbito local). No se toca; para quitarlo, ejecuta en esa carpeta: claude mcp remove --scope local aulaglobal"}
+		return Link{State: LinkElsewhere, Command: command, Detail: "está configurado solo para un proyecto (ámbito local). No se toca; para quitarlo, ejecuta en esa carpeta: claude mcp remove --scope local aulaglobal"}
 	case "project":
-		return link{state: linkElsewhere, command: command, detail: "lo define un proyecto en su .mcp.json. No se toca ese archivo; si no lo quieres, bórralo tú de allí."}
+		return Link{State: LinkElsewhere, Command: command, Detail: "lo define un proyecto en su .mcp.json. No se toca ese archivo; si no lo quieres, bórralo tú de allí."}
 	}
-	return link{state: linkError, detail: "ámbito de Claude Code desconocido"}
+	return Link{State: LinkError, Detail: "ámbito de Claude Code desconocido"}
 }
 
-func (a claudeAssistant) Remove(e clientEnv) error {
+func (a claudeAssistant) Remove(e Env) error {
 	l := a.Find(e)
-	switch l.state {
-	case linkNone:
+	switch l.State {
+	case LinkNone:
 		return nil
-	case linkPresent:
+	case LinkPresent:
 	default:
 		return errors.New("not removable")
 	}
-	out, err := e.call(e.Run, a.cli(e), "mcp", "remove", "--scope", "user", aulaglobalKey)
+	out, err := e.call(e.RunClaude, a.cli(e), "mcp", "remove", "--scope", "user", aulaglobalKey)
 	if err != nil && !strings.Contains(strings.ToLower(string(out)), "no mcp server") {
 		return errors.New("remove failed")
 	}
-	if after := a.Find(e); after.state == linkPresent {
+	if after := a.Find(e); after.State == LinkPresent {
 		return errors.New("entry still present")
 	}
 	return nil
 }
 
-func (a claudeAssistant) ManualRemove(clientEnv) string {
+func (a claudeAssistant) ManualRemove(Env) string {
 	return "Alternativa manual · Claude Code: ejecuta  claude mcp remove --scope user aulaglobal"
 }
 
@@ -234,11 +235,11 @@ func codeArgs(exe string, extra []string) []string {
 }
 
 // manualCode prints the command that adds the server to Claude Code by hand.
-func manualCode(u setupUI, cli, exe string, extra []string) {
+func manualCode(out io.Writer, cli, exe string, extra []string) {
 	if cli == "" {
 		cli = "claude"
 	}
-	fmt.Fprint(u.out, "\n── Alternativa manual · Claude Code ──\n\nEjecuta este comando cuando tengas Claude Code instalado:\n")
+	fmt.Fprint(out, "\n── Alternativa manual · Claude Code ──\n\nEjecuta este comando cuando tengas Claude Code instalado:\n")
 	// Single quotes are safe for POSIX shells and PowerShell, including spaces.
 	quote := func(s string) string {
 		if runtime.GOOS == "windows" {
@@ -253,5 +254,5 @@ func manualCode(u setupUI, cli, exe string, extra []string) {
 	for _, arg := range codeArgs(exe, extra) {
 		parts = append(parts, quote(arg))
 	}
-	fmt.Fprintln(u.out, "  "+strings.Join(parts, " "))
+	fmt.Fprintln(out, "  "+strings.Join(parts, " "))
 }

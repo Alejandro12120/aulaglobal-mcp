@@ -1,14 +1,16 @@
-package main
+package assistants_test
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/assistants/assistantstest"
 )
 
 func TestFindClaude(t *testing.T) {
@@ -51,65 +53,24 @@ func TestFindClaude(t *testing.T) {
 				}
 				return fstest.MapFS{"candidate": &fstest.MapFile{Mode: tc.mode}}.Stat("candidate")
 			}
-			if got := findClaude(tc.goos, home, appdata, look, stat); got != tc.want {
-				t.Fatalf("findClaude(%q) = %q, want %q (candidate %q, mode %v)", tc.goos, got, tc.want, tc.candidate, tc.mode)
+			if got := assistants.FindClaude(tc.goos, home, appdata, look, stat); got != tc.want {
+				t.Fatalf("assistants.FindClaude(%q) = %q, want %q (candidate %q, mode %v)", tc.goos, got, tc.want, tc.candidate, tc.mode)
 			}
 		})
 	}
 }
 
-func TestOtherClaudeScopes(t *testing.T) {
-	for _, scope := range []string{"local", "project"} {
-		for _, answer := range []string{"\n", "n\n"} {
-			t.Run(scope+answer, func(t *testing.T) {
-				a := claudeAssistant{}
-				e, w, state, _ := clientFixture(t, a, true)
-				*state = scope
-				var out strings.Builder
-				configureClients(setupUI{strings.NewReader(answer), &out, nil}, e, w, []assistant{a}, false)
-				want := "actualizado"
-				if answer == "n\n" {
-					want = "omitido"
-					if *state != scope {
-						t.Fatal("changed after decline")
-					}
-				}
-				if !strings.Contains(out.String(), want) {
-					t.Fatal(out.String())
-				}
-			})
-		}
-	}
-}
-
-func TestClaudeUnknownInspection(t *testing.T) {
-	for _, tc := range []struct {
-		output string
-		err    error
-	}{{"Scope: Unknown config", nil}, {"private diagnostic", errors.New("offline")}} {
-		a := claudeAssistant{}
-		e, w, _, _ := clientFixture(t, a, true)
-		calls := 0
-		e.Run = func(context.Context, string, ...string) ([]byte, error) { calls++; return []byte(tc.output), tc.err }
-		var out strings.Builder
-		configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
-		if calls != 1 || !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
-			t.Fatal(out.String(), calls)
-		}
-	}
-}
-
 func TestClientCLIArgumentsAndManual(t *testing.T) {
 	want := []string{"mcp", "add", "--scope", "user", "aulaglobal", "-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes space", "--", "/server", "--transport", "stdio"}
-	if !sameEntry(codeArgs("/server", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes space"}), want) {
+	if !assistants.SameEntry(assistants.CodeArgs("/server", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes space"}), want) {
 		t.Fatal("Claude variadic env consumed the name")
 	}
 	extra := []string{"-e", "SECRET=never", "-e", "AULAGLOBAL_TOKEN_FILE=/token"}
-	if strings.Contains(strings.Join(openCodeArgs("/exe", extra), " "), "never") {
+	if strings.Contains(strings.Join(assistants.OpenCodeArgs("/exe", extra), " "), "never") {
 		t.Fatal("unapproved env")
 	}
 	var out strings.Builder
-	manualCode(setupUI{out: &out}, "claude", "/path with spaces/server", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
+	assistants.ManualCode(&out, "claude", "/path with spaces/server", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
 	for _, part := range []string{"'--scope' 'user'", "'/path with spaces/server'", "'AULAGLOBAL_DOWNLOAD_DIR=/notes'"} {
 		if !strings.Contains(out.String(), part) {
 			t.Fatal(out.String())
@@ -117,95 +78,49 @@ func TestClientCLIArgumentsAndManual(t *testing.T) {
 	}
 }
 
-// fakeClaudeCLI imitates `claude mcp get/remove` with the real CLI's messages.
-type fakeClaudeCLI struct {
-	scope, command string // "" = no entry
-	env            map[string]string
-	calls          [][]string
-	failRemove     string // output of a failing remove
-}
-
-func (f *fakeClaudeCLI) run(_ context.Context, _ string, args ...string) ([]byte, error) {
-	f.calls = append(f.calls, args)
-	switch args[1] {
-	case "get":
-		if f.scope == "" {
-			return []byte("No MCP server found with name: \"aulaglobal\"."), errors.New("exit 1")
-		}
-		scope := map[string]string{"user": "User config (available in all your projects)", "local": "Local config (private to you in this project)", "project": "Project config (shared via .mcp.json)"}[f.scope]
-		var env strings.Builder
-		for k, v := range f.env {
-			env.WriteString(fmt.Sprintf("    %s=%s\n", k, v))
-		}
-		return []byte(fmt.Sprintf("aulaglobal:\n  Scope: %s\n  Status: ✓ Connected\n  Type: stdio\n  Command: %s\n  Args: --transport stdio\n  Environment:\n%s\nTo remove this server, run: claude mcp remove \"aulaglobal\" -s %s\n", scope, f.command, env.String(), f.scope)), nil
-	case "remove":
-		if f.failRemove != "" {
-			return []byte(f.failRemove), errors.New("exit 1")
-		}
-		if f.scope != "user" || args[2] != "--scope" || args[3] != "user" || args[4] != "aulaglobal" {
-			return []byte("No MCP server found with name: \"aulaglobal\" in user config"), errors.New("exit 1")
-		}
-		f.scope = ""
-		return []byte("Removed MCP server aulaglobal from user config"), nil
-	}
-	return nil, errors.New("unexpected")
-}
-
-func claudeEnv(t *testing.T, f *fakeClaudeCLI) clientEnv {
-	e := fileClientEnv(t)
-	e.Look = func(n string) (string, error) {
-		if n == "claude" {
-			return "fake-claude", nil
-		}
-		return "", os.ErrNotExist
-	}
-	e.Run = f.run
-	return e
-}
-
 func TestClaudeCodeFindAndRemove(t *testing.T) {
-	a := claudeAssistant{}
-	f := &fakeClaudeCLI{scope: "user", command: "/x/aulaglobal-mcp", env: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/notes"}}
-	e := claudeEnv(t, f)
+	a := assistantstest.ByID(t, "claude-code")
+	f := &assistantstest.FakeClaude{Scope: "user", Command: "/x/aulaglobal-mcp", Env: map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": "/notes"}}
+	e := assistantstest.ClaudeEnv(t, f)
 	l := a.Find(e)
-	if l.state != linkPresent || l.command != "/x/aulaglobal-mcp" || l.env["AULAGLOBAL_DOWNLOAD_DIR"] != "/notes" || !strings.Contains(l.detail, "claude mcp remove --scope user aulaglobal") {
+	if l.State != assistants.LinkPresent || l.Command != "/x/aulaglobal-mcp" || l.Env["AULAGLOBAL_DOWNLOAD_DIR"] != "/notes" || !strings.Contains(l.Detail, "claude mcp remove --scope user aulaglobal") {
 		t.Fatalf("%+v", l)
 	}
 	if err := a.Remove(e); err != nil {
 		t.Fatal(err)
 	}
-	if f.scope != "" {
+	if f.Scope != "" {
 		t.Fatal("entry remains")
 	}
-	last := f.calls[len(f.calls)-2]
+	last := f.Calls[len(f.Calls)-2]
 	if strings.Join(last, " ") != "mcp remove --scope user aulaglobal" {
-		t.Fatalf("calls %v", f.calls)
+		t.Fatalf("calls %v", f.Calls)
 	}
-	if l := a.Find(e); l.state != linkNone {
+	if l := a.Find(e); l.State != assistants.LinkNone {
 		t.Fatalf("%+v", l)
 	}
-	n := len(f.calls)
-	if err := a.Remove(e); err != nil || len(f.calls) != n+1 { // only the lookup
-		t.Fatalf("second removal ran commands: %v", f.calls[n:])
+	n := len(f.Calls)
+	if err := a.Remove(e); err != nil || len(f.Calls) != n+1 { // only the lookup
+		t.Fatalf("second removal ran commands: %v", f.Calls[n:])
 	}
 }
 
 func TestClaudeCodeLocalAndProjectScopesAreNeverTouched(t *testing.T) {
-	a := claudeAssistant{}
+	a := assistantstest.ByID(t, "claude-code")
 	for _, scope := range []string{"local", "project"} {
-		f := &fakeClaudeCLI{scope: scope, command: "/x/aulaglobal-mcp"}
-		e := claudeEnv(t, f)
+		f := &assistantstest.FakeClaude{Scope: scope, Command: "/x/aulaglobal-mcp"}
+		e := assistantstest.ClaudeEnv(t, f)
 		l := a.Find(e)
-		if l.state != linkElsewhere || l.detail == "" {
+		if l.State != assistants.LinkElsewhere || l.Detail == "" {
 			t.Fatalf("%s: %+v", scope, l)
 		}
-		if scope == "project" && !strings.Contains(l.detail, ".mcp.json") || scope == "local" && !strings.Contains(l.detail, "--scope local") {
-			t.Fatal(l.detail)
+		if scope == "project" && !strings.Contains(l.Detail, ".mcp.json") || scope == "local" && !strings.Contains(l.Detail, "--scope local") {
+			t.Fatal(l.Detail)
 		}
 		if err := a.Remove(e); err == nil {
 			t.Fatal("removed a non-user scope")
 		}
-		for _, c := range f.calls {
+		for _, c := range f.Calls {
 			if c[1] == "remove" {
 				t.Fatalf("%s: remove was called: %v", scope, c)
 			}
@@ -214,36 +129,36 @@ func TestClaudeCodeLocalAndProjectScopesAreNeverTouched(t *testing.T) {
 }
 
 func TestClaudeCodeRemoveFailureAndUnknown(t *testing.T) {
-	a := claudeAssistant{}
-	f := &fakeClaudeCLI{scope: "user", command: "c", failRemove: "private diagnostic"}
-	if err := a.Remove(claudeEnv(t, f)); err == nil || strings.Contains(err.Error(), "private") {
+	a := assistantstest.ByID(t, "claude-code")
+	f := &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "private diagnostic"}
+	if err := a.Remove(assistantstest.ClaudeEnv(t, f)); err == nil || strings.Contains(err.Error(), "private") {
 		t.Fatalf("%v", err)
 	}
 	// The entry vanished between get and remove: not an error.
-	f = &fakeClaudeCLI{scope: "user", command: "c", failRemove: "No MCP server found with name: aulaglobal in user config"}
-	e := claudeEnv(t, f)
-	e.Run = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
+	f = &assistantstest.FakeClaude{Scope: "user", Command: "c", FailRemove: "No MCP server found with name: aulaglobal in user config"}
+	e := assistantstest.ClaudeEnv(t, f)
+	e.RunClaude = func(ctx context.Context, cli string, args ...string) ([]byte, error) {
 		if args[1] == "remove" {
-			f.scope = ""
+			f.Scope = ""
 		}
-		return f.run(ctx, cli, args...)
+		return f.Run(ctx, cli, args...)
 	}
 	if err := a.Remove(e); err != nil {
 		t.Fatal(err)
 	}
 	// Unknown scope and offline CLI are errors, never guesses.
-	e.Run = func(context.Context, string, ...string) ([]byte, error) { return []byte("Scope: Weird"), nil }
-	if l := a.Find(e); l.state != linkError {
+	e.RunClaude = func(context.Context, string, ...string) ([]byte, error) { return []byte("Scope: Weird"), nil }
+	if l := a.Find(e); l.State != assistants.LinkError {
 		t.Fatalf("%+v", l)
 	}
-	e.Run = func(context.Context, string, ...string) ([]byte, error) {
+	e.RunClaude = func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("private diagnostic"), errors.New("x")
 	}
-	if l := a.Find(e); l.state != linkError || strings.Contains(l.detail, "private") {
+	if l := a.Find(e); l.State != assistants.LinkError || strings.Contains(l.Detail, "private") {
 		t.Fatalf("%+v", l)
 	}
-	e.Look = func(string) (string, error) { return "", os.ErrNotExist }
-	if l := a.Find(e); l.state != linkNotInstalled {
+	e.LookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	if l := a.Find(e); l.State != assistants.LinkNotInstalled {
 		t.Fatalf("%+v", l)
 	}
 }

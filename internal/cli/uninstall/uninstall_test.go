@@ -1,4 +1,4 @@
-package main
+package uninstall
 
 import (
 	"crypto/sha256"
@@ -14,6 +14,10 @@ import (
 	"strings"
 	"testing"
 
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/assistants/assistantstest"
+	"aulaglobal-mcp/internal/termui"
+	"aulaglobal-mcp/internal/testutil"
 	"aulaglobal-mcp/internal/userpaths"
 )
 
@@ -42,7 +46,7 @@ type ufix struct {
 	exe, token, configDir  string
 	cacheDir, data         string
 	e                      uninstallEnv
-	claude                 *fakeClaudeCLI
+	claude                 *assistantstest.FakeClaude
 	reg                    *memPath
 	spawned                []string
 	zshrc, bashrc          string
@@ -61,23 +65,23 @@ func newUFix(t *testing.T) *ufix {
 	f.cacheDir = filepath.Join(f.home, "cache", "aulaglobal-mcp")
 	f.token = filepath.Join(f.configDir, "token")
 	f.data = filepath.Join(f.home, "AulaGlobal")
-	writeFile(t, f.exe, "binary")
+	testutil.WriteFile(t, f.exe, "binary")
 	for _, n := range []string{"token", "token.private", "token.meta.json"} {
-		writeFile(t, filepath.Join(f.configDir, n), "secret-"+n)
+		testutil.WriteFile(t, filepath.Join(f.configDir, n), "secret-"+n)
 	}
-	writeFile(t, filepath.Join(f.cacheDir, "update-check.json"), "{}")
-	writeFile(t, filepath.Join(f.data, dataMarker, "manifest.json"), "{}")
-	writeFile(t, filepath.Join(f.data, "Fisica", "tema1.pdf"), "pdf")
+	testutil.WriteFile(t, filepath.Join(f.cacheDir, "update-check.json"), "{}")
+	testutil.WriteFile(t, filepath.Join(f.data, dataMarker, "manifest.json"), "{}")
+	testutil.WriteFile(t, filepath.Join(f.data, "Fisica", "tema1.pdf"), "pdf")
 	f.pathLine = `export PATH="` + f.installDir + `:$PATH" ` + pathMarker
 	f.zshrc = filepath.Join(f.home, ".zshrc")
 	f.bashrc = filepath.Join(f.home, ".bashrc")
-	writeFile(t, f.zshrc, "alias ll='ls -l'\n\n"+f.pathLine+"\n")
-	writeFile(t, f.bashrc, "# bashrc\n\n"+f.pathLine+"\n")
-	writeFile(t, filepath.Join(f.home, "canary.txt"), "mine")
+	testutil.WriteFile(t, f.zshrc, "alias ll='ls -l'\n\n"+f.pathLine+"\n")
+	testutil.WriteFile(t, f.bashrc, "# bashrc\n\n"+f.pathLine+"\n")
+	testutil.WriteFile(t, filepath.Join(f.home, "canary.txt"), "mine")
 
-	f.claude = &fakeClaudeCLI{scope: "user", command: f.exe}
-	ce := clientEnv{GOOS: runtime.GOOS, Home: f.home, Config: config}
-	ce.Look = func(n string) (string, error) {
+	f.claude = &assistantstest.FakeClaude{Scope: "user", Command: f.exe}
+	ce := assistants.Env{GOOS: runtime.GOOS, Home: f.home, ConfigDir: config}
+	ce.LookPath = func(n string) (string, error) {
 		if n == "claude" {
 			return "fake-claude", nil
 		}
@@ -89,12 +93,12 @@ func newUFix(t *testing.T) *ufix {
 		}
 		return os.Stat(p)
 	}
-	ce.Run = f.claude.run
+	ce.RunClaude = f.claude.Run
 	f.codexPath = filepath.Join(f.home, ".codex", "config.toml")
-	writeFile(t, f.codexPath, "model = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\"\n\n[mcp_servers.aulaglobal]\ncommand = '"+f.exe+"'\nargs = ['--transport', 'stdio']\n")
+	testutil.WriteFile(t, f.codexPath, "model = \"x\"\n\n[mcp_servers.other]\ncommand = \"keep\"\n\n[mcp_servers.aulaglobal]\ncommand = '"+f.exe+"'\nargs = ['--transport', 'stdio']\n")
 	f.reg = &memPath{}
 	f.e = uninstallEnv{
-		ce: ce, list: []assistant{claudeAssistant{}, codexAssistant(), desktopAssistant()}, goos: "linux", home: f.home,
+		ce: ce, list: []assistants.Assistant{assistantstest.ByID(t, "claude-code"), assistantstest.ByID(t, "codex"), assistantstest.ByID(t, "claude-desktop")}, goos: "linux", home: f.home,
 		exe: f.exe, tokenFile: f.token, configDir: f.configDir, cacheDir: f.cacheDir, dataDefault: f.data,
 		interactive: true, getenv: func(string) string { return "" }, removeBinary: removeBinaryUnix,
 	}
@@ -102,13 +106,13 @@ func newUFix(t *testing.T) *ufix {
 }
 
 func (f *ufix) desktop(content string) {
-	f.desktopPath = userpaths.Claude(f.e.ce.GOOS, f.home, f.e.ce.Config)
-	writeFile(f.t, f.desktopPath, content)
+	f.desktopPath = userpaths.Claude(f.e.ce.GOOS, f.home, f.e.ce.ConfigDir)
+	testutil.WriteFile(f.t, f.desktopPath, content)
 }
 
 func (f *ufix) run(o uninstallOpts, input string) (string, error) {
 	var out strings.Builder
-	err := runUninstall(setupUI{in: strings.NewReader(input), out: &out}, f.e, o)
+	err := runUninstall(termui.UI{In: strings.NewReader(input), Out: &out}, f.e, o)
 	return out.String(), err
 }
 
@@ -215,7 +219,7 @@ func TestUninstallHelpExitsCleanly(t *testing.T) {
 	os.Stdout = f
 	defer func() { os.Stdout = old }()
 	for _, a := range []string{"--help", "-h"} {
-		if err := uninstall([]string{a}); err != nil {
+		if err := Run([]string{a}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -226,7 +230,7 @@ func TestUninstallHelpExitsCleanly(t *testing.T) {
 			t.Errorf("help lacks %q", want)
 		}
 	}
-	if err := uninstall([]string{"--delete-data"}); err == nil || !strings.Contains(err.Error(), "Uso:") {
+	if err := Run([]string{"--delete-data"}); err == nil || !strings.Contains(err.Error(), "Uso:") {
 		t.Fatalf("usage error lacks help: %v", err)
 	}
 }
@@ -239,7 +243,7 @@ func TestUninstallWithoutTerminalOrFlagsChangesNothing(t *testing.T) {
 	if err == nil || !strings.Contains(out, "Uso: aulaglobal-mcp uninstall") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" || f.claude.scope != "user" || len(f.claude.calls) != 0 && f.claude.calls[len(f.claude.calls)-1][1] == "remove" {
+	if d := sameSnapshot(before, snapshot(t, f.root)); d != "" || f.claude.Scope != "user" || len(f.claude.Calls) != 0 && f.claude.Calls[len(f.claude.Calls)-1][1] == "remove" {
 		t.Fatal("changed:", d)
 	}
 	// With flags but no way to confirm, it asks for --yes instead of guessing.
@@ -275,7 +279,7 @@ func TestUninstallTranscripts(t *testing.T) {
 				o.all, o.dryRun = true, true
 				input = "n\ns\n" // foreign: no; data folder: yes (shown in the plan only)
 			case "nothing-to-do":
-				f.claude.scope = ""
+				f.claude.Scope = ""
 				os.Remove(f.codexPath)
 				os.Remove(f.desktopPath)
 				input = "\n"
@@ -284,7 +288,7 @@ func TestUninstallTranscripts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			compareGolden(t, "uninstall-"+sc, f.transcript(out))
+			testutil.Golden(t, "uninstall-"+sc, f.transcript(out))
 		})
 	}
 }
@@ -309,10 +313,10 @@ func TestUninstallDisconnectSelectedClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if strings.Contains(readFile(t, f.codexPath), "aulaglobal") || !strings.Contains(readFile(t, f.codexPath), "[mcp_servers.other]") {
-		t.Fatal(readFile(t, f.codexPath))
+	if strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, f.codexPath), "[mcp_servers.other]") {
+		t.Fatal(testutil.ReadFile(t, f.codexPath))
 	}
-	if f.claude.scope != "user" {
+	if f.claude.Scope != "user" {
 		t.Fatal("Claude Code was not selected but was changed")
 	}
 	// Naming an assistant that has nothing is reported, not an error.
@@ -334,7 +338,7 @@ func TestUninstallInteractiveSelectionByNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if f.claude.scope != "user" || strings.Contains(readFile(t, f.codexPath), "aulaglobal") {
+	if f.claude.Scope != "user" || strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") {
 		t.Fatalf("selection ignored\n%s", out)
 	}
 	// 0 means none; invalid answers are asked again.
@@ -369,7 +373,7 @@ func TestUninstallForeignEntriesNeedAnExplicitYes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if got := !strings.Contains(readFile(t, f.desktopPath), "aulaglobal"); got != tc.gone {
+			if got := !strings.Contains(testutil.ReadFile(t, f.desktopPath), "aulaglobal"); got != tc.gone {
 				t.Fatalf("removed=%v\n%s", got, out)
 			}
 			if !tc.gone && !strings.Contains(out, "«/usr/bin/node»") {
@@ -381,12 +385,12 @@ func TestUninstallForeignEntriesNeedAnExplicitYes(t *testing.T) {
 
 func TestUninstallClaudeLocalScopeIsExplainedNotTouched(t *testing.T) {
 	f := newUFix(t)
-	f.claude.scope = "local"
+	f.claude.Scope = "local"
 	out, err := f.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
 	if err != nil || !strings.Contains(out, "claude mcp remove --scope local aulaglobal") || !strings.Contains(out, "No hay nada que hacer") {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, c := range f.claude.calls {
+	for _, c := range f.claude.Calls {
 		if c[1] == "remove" {
 			t.Fatal("remove called")
 		}
@@ -396,7 +400,7 @@ func TestUninstallClaudeLocalScopeIsExplainedNotTouched(t *testing.T) {
 func TestUninstallMalformedConfigGivesManualInstructions(t *testing.T) {
 	f := newUFix(t)
 	f.desktop("{ not json")
-	before := readFile(t, f.desktopPath)
+	before := testutil.ReadFile(t, f.desktopPath)
 	out, err := f.run(uninstallOpts{clients: "claude-desktop,codex", clientsSet: true, yes: true}, "")
 	if err == nil {
 		t.Fatalf("a failure must give a non-zero exit\n%s", out)
@@ -404,18 +408,18 @@ func TestUninstallMalformedConfigGivesManualInstructions(t *testing.T) {
 	if !strings.Contains(out, "✗ Claude Desktop") || !strings.Contains(out, "Alternativa manual") || !strings.Contains(out, f.desktopPath) {
 		t.Fatal(out)
 	}
-	if readFile(t, f.desktopPath) != before || exists(f.desktopPath+".bak") {
+	if testutil.ReadFile(t, f.desktopPath) != before || exists(f.desktopPath+".bak") {
 		t.Fatal("malformed file touched")
 	}
 	// The healthy assistant is still handled.
-	if strings.Contains(readFile(t, f.codexPath), "aulaglobal") {
+	if strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") {
 		t.Fatal("codex not processed")
 	}
 }
 
 func TestUninstallRemoveFailureIsReportedWithManualSteps(t *testing.T) {
 	f := newUFix(t)
-	f.claude.failRemove = "private diagnostic"
+	f.claude.FailRemove = "private diagnostic"
 	out, err := f.run(uninstallOpts{clients: "claude-code", clientsSet: true, yes: true}, "")
 	if err == nil || !strings.Contains(out, "✗ Claude Code") || !strings.Contains(out, "claude mcp remove --scope user aulaglobal") || strings.Contains(out, "private diagnostic") {
 		t.Fatalf("%v\n%s", err, out)
@@ -438,7 +442,7 @@ func TestUninstallLogoutDeletesOnlyTheToken(t *testing.T) {
 			t.Fatalf("%s removed by logout", p)
 		}
 	}
-	if f.claude.scope != "user" || !strings.Contains(out, "aulaglobal-mcp setup") || strings.Contains(strings.ToLower(out), "revoc") || strings.Contains(strings.ToLower(out), "servidor") {
+	if f.claude.Scope != "user" || !strings.Contains(out, "aulaglobal-mcp setup") || strings.Contains(strings.ToLower(out), "revoc") || strings.Contains(strings.ToLower(out), "servidor") {
 		t.Fatalf("%s", out)
 	}
 	// Logging out twice is harmless.
@@ -451,14 +455,14 @@ func TestUninstallLogoutDeletesOnlyTheToken(t *testing.T) {
 func TestUninstallLogoutCustomTokenLocations(t *testing.T) {
 	f := newUFix(t)
 	custom := filepath.Join(f.root, "secrets", "token")
-	writeFile(t, custom, "tok")
-	writeFile(t, custom+".meta.json", "{}")
-	writeFile(t, filepath.Join(f.root, "secrets", "keep.txt"), "mine")
+	testutil.WriteFile(t, custom, "tok")
+	testutil.WriteFile(t, custom+".meta.json", "{}")
+	testutil.WriteFile(t, filepath.Join(f.root, "secrets", "keep.txt"), "mine")
 	f.e.tokenFile = custom
 	// A custom path recorded in an assistant entry is found too.
 	viaEntry := filepath.Join(f.root, "entry-secrets", "token")
-	writeFile(t, viaEntry, "tok")
-	f.claude.env = map[string]string{"AULAGLOBAL_TOKEN_FILE": viaEntry}
+	testutil.WriteFile(t, viaEntry, "tok")
+	f.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": viaEntry}
 	out, err := f.run(uninstallOpts{logout: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -466,7 +470,7 @@ func TestUninstallLogoutCustomTokenLocations(t *testing.T) {
 	if exists(custom) || exists(custom+".meta.json") || exists(viaEntry) || exists(filepath.Dir(viaEntry)) {
 		t.Fatalf("token left behind\n%s", out)
 	}
-	if readFile(t, filepath.Join(f.root, "secrets", "keep.txt")) != "mine" || !isDir(filepath.Join(f.root, "secrets")) {
+	if testutil.ReadFile(t, filepath.Join(f.root, "secrets", "keep.txt")) != "mine" || !isDir(filepath.Join(f.root, "secrets")) {
 		t.Fatal("a non-empty folder or a foreign file was removed")
 	}
 	// The default token (not in use here) is untouched.
@@ -478,8 +482,8 @@ func TestUninstallLogoutCustomTokenLocations(t *testing.T) {
 func TestUninstallLogoutNeverDeletesLargeOrIrregularEntryTokens(t *testing.T) {
 	f := newUFix(t)
 	big := filepath.Join(f.root, "thesis.docx")
-	writeFile(t, big, strings.Repeat("x", 100<<10))
-	f.claude.env = map[string]string{"AULAGLOBAL_TOKEN_FILE": big}
+	testutil.WriteFile(t, big, strings.Repeat("x", 100<<10))
+	f.claude.Env = map[string]string{"AULAGLOBAL_TOKEN_FILE": big}
 	if _, err := f.run(uninstallOpts{logout: true, yes: true}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -501,14 +505,14 @@ func TestUninstallAllEndToEnd(t *testing.T) {
 			t.Errorf("%s still exists", p)
 		}
 	}
-	if f.claude.scope != "" || strings.Contains(readFile(t, f.codexPath), "aulaglobal") || !strings.Contains(readFile(t, f.codexPath), "[mcp_servers.other]") {
+	if f.claude.Scope != "" || strings.Contains(testutil.ReadFile(t, f.codexPath), "aulaglobal") || !strings.Contains(testutil.ReadFile(t, f.codexPath), "[mcp_servers.other]") {
 		t.Error("assistants not disconnected correctly")
 	}
 	for _, p := range []string{f.zshrc, f.bashrc} {
-		if got := readFile(t, p); strings.Contains(got, pathMarker) || !strings.HasPrefix(got, "alias ll") && !strings.HasPrefix(got, "# bashrc") {
+		if got := testutil.ReadFile(t, p); strings.Contains(got, pathMarker) || !strings.HasPrefix(got, "alias ll") && !strings.HasPrefix(got, "# bashrc") {
 			t.Errorf("%s: %q", p, got)
 		}
-		if !strings.Contains(readFile(t, p+".bak"), pathMarker) {
+		if !strings.Contains(testutil.ReadFile(t, p+".bak"), pathMarker) {
 			t.Errorf("%s.bak is not the original", p)
 		}
 	}
@@ -521,7 +525,7 @@ func TestUninstallAllEndToEnd(t *testing.T) {
 	}
 	// Idempotent.
 	f.e.exe = filepath.Join(f.root, "elsewhere", "aulaglobal-mcp")
-	writeFile(t, f.e.exe, "x")
+	testutil.WriteFile(t, f.e.exe, "x")
 	if out, err = f.run(uninstallOpts{all: true, yes: true}, ""); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -549,7 +553,7 @@ func TestUninstallAllAsksAboutMaterialsDefaultingToKeep(t *testing.T) {
 	}{{"enter", "\n", false}, {"n", "n\n", false}, {"s", "s\n", true}, {"si-accent", "sí\n", true}, {"other", "quizá\n", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newUFix(t)
-			f.claude.scope = ""
+			f.claude.Scope = ""
 			out, err := f.run(uninstallOpts{all: true}, tc.answer+"s\n")
 			if err != nil {
 				t.Fatalf("%v\n%s", err, out)
@@ -579,10 +583,10 @@ func TestUninstallSuspiciousDataPathsAreRefused(t *testing.T) {
 		setup func(f *ufix, dir string)
 	}{
 		"home itself":     {func(f *ufix) string { return f.home }, nil},
-		"no marker":       {func(f *ufix) string { return filepath.Join(f.root, "notes") }, func(f *ufix, d string) { writeFile(f.t, filepath.Join(d, "a.docx"), "x") }},
+		"no marker":       {func(f *ufix) string { return filepath.Join(f.root, "notes") }, func(f *ufix, d string) { testutil.WriteFile(f.t, filepath.Join(d, "a.docx"), "x") }},
 		"filesystem root": {func(f *ufix) string { return filepath.VolumeName(f.root) + string(filepath.Separator) }, nil},
 		"parent of home":  {func(f *ufix) string { return f.root }, func(f *ufix, d string) {}},
-		"user folder":     {func(f *ufix) string { return filepath.Join(f.root, "Documents") }, func(f *ufix, d string) { writeFile(f.t, filepath.Join(d, dataMarker, "m"), "x") }},
+		"user folder":     {func(f *ufix) string { return filepath.Join(f.root, "Documents") }, func(f *ufix, d string) { testutil.WriteFile(f.t, filepath.Join(d, dataMarker, "m"), "x") }},
 		"program folder":  {func(f *ufix) string { return f.installDir }, func(f *ufix, d string) {}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -591,7 +595,7 @@ func TestUninstallSuspiciousDataPathsAreRefused(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(f, dir)
 			}
-			f.claude.scope = ""
+			f.claude.Scope = ""
 			f.e.dataExtra = dir
 			f.e.dataDefault = filepath.Join(f.root, "nothing-here") // so the default folder is not a candidate
 			before := snapshot(t, f.root)
@@ -625,10 +629,10 @@ func isProgramOrConfig(f *ufix, rel string) bool {
 func TestUninstallCustomDataFolderOnlyDeletedByAnInteractiveAnswer(t *testing.T) {
 	setup := func() *ufix {
 		f := newUFix(t)
-		f.claude.scope = ""
+		f.claude.Scope = ""
 		custom := filepath.Join(f.root, "Apuntes UC3M")
-		writeFile(t, filepath.Join(custom, dataMarker, "m"), "x")
-		writeFile(t, filepath.Join(custom, "a.pdf"), "x")
+		testutil.WriteFile(t, filepath.Join(custom, dataMarker, "m"), "x")
+		testutil.WriteFile(t, filepath.Join(custom, "a.pdf"), "x")
 		f.e.dataExtra = custom
 		f.e.dataDefault = filepath.Join(f.root, "nothing-here")
 		return f
@@ -654,8 +658,8 @@ func TestUninstallCustomDataFolderOnlyDeletedByAnInteractiveAnswer(t *testing.T)
 func TestUninstallListsDifferentMaterialFolders(t *testing.T) {
 	f := newUFix(t)
 	other := filepath.Join(f.root, "Apuntes")
-	writeFile(t, filepath.Join(other, dataMarker, "m"), "x")
-	f.claude.env = map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": other}
+	testutil.WriteFile(t, filepath.Join(other, dataMarker, "m"), "x")
+	f.claude.Env = map[string]string{"AULAGLOBAL_DOWNLOAD_DIR": other}
 	f.e.dataExtra = f.data
 	out, err := f.run(uninstallOpts{all: true}, "n\nn\ns\n")
 	if err != nil {
@@ -681,10 +685,10 @@ func TestUninstallAllInContainerKeepsTheBinary(t *testing.T) {
 	if !exists(f.exe) || !strings.Contains(out, "contenedor") {
 		t.Fatalf("%s", out)
 	}
-	if exists(f.token) || f.claude.scope != "" {
+	if exists(f.token) || f.claude.Scope != "" {
 		t.Fatal("the other steps should still run")
 	}
-	if !strings.Contains(readFile(t, f.zshrc), pathMarker) {
+	if !strings.Contains(testutil.ReadFile(t, f.zshrc), pathMarker) {
 		t.Fatal("profiles are not this container's business")
 	}
 }
@@ -692,12 +696,12 @@ func TestUninstallAllInContainerKeepsTheBinary(t *testing.T) {
 func TestUninstallProfileLineForAnotherFolderIsKept(t *testing.T) {
 	f := newUFix(t)
 	other := `export PATH="/opt/other-copy:$PATH" ` + pathMarker
-	writeFile(t, f.zshrc, "x\n"+other+"\n")
+	testutil.WriteFile(t, f.zshrc, "x\n"+other+"\n")
 	out, err := f.run(uninstallOpts{all: true, yes: true}, "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if got := readFile(t, f.zshrc); got != "x\n"+other+"\n" || exists(f.zshrc+".bak") {
+	if got := testutil.ReadFile(t, f.zshrc); got != "x\n"+other+"\n" || exists(f.zshrc+".bak") {
 		t.Fatalf("%q", got)
 	}
 	if !strings.Contains(out, "es de otra carpeta") {
@@ -722,7 +726,7 @@ func TestUninstallDryRunChangesNothing(t *testing.T) {
 		if d := sameSnapshot(before, snapshot(t, f.root)); d != "" {
 			t.Fatalf("%+v changed: %s", o, d)
 		}
-		for _, c := range f.claude.calls {
+		for _, c := range f.claude.Calls {
 			if c[1] == "remove" {
 				t.Fatalf("%+v: claude remove called", o)
 			}
@@ -756,7 +760,7 @@ func TestUninstallAllWindowsSemantics(t *testing.T) {
 	if err := os.Rename(f.exe, f.e.exe); err != nil {
 		t.Fatal(err)
 	}
-	f.claude.command = f.e.exe
+	f.claude.Command = f.e.exe
 	f.reg.value = `C:\Windows;` + f.installDir + `\;C:\Tools`
 	var broadcast int
 	f.e.winPath = f.reg
@@ -778,7 +782,7 @@ func TestUninstallAllWindowsSemantics(t *testing.T) {
 		t.Fatalf("%v", f.spawned)
 	}
 	// Shell profiles are a Unix thing.
-	if !strings.Contains(readFile(t, f.zshrc), pathMarker) {
+	if !strings.Contains(testutil.ReadFile(t, f.zshrc), pathMarker) {
 		t.Fatal("profile edited on Windows")
 	}
 	if !strings.Contains(out, "se borrará en unos segundos") {
@@ -880,20 +884,20 @@ func TestClaudeCodeThroughARealSubprocess(t *testing.T) {
 	}
 	state := filepath.Join(dir, "state")
 	exe := filepath.Join(dir, "aulaglobal-mcp")
-	writeFile(t, state, exe+"\n")
+	testutil.WriteFile(t, state, exe+"\n")
 	t.Setenv("AULAGLOBAL_FAKE_CLAUDE", state)
 
-	e := fileClientEnv(t)
-	e.Look = func(n string) (string, error) {
+	e := assistantstest.FileEnv(t)
+	e.LookPath = func(n string) (string, error) {
 		if n == "claude" {
 			return cli, nil
 		}
 		return "", os.ErrNotExist
 	}
-	e.Run = runClaude
-	a := claudeAssistant{}
+	e.RunClaude = assistants.RealEnv(runtime.GOOS, "", "").RunClaude
+	a := assistantstest.ByID(t, "claude-code")
 	l := a.Find(e)
-	if l.state != linkPresent || !pointsToProgram(l.command, exe, runtime.GOOS == "windows") {
+	if l.State != assistants.LinkPresent || !pointsToProgram(l.Command, exe, runtime.GOOS == "windows") {
 		t.Fatalf("%+v", l)
 	}
 	if err := a.Remove(e); err != nil {
@@ -902,7 +906,7 @@ func TestClaudeCodeThroughARealSubprocess(t *testing.T) {
 	if b, _ := os.ReadFile(state); strings.TrimSpace(string(b)) != "" {
 		t.Fatal("the fake server was not removed")
 	}
-	if l := a.Find(e); l.state != linkNone {
+	if l := a.Find(e); l.State != assistants.LinkNone {
 		t.Fatalf("%+v", l)
 	}
 	if err := a.Remove(e); err != nil {

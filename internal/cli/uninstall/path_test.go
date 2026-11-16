@@ -1,10 +1,12 @@
-package main
+package uninstall
 
 import (
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"aulaglobal-mcp/internal/testutil"
 )
 
 func TestMarkedPathLineIsExactlyWhatInstallShWrites(t *testing.T) {
@@ -55,7 +57,7 @@ func TestRewriteProfileKeepsModeAndBacksUp(t *testing.T) {
 		t.Skip("POSIX permission bits")
 	}
 	f := filepath.Join(t.TempDir(), ".zshrc")
-	writeFile(t, f, "old\n")
+	testutil.WriteFile(t, f, "old\n")
 	if err := os.Chmod(f, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -63,19 +65,19 @@ func TestRewriteProfileKeepsModeAndBacksUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	fi, _ := os.Stat(f)
-	if readFile(t, f) != "new\n" || readFile(t, f+".bak") != "old\n" || fi.Mode().Perm() != 0644 {
+	if testutil.ReadFile(t, f) != "new\n" || testutil.ReadFile(t, f+".bak") != "old\n" || fi.Mode().Perm() != 0644 {
 		t.Fatal("rewrite", fi.Mode())
 	}
 	// A symlinked profile is edited at its target and stays a symlink.
 	dir := t.TempDir()
 	target := filepath.Join(dir, "dotfiles", "zshrc")
 	link := filepath.Join(dir, ".zshrc")
-	writeFile(t, target, "old\n")
-	symlinkOrSkip(t, target, link)
+	testutil.WriteFile(t, target, "old\n")
+	testutil.SymlinkOrSkip(t, target, link)
 	if err := rewriteProfile(link, []byte("new\n")); err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 || readFile(t, target) != "new\n" || readFile(t, link+".bak") != "old\n" {
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 || testutil.ReadFile(t, target) != "new\n" || testutil.ReadFile(t, link+".bak") != "old\n" {
 		t.Fatal("symlink was replaced")
 	}
 }

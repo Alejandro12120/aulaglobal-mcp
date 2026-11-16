@@ -1,13 +1,14 @@
-package main
+package assistants_test
 
 import (
-	"aulaglobal-mcp/internal/userpaths"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/userpaths"
 )
 
 func TestFindAntigravity(t *testing.T) {
@@ -42,15 +43,15 @@ func TestFindAntigravity(t *testing.T) {
 				}
 				return fstest.MapFS{"x": &fstest.MapFile{Mode: c.mode}}.Stat("x")
 			}
-			if _, ok := findAntigravity(goos, home, local, look, stat); !ok {
+			if _, ok := assistants.FindAntigravity(goos, home, local, look, stat); !ok {
 				t.Fatal(goos, c)
 			}
 		}
 		missing := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-		if _, ok := findAntigravity(goos, home, local, look, missing); ok {
+		if _, ok := assistants.FindAntigravity(goos, home, local, look, missing); ok {
 			t.Fatal("present")
 		}
-		cli, ok := findAntigravity(goos, home, local, func(n string) (string, error) {
+		cli, ok := assistants.FindAntigravity(goos, home, local, func(n string) (string, error) {
 			if n == "agy" {
 				return "fake-cli", nil
 			}
@@ -67,7 +68,7 @@ func TestRealAntigravity(t *testing.T) {
 	if cli == "" {
 		t.Skip("set AULAGLOBAL_TEST_AGY to isolated binary")
 	}
-	entry, e := antigravityCLIEntry(cli, "/bin/true", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
+	entry, e := assistants.AntigravityCLIEntry(cli, "/bin/true", []string{"-e", "AULAGLOBAL_DOWNLOAD_DIR=/notes"})
 	if e != nil || entry["command"] != "/bin/true" || entry["disabled"] != false {
 		t.Fatal(entry, e)
 	}
@@ -78,25 +79,5 @@ func TestAntigravityHelpFixture(t *testing.T) {
 	b, e := os.ReadFile("testdata/agy-1.5.9-mcp-add-help.txt")
 	if e != nil || !strings.Contains(string(b), "<commandOrUrl>") || !strings.Contains(string(b), "--env") {
 		t.Fatal("unexpected real CLI help", e)
-	}
-}
-func TestAntigravityGeneratorFailure(t *testing.T) {
-	a := antigravityAssistant()
-	e, w, _, _ := clientFixture(t, a, true)
-	e.Look = func(n string) (string, error) {
-		if n == "agy" {
-			return "fake-agy", nil
-		}
-		return "", os.ErrNotExist
-	}
-	e.GenerateAG = func(string, string, []string) (map[string]any, error) { return nil, errors.New("private diagnostic") }
-	var out strings.Builder
-	configureClients(setupUI{strings.NewReader(""), &out, nil}, e, w, []assistant{a}, true)
-	if !strings.Contains(out.String(), "✗") || strings.Contains(out.String(), "private diagnostic") {
-		t.Fatal(out.String())
-	}
-	p := userpaths.Antigravity(e.Home)
-	if _, err := os.Stat(p); !os.IsNotExist(err) {
-		t.Fatal("written after generator failure")
 	}
 }

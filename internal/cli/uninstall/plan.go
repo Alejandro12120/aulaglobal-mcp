@@ -1,4 +1,4 @@
-package main
+package uninstall
 
 import (
 	"errors"
@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/termui"
 )
 
 // An uninstall is first planned and then run. Planning only reads: each
@@ -62,8 +65,8 @@ func printItem(out io.Writer, st stepStatus, text string) {
 }
 
 type clientLink struct {
-	a    assistant
-	l    link
+	a    assistants.Assistant
+	l    assistants.Link
 	ours bool
 }
 
@@ -71,7 +74,7 @@ func (e uninstallEnv) inspectClients() []clientLink {
 	var out []clientLink
 	for _, a := range e.list {
 		l := a.Find(e.ce)
-		out = append(out, clientLink{a, l, l.state == linkPresent && pointsToProgram(l.command, e.exe, e.goos == "windows")})
+		out = append(out, clientLink{a, l, l.State == assistants.LinkPresent && pointsToProgram(l.Command, e.exe, e.goos == "windows")})
 	}
 	return out
 }
@@ -81,37 +84,37 @@ func quote(s string) string { return "«" + s + "»" }
 // planClients adds one step per assistant to disconnect. A nil sel means every
 // assistant that has the entry. Otherwise only the IDs in sel are considered,
 // and an assistant named there that has nothing to remove gets a note.
-func (e uninstallEnv) planClients(u setupUI, o uninstallOpts, p *planner, cls []clientLink, sel map[string]bool) {
+func (e uninstallEnv) planClients(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink, sel map[string]bool) {
 	explicit := sel != nil
 	for _, c := range cls {
 		if explicit && !sel[c.a.ID()] {
 			continue
 		}
 		name := c.a.Name()
-		switch c.l.state {
-		case linkNotInstalled:
+		switch c.l.State {
+		case assistants.LinkNotInstalled:
 			if explicit {
 				p.note(stInfo, name+": no está instalado en este ordenador.")
 			}
-		case linkNone:
+		case assistants.LinkNone:
 			if explicit {
 				p.note(stInfo, name+": no tiene AulaGlobal conectado.")
 			}
-		case linkElsewhere:
-			p.note(stWarn, name+": AulaGlobal "+c.l.detail)
-		case linkError:
-			p.note(stFail, name+": no se puede modificar con seguridad ("+c.l.detail+"). No se ha tocado nada.\n"+c.a.ManualRemove(e.ce))
-		case linkPresent:
+		case assistants.LinkElsewhere:
+			p.note(stWarn, name+": AulaGlobal "+c.l.Detail)
+		case assistants.LinkError:
+			p.note(stFail, name+": no se puede modificar con seguridad ("+c.l.Detail+"). No se ha tocado nada.\n"+c.a.ManualRemove(e.ce))
+		case assistants.LinkPresent:
 			if !c.ours {
-				if !e.interactive || o.yes || !u.yes(name+": la entrada «aulaglobal» apunta a "+quote(c.l.command)+", no a este programa. ¿Quitarla igualmente? [s/N]") {
-					p.note(stWarn, name+": la entrada apunta a "+quote(c.l.command)+", no a este programa; no se toca.")
+				if !e.interactive || o.yes || !ui.Yes(name+": la entrada «aulaglobal» apunta a "+quote(c.l.Command)+", no a este programa. ¿Quitarla igualmente? [s/N]") {
+					p.note(stWarn, name+": la entrada apunta a "+quote(c.l.Command)+", no a este programa; no se toca.")
 					continue
 				}
 			}
 			c := c
-			plan := name + ": ejecutar `" + c.l.detail + "`"
-			if c.l.location != "" {
-				plan = name + ": quitar la entrada «aulaglobal» de " + c.l.location + " (copia de seguridad: " + c.l.location + ".bak)"
+			plan := name + ": ejecutar `" + c.l.Detail + "`"
+			if c.l.Location != "" {
+				plan = name + ": quitar la entrada «aulaglobal» de " + c.l.Location + " (copia de seguridad: " + c.l.Location + ".bak)"
 			}
 			p.add(plan, func() (stepStatus, string) {
 				if err := c.a.Remove(e.ce); err != nil {
@@ -136,7 +139,7 @@ func (e uninstallEnv) tokenCandidates(cls []clientLink) []string {
 	}
 	add(e.tokenFile)
 	for _, c := range cls {
-		if p := c.l.env["AULAGLOBAL_TOKEN_FILE"]; c.ours && filepath.IsAbs(p) {
+		if p := c.l.Env["AULAGLOBAL_TOKEN_FILE"]; c.ours && filepath.IsAbs(p) {
 			if fi, err := os.Lstat(p); err == nil && fi.Mode().IsRegular() && fi.Size() <= 64<<10 {
 				add(p)
 			}
@@ -201,8 +204,8 @@ func removeOwnDir(dir, what string) func() (stepStatus, string) {
 	}
 }
 
-func (e uninstallEnv) planAll(u setupUI, o uninstallOpts, p *planner, cls []clientLink) {
-	e.planClients(u, o, p, cls, nil)
+func (e uninstallEnv) planAll(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink) {
+	e.planClients(ui, o, p, cls, nil)
 	e.planToken(p, cls, true)
 	if isDir(e.configDir) {
 		p.add("Borrar la carpeta de configuración "+e.configDir, removeOwnDir(e.configDir, "la carpeta de configuración"))
@@ -218,7 +221,7 @@ func (e uninstallEnv) planAll(u setupUI, o uninstallOpts, p *planner, cls []clie
 	} else {
 		e.planProfiles(p, exeDir)
 	}
-	e.planData(u, o, p, cls)
+	e.planData(ui, o, p, cls)
 	if !e.inContainer {
 		rmDir := baseName(exeDir) == programName
 		plan := "Borrar el programa " + e.exe
@@ -318,7 +321,7 @@ func (e uninstallEnv) dataCandidates(cls []clientLink) []string {
 	}
 	for _, c := range cls {
 		if c.ours {
-			if d := c.l.env["AULAGLOBAL_DOWNLOAD_DIR"]; d != "" {
+			if d := c.l.Env["AULAGLOBAL_DOWNLOAD_DIR"]; d != "" {
 				add(d)
 			} else {
 				add(e.dataDefault)
@@ -336,7 +339,7 @@ func (e uninstallEnv) dataCandidates(cls []clientLink) []string {
 
 // planData decides, folder by folder, whether to delete the materials. Nothing
 // outside a folder that passes checkDataDir is ever deleted.
-func (e uninstallEnv) planData(u setupUI, o uninstallOpts, p *planner, cls []clientLink) {
+func (e uninstallEnv) planData(ui termui.UI, o uninstallOpts, p *planner, cls []clientLink) {
 	protect := []string{filepath.Dir(e.exe), e.configDir, e.cacheDir, filepath.Dir(e.tokenFile)}
 	for _, d := range e.dataCandidates(cls) {
 		v := checkDataDir(d, e.home, e.dataDefault, protect)
@@ -358,9 +361,9 @@ func (e uninstallEnv) planData(u setupUI, o uninstallOpts, p *planner, cls []cli
 			want = true
 		case ask:
 			if v.custom {
-				fmt.Fprintln(u.out, "\n! "+d+" no es la carpeta predeterminada: se borrará todo lo que haya dentro, no solo los apuntes.")
+				fmt.Fprintln(ui.Out, "\n! "+d+" no es la carpeta predeterminada: se borrará todo lo que haya dentro, no solo los apuntes.")
 			}
-			want = u.yes("¿Borrar también la carpeta AulaGlobal con tus materiales (" + d + ")? [s/N]")
+			want = ui.Yes("¿Borrar también la carpeta AulaGlobal con tus materiales (" + d + ")? [s/N]")
 		}
 		if !want {
 			if !(v.custom && !ask) {

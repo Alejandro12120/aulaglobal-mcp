@@ -12,30 +12,35 @@ import (
 	"syscall"
 
 	"aulaglobal-mcp/internal/aulaglobal"
+	"aulaglobal-mcp/internal/cli/serve"
+	"aulaglobal-mcp/internal/cli/setup"
+	"aulaglobal-mcp/internal/cli/uninstall"
+	"aulaglobal-mcp/internal/cli/update"
 	"aulaglobal-mcp/internal/selfupdate"
 	"aulaglobal-mcp/internal/userpaths"
 
 	"golang.org/x/term"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	selfupdate.CleanupOld()
-	if e := run(); e != nil {
-		slog.Error("server stopped", "error", aulaglobal.Redact(e.Error(), os.Getenv("AULAGLOBAL_TOKEN"), os.Getenv("MCP_HTTP_AUTH_TOKEN")))
+	if err := run(); err != nil {
+		slog.Error("server stopped", "error", aulaglobal.Redact(err.Error(), os.Getenv("AULAGLOBAL_TOKEN"), os.Getenv("MCP_HTTP_AUTH_TOKEN")))
 		os.Exit(1)
 	}
 }
 
 // run dispatches on the first argument. Anything that is not a subcommand
-// starts the MCP server. To add a subcommand, add a case here and a file with
-// its implementation.
+// starts the MCP server. To add a subcommand, add a case here and a package
+// under internal/cli with its implementation.
 func run() error {
 	// Double-clicking the program on Windows opens a console with no arguments.
 	if runtime.GOOS == "windows" && len(os.Args) == 1 && term.IsTerminal(int(os.Stdin.Fd())) {
-		return setup(nil)
+		return setup.Run(nil)
 	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -43,11 +48,11 @@ func run() error {
 			fmt.Println(version)
 			return nil
 		case "setup":
-			return setup(os.Args[2:])
+			return setup.Run(os.Args[2:])
 		case "update":
-			return update(os.Args[2:])
+			return update.Run(os.Args[2:], version)
 		case "uninstall":
-			return uninstall(os.Args[2:])
+			return uninstall.Run(os.Args[2:])
 		}
 	}
 	api, defaultData, err := newClient()
@@ -57,9 +62,9 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	if len(os.Args) > 1 && os.Args[1] == "token-from-cookie" {
-		return tokenFromCookie(ctx, api, os.Args[2:])
+		return setup.TokenFromCookie(ctx, api, os.Args[2:])
 	}
-	return serve(ctx, api, defaultData)
+	return serve.Run(ctx, api, defaultData, version)
 }
 
 // newClient builds the AulaGlobal client from the environment. The token comes
@@ -74,16 +79,9 @@ func newClient() (*aulaglobal.Client, string, error) {
 	}
 	tokenFile := os.Getenv("AULAGLOBAL_TOKEN_FILE")
 	if tokenFile == "" && os.Getenv("AULAGLOBAL_TOKEN") == "" {
-		if _, e := os.Stat(defaultToken); e == nil {
+		if _, statErr := os.Stat(defaultToken); statErr == nil {
 			tokenFile = defaultToken
 		}
 	}
 	return aulaglobal.New(aulaglobal.Site, aulaglobal.StaticToken{Value: os.Getenv("AULAGLOBAL_TOKEN"), File: tokenFile}), defaultData, nil
-}
-
-func env(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
 }

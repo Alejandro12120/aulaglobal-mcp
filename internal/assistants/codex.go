@@ -1,4 +1,4 @@
-package main
+package assistants
 
 import (
 	"bufio"
@@ -10,14 +10,14 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-func codexAssistant() assistant {
+func codexAssistant() Assistant {
 	return fileAssistant{
 		id:     "codex",
 		name:   "Codex / ChatGPT",
 		reload: "Reinicia Codex / ChatGPT o abre una sesión nueva.",
 		toml:   true,
-		path:   func(e clientEnv) (string, error) { return filepath.Join(e.Home, ".codex", "config.toml"), nil },
-		detect: func(e clientEnv) bool { return dirExists(e, filepath.Join(e.Home, ".codex")) },
+		path:   func(e Env) (string, error) { return filepath.Join(e.Home, ".codex", "config.toml"), nil },
+		detect: func(e Env) bool { return dirExists(e, filepath.Join(e.Home, ".codex")) },
 
 		merge:      codexConfig,
 		entryOf:    codexEntry,

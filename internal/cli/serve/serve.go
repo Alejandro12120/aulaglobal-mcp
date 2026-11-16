@@ -1,4 +1,4 @@
-package main
+package serve
 
 import (
 	"context"
@@ -14,16 +14,19 @@ import (
 	"time"
 
 	"aulaglobal-mcp/internal/aulaglobal"
+	"aulaglobal-mcp/internal/cli/env"
 	"aulaglobal-mcp/internal/mcpserver"
+	"aulaglobal-mcp/internal/selfupdate"
 	"aulaglobal-mcp/internal/store"
-
+	"aulaglobal-mcp/internal/userpaths"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// serve runs the MCP server over stdio or HTTP until ctx is cancelled.
-func serve(ctx context.Context, api *aulaglobal.Client, defaultData string) error {
-	transport := flag.String("transport", env("MCP_TRANSPORT", "stdio"), "stdio or http")
-	addr := flag.String("addr", env("MCP_ADDR", "127.0.0.1:8080"), "HTTP bind address")
+// Run runs the MCP server over stdio or HTTP until ctx is cancelled. version
+// is the version of the running program, which the update check compares.
+func Run(ctx context.Context, api *aulaglobal.Client, defaultData, version string) error {
+	transport := flag.String("transport", env.Or("MCP_TRANSPORT", "stdio"), "stdio or http")
+	addr := flag.String("addr", env.Or("MCP_ADDR", "127.0.0.1:8080"), "HTTP bind address")
 	unsafe := flag.Bool("dangerously-disable-http-auth", false, "DANGER: allow unauthenticated access to course files")
 	hosts := flag.String("allowed-hosts", os.Getenv("MCP_ALLOWED_HOSTS"), "comma separated exact Host headers; default localhost:8080,127.0.0.1:8080")
 	origins := flag.String("allowed-origins", os.Getenv("MCP_ALLOWED_ORIGINS"), "comma separated exact allowed Origin headers; default none")
@@ -53,12 +56,12 @@ func serve(ctx context.Context, api *aulaglobal.Client, defaultData string) erro
 			return e
 		}
 	}
-	st, e := store.Open(env("AULAGLOBAL_DOWNLOAD_DIR", defaultData), maxBytes, int(workers))
+	st, e := store.Open(env.Or("AULAGLOBAL_DOWNLOAD_DIR", defaultData), maxBytes, int(workers))
 	if e != nil {
 		return e
 	}
 	defer st.Root.Close()
-	server := mcpserver.New(api, st, startUpdateCheck(ctx))
+	server := mcpserver.New(api, st, startUpdateCheck(ctx, version))
 	switch *transport {
 	case "stdio":
 		return server.Run(ctx, &mcp.StdioTransport{})
@@ -127,4 +130,19 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, hosts, origins str
 		defer cancel()
 		return httpServer.Shutdown(shutdown)
 	}
+}
+
+// startUpdateCheck launches the single background check for the MCP server and
+// returns the notifier, or nil when checks are disabled.
+func startUpdateCheck(ctx context.Context, version string) mcpserver.Updates {
+	if !selfupdate.CheckEnabled(version) {
+		return nil
+	}
+	cache, _ := userpaths.UpdateCache() // an error just disables caching
+	checker, err := selfupdate.NewChecker(version, cache)
+	if err != nil {
+		return nil
+	}
+	go checker.Run(ctx)
+	return checker
 }

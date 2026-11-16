@@ -1,4 +1,4 @@
-package main
+package assistants
 
 import (
 	"context"
@@ -17,25 +17,25 @@ import (
 // its `agy` CLI is installed, the entry comes from the CLI so that it has the
 // shape this agy version expects.
 
-func antigravityAssistant() assistant {
+func antigravityAssistant() Assistant {
 	return fileAssistant{
 		id:     "antigravity",
 		name:   "Antigravity",
 		reload: "Recarga /mcp en CLI; usa Restart en Customizations → Installed → MCP Servers, o reinicia el IDE.",
-		path:   func(e clientEnv) (string, error) { return userpaths.Antigravity(e.Home), nil },
-		detect: func(e clientEnv) bool {
-			_, ok := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
+		path:   func(e Env) (string, error) { return userpaths.Antigravity(e.Home), nil },
+		detect: func(e Env) bool {
+			_, ok := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.LookPath, e.Stat)
 			return ok
 		},
 		merge:      mcpServersConfig,
 		entryOf:    mcpServersEntry,
 		removeFrom: mcpServersRemove,
-		generate: func(e clientEnv, w desiredEntry) (map[string]any, error) {
-			cli, _ := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.Look, e.Stat)
+		generate: func(e Env, w Entry) (map[string]any, error) {
+			cli, _ := findAntigravity(e.GOOS, e.Home, e.LocalAppData, e.LookPath, e.Stat)
 			if cli != "" {
-				return e.GenerateAG(cli, w.Exe, w.Extra)
+				return e.GenerateAntigravity(cli, w.Exe, w.Extra)
 			}
-			return w.entry(), nil
+			return w.Config(), nil
 		},
 		ignoreDisabledFalse: true,
 	}

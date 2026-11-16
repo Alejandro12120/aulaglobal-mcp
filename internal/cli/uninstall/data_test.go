@@ -1,17 +1,19 @@
-package main
+package uninstall
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aulaglobal-mcp/internal/testutil"
 )
 
 func TestTokenFiles(t *testing.T) {
 	dir := t.TempDir()
 	tok := filepath.Join(dir, "token")
 	for _, n := range []string{"token", "token.private", "token.meta.json", ".token-123", "token.notes", "other"} {
-		writeFile(t, filepath.Join(dir, n), "x")
+		testutil.WriteFile(t, filepath.Join(dir, n), "x")
 	}
 	got := tokenFiles(tok)
 	if len(got) != 4 {
@@ -58,7 +60,7 @@ func TestCheckDataDir(t *testing.T) {
 		t.Fatalf("empty: %+v", v)
 	}
 	notes := mk(filepath.Join(root, "notes"), false)
-	writeFile(t, filepath.Join(notes, "important.docx"), "x")
+	testutil.WriteFile(t, filepath.Join(notes, "important.docx"), "x")
 	for name, p := range map[string]string{
 		"no marker":      notes,
 		"home":           home,
@@ -76,21 +78,21 @@ func TestCheckDataDir(t *testing.T) {
 	}
 	// A file, and (where supported) a symlink to a marked folder, are refused.
 	f := filepath.Join(root, "file")
-	writeFile(t, f, "x")
+	testutil.WriteFile(t, f, "x")
 	if v := check(f); v.ok {
 		t.Errorf("file accepted")
 	}
 	target := mk(filepath.Join(root, "target"), true)
 	link := filepath.Join(root, "link")
 	t.Run("symlink", func(t *testing.T) {
-		symlinkOrSkip(t, target, link)
+		testutil.SymlinkOrSkip(t, target, link)
 		if v := check(link); v.ok || !strings.Contains(v.reason, "enlace") {
 			t.Errorf("symlink accepted: %+v", v)
 		}
 	})
 	// The marker must be a directory: a plain file with that name proves nothing.
 	fake := mk(filepath.Join(root, "fake"), false)
-	writeFile(t, filepath.Join(fake, dataMarker), "x")
+	testutil.WriteFile(t, filepath.Join(fake, dataMarker), "x")
 	if v := check(fake); v.ok {
 		t.Errorf("file marker accepted")
 	}

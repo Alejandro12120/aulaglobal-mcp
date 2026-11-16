@@ -1,10 +1,12 @@
-package main
+package uninstall
 
 import (
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"aulaglobal-mcp/internal/atomicfile"
 )
 
 // Shell profile and Windows PATH edits that `uninstall` makes. Each function
@@ -103,7 +105,7 @@ func rewriteProfile(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = writeAtomic(path+".bak", old); err != nil {
+	if err = atomicfile.Write(path+".bak", old); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".profile-*")

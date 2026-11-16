@@ -1,4 +1,4 @@
-package main
+package assistants_test
 
 import (
 	"encoding/json"
@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aulaglobal-mcp/internal/assistants"
 )
 
 func TestConfigMerging(t *testing.T) {
 	entry := map[string]any{"command": `C:\Users\Ana\aulaglobal-mcp.exe`, "args": []string{"--transport", "stdio"}}
 	old := []byte(`{"other":{"large":1234567890123456789},"mcpServers":{"keep":{"command":"keep"}}}`)
-	b, _, e := mcpServersConfig(old, entry, true)
+	b, _, e := assistants.McpServersConfig(old, entry, true)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -20,7 +22,7 @@ func TestConfigMerging(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(path, old, 0600)
-	if e = atomicConfig(path, b); e != nil {
+	if e = assistants.AtomicConfig(path, b); e != nil {
 		t.Fatal(e)
 	}
 	bak, _ := os.ReadFile(path + ".bak")
@@ -32,7 +34,7 @@ func TestConfigMerging(t *testing.T) {
 		t.Fatal("write")
 	}
 	for _, old := range []string{"# keep\nmodel = 'x'\n[mcp_servers.other]\ncommand='keep'\n", "model='x'\n[mcp_servers.aulaglobal]\ncommand='old'\n[mcp_servers.aulaglobal.env]\nX='x'\n[mcp_servers.other]\ncommand='keep'\n", "model='x'\n[mcp_servers.\"aulaglobal\"]\ncommand='old'\n"} {
-		b, exists, e := codexConfig([]byte(old), entry, false)
+		b, exists, e := assistants.CodexConfig([]byte(old), entry, false)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -40,7 +42,7 @@ func TestConfigMerging(t *testing.T) {
 			if b != nil {
 				t.Fatal("must confirm")
 			}
-			b, _, e = codexConfig([]byte(old), entry, true)
+			b, _, e = assistants.CodexConfig([]byte(old), entry, true)
 		}
 		if e != nil || !strings.Contains(string(b), "model") || strings.Contains(string(b), "command='old'") {
 			t.Fatal(e, string(b))
@@ -49,10 +51,10 @@ func TestConfigMerging(t *testing.T) {
 			t.Fatal("comment lost")
 		}
 	}
-	if _, _, e = mcpServersConfig([]byte("{bad"), entry, true); e == nil {
+	if _, _, e = assistants.McpServersConfig([]byte("{bad"), entry, true); e == nil {
 		t.Fatal("invalid json accepted")
 	}
-	if _, _, e = codexConfig([]byte("[bad"), entry, true); e == nil {
+	if _, _, e = assistants.CodexConfig([]byte("[bad"), entry, true); e == nil {
 		t.Fatal("invalid toml accepted")
 	}
 	var root map[string]any

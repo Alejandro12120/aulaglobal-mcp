@@ -1,42 +1,46 @@
-package main
+package setup
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aulaglobal-mcp/internal/assistants"
+	"aulaglobal-mcp/internal/assistants/assistantstest"
+	"aulaglobal-mcp/internal/termui"
+	"aulaglobal-mcp/internal/testutil"
 )
 
 func TestClientTranscripts(t *testing.T) {
 	for _, scenario := range []string{"local-and-codex", "configure-all", "already-configured", "failure"} {
 		t.Run(scenario, func(t *testing.T) {
-			a := claudeAssistant{}
-			e, w, state, fail := clientFixture(t, a, true)
+			a := assistantstest.ByID(t, "claude-code")
+			e, w, state, fail := assistantstest.Fixture(t, a, true)
 			// Stable desired command makes golden files independent of OS and temp path.
-			w = desiredEntry{Exe: "/installed/aulaglobal-mcp"}
+			w = assistants.Entry{Exe: "/installed/aulaglobal-mcp"}
 			input := "e\ns\nn\n"
-			list := assistants
+			list := assistants.All()
 			switch scenario {
 			case "local-and-codex":
 				*state = "local"
 				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
-				seedClient(t, codexAssistant(), e, w, "different")
+				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), e, w, "different")
 			case "configure-all":
 				input = "\n"
 				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
 			case "already-configured":
 				*state = "identical"
-				list = []assistant{codexAssistant()}
+				list = []assistants.Assistant{assistantstest.ByID(t, "codex")}
 				os.MkdirAll(filepath.Join(e.Home, ".codex"), 0700)
-				seedClient(t, codexAssistant(), e, w, "identical")
+				assistantstest.Seed(t, assistantstest.ByID(t, "codex"), e, w, "identical")
 			case "failure":
 				*fail = true
-				list = []assistant{a}
+				list = []assistants.Assistant{a}
 				input = "s\n"
 			}
 			var out strings.Builder
-			connectAssistants(setupUI{strings.NewReader(input), &out, nil}, e, w, list, false)
+			connectAssistants(termui.UI{In: strings.NewReader(input), Out: &out}, e, w, list, false)
 			got := strings.ReplaceAll(out.String(), "\r\n", "\n")
 			if !strings.Contains(got, "── Paso 4 de 4 · Conectar con tus asistentes ──\n\n"+privacyNotice+"\nAsistentes encontrados") {
 				t.Fatalf("step 4 must show the privacy notice before the assistants:\n%s", got)
@@ -53,56 +57,8 @@ func TestClientTranscripts(t *testing.T) {
 				end := strings.Index(got, "\nResumen:")
 				got = got[:start] + "Alternativa manual · Claude Code: <comando para este sistema>\n" + got[end:]
 			}
-			path := filepath.Join("testdata", "setup-"+scenario+".golden")
-			if os.Getenv("UPDATE_GOLDEN") == "1" {
-				if err := os.WriteFile(path, []byte(got), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if diff := transcriptDifference(string(want), got); diff != "" {
-				t.Fatalf("transcript mismatch: %s\n%s", diff, got)
-			}
+			testutil.Golden(t, "setup-"+scenario, got)
 		})
-	}
-}
-
-// Quote the first differing line so invisible whitespace is visible in CI logs.
-func transcriptDifference(want, got string) string {
-	want = strings.ReplaceAll(want, "\r\n", "\n")
-	got = strings.ReplaceAll(got, "\r\n", "\n")
-	if want == got {
-		return ""
-	}
-	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
-	for i := 0; i < len(w) || i < len(g); i++ {
-		if i >= len(w) {
-			return fmt.Sprintf("line %d: want <EOF>, got %q", i+1, g[i])
-		}
-		if i >= len(g) {
-			return fmt.Sprintf("line %d: want %q, got <EOF>", i+1, w[i])
-		}
-		if w[i] != g[i] {
-			return fmt.Sprintf("line %d: want %q, got %q", i+1, w[i], g[i])
-		}
-	}
-	return ""
-}
-
-func TestTranscriptDifference(t *testing.T) {
-	for _, tc := range []struct{ want, got, diff string }{
-		{"one\r\ntwo\r\n", "one\ntwo\n", ""},
-		{"one\ntwo\n", "one\r\ntwo\r\n", ""},
-		{"one\ntwo\n", "one\ntwo \n", `line 2: want "two", got "two "`},
-		{"one\n", "one", `line 2: want "", got <EOF>`},
-		{"one", "one\n", `line 2: want <EOF>, got ""`},
-	} {
-		if got := transcriptDifference(tc.want, tc.got); got != tc.diff {
-			t.Fatalf("difference = %q, want %q", got, tc.diff)
-		}
 	}
 }
 
@@ -127,7 +83,7 @@ func TestSetupOnlyClientsFlags(t *testing.T) {
 	os.Stdout = f
 	defer func() { os.Stdout = stdout }()
 	for i := 0; i < 2; i++ {
-		if err := setup([]string{"--only-clients", "--clients", "codex", "--yes"}); err != nil {
+		if err := Run([]string{"--only-clients", "--clients", "codex", "--yes"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,7 +95,7 @@ func TestSetupOnlyClientsFlags(t *testing.T) {
 	if !strings.Contains(s, "añadido") || !strings.Contains(s, "ya está configurado") || strings.Contains(s, "Claude") || strings.Contains(s, "›") {
 		t.Fatal(s)
 	}
-	if err := setup([]string{"--clients", "invalid"}); err == nil {
+	if err := Run([]string{"--clients", "invalid"}); err == nil {
 		t.Fatal("invalid flag accepted")
 	}
 }

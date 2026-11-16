@@ -1,4 +1,4 @@
-package main
+package assistants
 
 import (
 	"context"
@@ -21,11 +21,11 @@ type openCodeAssistant struct{}
 func (openCodeAssistant) ID() string     { return "opencode" }
 func (openCodeAssistant) Name() string   { return "OpenCode" }
 func (openCodeAssistant) Reload() string { return "Reinicia OpenCode o abre una sesión nueva." }
-func (openCodeAssistant) cli(e clientEnv) string {
-	return findOpenCode(e.GOOS, e.Home, e.AppData, e.Look, e.Stat)
+func (openCodeAssistant) cli(e Env) string {
+	return findOpenCode(e.GOOS, e.Home, e.AppData, e.LookPath, e.Stat)
 }
-func (a openCodeAssistant) Detect(e clientEnv) bool {
-	return a.cli(e) != "" || dirExists(e, userpaths.OpenCode(e.Home, e.XDG))
+func (a openCodeAssistant) Detect(e Env) bool {
+	return a.cli(e) != "" || dirExists(e, userpaths.OpenCode(e.Home, e.XDGConfigHome))
 }
 
 func findOpenCode(goos, home, appdata string, look func(string) (string, error), stat func(string) (os.FileInfo, error)) string {
@@ -75,8 +75,8 @@ func runOpenCode(ctx context.Context, path string, args ...string) ([]byte, erro
 
 // path returns the configuration file. Having both opencode.json and
 // opencode.jsonc is ambiguous, so it is an error.
-func (a openCodeAssistant) path(e clientEnv) (string, error) {
-	dir := userpaths.OpenCode(e.Home, e.XDG)
+func (a openCodeAssistant) path(e Env) (string, error) {
+	dir := userpaths.OpenCode(e.Home, e.XDGConfigHome)
 	p := filepath.Join(dir, "opencode.json")
 	c := filepath.Join(dir, "opencode.jsonc")
 	_, ce := e.Stat(c)
@@ -112,22 +112,22 @@ func openCodeEntry(exe string, extra []string) map[string]any {
 	return entry
 }
 
-func (a openCodeAssistant) read(e clientEnv, w desiredEntry) (string, []byte, inspection) {
+func (a openCodeAssistant) read(e Env, w Entry) (string, []byte, Inspection) {
 	p, old, early, done := loadConfig(e, a.Detect(e), a.path)
 	if done {
 		return p, old, early
 	}
 	if len(old) > 0 {
 		if err := strictJSON(old); err != nil {
-			return p, old, inspection{err: err}
+			return p, old, Inspection{Err: err}
 		}
 	}
 	_, exists, err := openCodeConfig(old, openCodeEntry(w.Exe, w.Extra), false)
 	if err != nil {
-		return p, old, inspection{err: err}
+		return p, old, Inspection{Err: err}
 	}
 	if !exists {
-		return p, old, inspection{state: missing}
+		return p, old, Inspection{State: Missing}
 	}
 	var root map[string]any
 	json.Unmarshal(old, &root)
@@ -142,7 +142,7 @@ func (a openCodeAssistant) read(e clientEnv, w desiredEntry) (string, []byte, in
 		want["enabled"] = true
 	}
 	if sameEntry(m[aulaglobalKey], want) {
-		return p, old, inspection{state: identical}
+		return p, old, Inspection{State: Identical}
 	}
 	detail := "entrada existente"
 	if b, ok := m[aulaglobalKey].(map[string]any); ok {
@@ -151,48 +151,48 @@ func (a openCodeAssistant) read(e clientEnv, w desiredEntry) (string, []byte, in
 			detail = "comando " + string(v)
 		}
 	}
-	return p, old, inspection{state: different, detail: detail}
+	return p, old, Inspection{State: Different, Detail: detail}
 }
 
-func (a openCodeAssistant) Inspect(e clientEnv, w desiredEntry) inspection {
+func (a openCodeAssistant) Inspect(e Env, w Entry) Inspection {
 	_, _, i := a.read(e, w)
 	return i
 }
 
-func (a openCodeAssistant) Apply(e clientEnv, w desiredEntry, replace bool) error {
+func (a openCodeAssistant) Apply(e Env, w Entry, replace bool) error {
 	p, old, i := a.read(e, w)
-	if i.err != nil {
-		return i.err
+	if i.Err != nil {
+		return i.Err
 	}
-	if i.state == identical {
+	if i.State == Identical {
 		return nil
 	}
-	if i.state == notInstalledHere {
+	if i.State == NotInstalled {
 		return errors.New("not installed")
 	}
-	if i.state == different && !replace {
+	if i.State == Different && !replace {
 		return errors.New("replacement not authorized")
 	}
 	cli := a.cli(e)
 	scriptable := false
 	if cli != "" {
-		help, err := e.call(e.OpenRun, cli, "mcp", "add", "--help")
+		help, err := e.call(e.RunOpenCode, cli, "mcp", "add", "--help")
 		scriptable = err == nil && strings.Contains(string(help), "--global")
 	}
 	b, _, err := openCodeConfig(old, openCodeEntry(w.Exe, w.Extra), replace)
 	if err != nil {
 		return err
 	}
-	if cli != "" && scriptable && i.state == missing {
-		if _, err = e.call(e.OpenRun, cli, openCodeArgs(w.Exe, w.Extra)...); err != nil {
+	if cli != "" && scriptable && i.State == Missing {
+		if _, err = e.call(e.RunOpenCode, cli, openCodeArgs(w.Exe, w.Extra)...); err != nil {
 			return err
 		}
 		// A zero exit status is not enough: check that the global entry is there.
 		_, _, check := a.read(e, w)
-		if check.err != nil {
-			return check.err
+		if check.Err != nil {
+			return check.Err
 		}
-		if check.state != identical {
+		if check.State != Identical {
 			return errors.New("unverified global entry")
 		}
 		return nil
@@ -203,7 +203,7 @@ func (a openCodeAssistant) Apply(e clientEnv, w desiredEntry, replace bool) erro
 	return e.write(p, b)
 }
 
-func (a openCodeAssistant) Manual(w desiredEntry) string {
+func (a openCodeAssistant) Manual(w Entry) string {
 	v2, _, _ := openCodeConfig(nil, openCodeEntry(w.Exe, w.Extra), true)
 	v1, _, _ := openCodeConfig([]byte(`{"mcp":{"aulaglobal":{"type":"local","command":["old"]}}}`), openCodeEntry(w.Exe, w.Extra), true)
 	return "Alternativa manual · OpenCode:\nV2 actual: mcp.servers, sin enabled.\n" + string(v2) + "V1 antiguo: mcp, con enabled.\n" + string(v1)
@@ -333,15 +333,15 @@ func (a openCodeAssistant) removeFrom(old []byte) ([]byte, bool, error) {
 	return jsonRemoveServer(old, path)
 }
 
-func (a openCodeAssistant) Find(e clientEnv) link {
+func (a openCodeAssistant) Find(e Env) Link {
 	return findInConfig(e, a.Detect(e), a.path, a.entryOf, "no se puede interpretar con seguridad (¿JSONC o formato ambiguo?)")
 }
 
-func (a openCodeAssistant) Remove(e clientEnv) error {
+func (a openCodeAssistant) Remove(e Env) error {
 	return removeFromConfig(e, a.path, a.removeFrom)
 }
 
-func (a openCodeAssistant) ManualRemove(e clientEnv) string {
+func (a openCodeAssistant) ManualRemove(e Env) string {
 	p, _ := a.path(e)
 	if p == "" {
 		p = filepath.Join("~", ".config", "opencode", "opencode.json")

@@ -1,4 +1,4 @@
-package main
+package setup
 
 import (
 	"context"
@@ -9,14 +9,13 @@ import (
 	"os"
 
 	"aulaglobal-mcp/internal/aulaglobal"
-
 	"golang.org/x/term"
 )
 
 // tokenFromCookie is `aulaglobal-mcp token-from-cookie`: it reads the
 // MoodleSessionag cookie from stdin, exchanges it for a token and saves it.
 // `setup` does the same interactively.
-func tokenFromCookie(ctx context.Context, api *aulaglobal.Client, args []string) error {
+func TokenFromCookie(ctx context.Context, api *aulaglobal.Client, args []string) error {
 	flags := flag.NewFlagSet("token-from-cookie", flag.ContinueOnError)
 	force := flags.Bool("force", false, "Atomically replace existing token files")
 	output := flags.String("output", "secrets/token", "New token file in private directory")

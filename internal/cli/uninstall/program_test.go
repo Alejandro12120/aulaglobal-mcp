@@ -1,4 +1,4 @@
-package main
+package uninstall
 
 import (
 	"errors"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aulaglobal-mcp/internal/testutil"
 )
 
 func TestWindowsCleanupCommand(t *testing.T) {
@@ -32,7 +34,7 @@ func TestRemoveBinaryUnix(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "aulaglobal-mcp")
 	exe := filepath.Join(dir, "aulaglobal-mcp")
-	writeFile(t, exe, "bin")
+	testutil.WriteFile(t, exe, "bin")
 	st, msg := removeBinaryUnix(exe, true)
 	if st != stOK || !strings.Contains(msg, "carpeta") {
 		t.Fatal(st, msg)
@@ -41,12 +43,12 @@ func TestRemoveBinaryUnix(t *testing.T) {
 		t.Fatal("empty dedicated folder kept")
 	}
 	// A non-empty folder is never removed.
-	writeFile(t, exe, "bin")
-	writeFile(t, filepath.Join(dir, "keep.txt"), "mine")
+	testutil.WriteFile(t, exe, "bin")
+	testutil.WriteFile(t, filepath.Join(dir, "keep.txt"), "mine")
 	if st, _ = removeBinaryUnix(exe, true); st != stOK {
 		t.Fatal(st)
 	}
-	if readFile(t, filepath.Join(dir, "keep.txt")) != "mine" {
+	if testutil.ReadFile(t, filepath.Join(dir, "keep.txt")) != "mine" {
 		t.Fatal("foreign file removed")
 	}
 	// Already gone is fine; rmDir=false keeps the folder.
@@ -55,7 +57,7 @@ func TestRemoveBinaryUnix(t *testing.T) {
 	}
 	// A shared folder (rmDir=false) with only our binary stays.
 	shared := filepath.Join(root, "bin")
-	writeFile(t, filepath.Join(shared, "aulaglobal-mcp"), "x")
+	testutil.WriteFile(t, filepath.Join(shared, "aulaglobal-mcp"), "x")
 	removeBinaryUnix(filepath.Join(shared, "aulaglobal-mcp"), false)
 	if !isDir(shared) {
 		t.Fatal("shared folder removed")
@@ -65,21 +67,21 @@ func TestRemoveBinaryUnix(t *testing.T) {
 func TestRemoveBinaryWindowsMovesAsideAndSchedules(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "aulaglobal-mcp")
 	exe := filepath.Join(dir, "aulaglobal-mcp.exe")
-	writeFile(t, exe, "bin")
-	writeFile(t, exe+".old", "stale")
+	testutil.WriteFile(t, exe, "bin")
+	testutil.WriteFile(t, exe+".old", "stale")
 	var cmdline string
 	st, msg := removeBinaryWindows(exe, true, func(c string) error { cmdline = c; return nil })
 	if st != stOK || !strings.Contains(msg, exe+".old") {
 		t.Fatal(st, msg)
 	}
-	if _, err := os.Stat(exe); !os.IsNotExist(err) || readFile(t, exe+".old") != "bin" {
+	if _, err := os.Stat(exe); !os.IsNotExist(err) || testutil.ReadFile(t, exe+".old") != "bin" {
 		t.Fatal("not parked")
 	}
 	if !strings.Contains(cmdline, `del /f /q "`+exe+`.old"`) || !strings.Contains(cmdline, `rmdir "`+dir+`"`) {
 		t.Fatal(cmdline)
 	}
 	// Scheduling failure: say exactly which file is left.
-	writeFile(t, exe, "bin")
+	testutil.WriteFile(t, exe, "bin")
 	st, msg = removeBinaryWindows(exe, false, func(string) error { return errors.New("denied") })
 	if st != stWarn || !strings.Contains(msg, exe+".old") {
 		t.Fatal(st, msg)

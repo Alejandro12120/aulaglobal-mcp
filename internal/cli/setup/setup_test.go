@@ -1,7 +1,6 @@
-package main
+package setup
 
 import (
-	"aulaglobal-mcp/internal/aulaglobal"
 	"context"
 	"crypto/md5"
 	"encoding/base64"
@@ -13,6 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aulaglobal-mcp/internal/aulaglobal"
+	"aulaglobal-mcp/internal/termui"
+	"aulaglobal-mcp/internal/testutil"
 )
 
 func TestSetupOffline(t *testing.T) {
@@ -45,14 +48,14 @@ func TestSetupOffline(t *testing.T) {
 	}
 	var out strings.Builder
 	attempt := 0
-	u := setupUI{strings.NewReader(""), &out, func() ([]byte, error) {
+	ui := termui.UI{In: strings.NewReader(""), Out: &out, Password: func() ([]byte, error) {
 		attempt++
 		if attempt == 1 {
 			return []byte(""), nil
 		}
 		return []byte(` "MoodleSessionag=abc123" `), nil
 	}}
-	e := acquire(context.Background(), aulaglobal.New(site, nil), token, filepath.Join(root, "data"), u)
+	e := acquire(context.Background(), aulaglobal.New(site, nil), token, filepath.Join(root, "data"), ui)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -75,8 +78,8 @@ func TestSetupOffline(t *testing.T) {
 		t.Fatal("unrelated file changed")
 	}
 	var decline strings.Builder
-	u = setupUI{strings.NewReader("\n"), &decline, func() ([]byte, error) { t.Fatal("password read after decline"); return nil, nil }}
-	e = acquire(context.Background(), aulaglobal.New(site, nil), token, root, u)
+	ui = termui.UI{In: strings.NewReader("\n"), Out: &decline, Password: func() ([]byte, error) { t.Fatal("password read after decline"); return nil, nil }}
+	e = acquire(context.Background(), aulaglobal.New(site, nil), token, root, ui)
 	if e != nil || !strings.Contains(decline.String(), "Obtenido el:") {
 		t.Fatal(e, decline.String())
 	}
@@ -92,9 +95,9 @@ func TestNormalize(t *testing.T) {
 func TestThreeEmptyAttempts(t *testing.T) {
 	var out strings.Builder
 	calls := 0
-	u := setupUI{strings.NewReader(""), &out, func() ([]byte, error) { calls++; return nil, nil }}
+	ui := termui.UI{In: strings.NewReader(""), Out: &out, Password: func() ([]byte, error) { calls++; return nil, nil }}
 	root := t.TempDir()
-	e := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), filepath.Join(root, "secrets", "token"), filepath.Join(root, "data"), u)
+	e := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), filepath.Join(root, "secrets", "token"), filepath.Join(root, "data"), ui)
 	if e == nil || calls != 3 {
 		t.Fatal(e, calls)
 	}
@@ -102,10 +105,10 @@ func TestThreeEmptyAttempts(t *testing.T) {
 
 func TestSetupStepFormatting(t *testing.T) {
 	var out strings.Builder
-	u := setupUI{strings.NewReader(""), &out, nil}
+	ui := termui.UI{In: strings.NewReader(""), Out: &out}
 	for i, title := range []string{"Carpetas", "Tu cuenta de AulaGlobal", "Comprobación", "Conectar con tus asistentes"} {
-		u.step(i+1, title)
-		fmt.Fprintln(u.out, "Una idea por línea.")
+		step(ui, i+1, title)
+		fmt.Fprintln(ui.Out, "Una idea por línea.")
 	}
 	for i := 1; i <= 4; i++ {
 		if !strings.Contains(out.String(), fmt.Sprintf("\n── Paso %d de 4", i)) {
@@ -117,24 +120,6 @@ func TestSetupStepFormatting(t *testing.T) {
 	}
 	if strings.Count(out.String(), "──\n\n") != 4 {
 		t.Fatal("missing separators")
-	}
-}
-
-// compareGolden checks a transcript against testdata/<name>.golden (UPDATE_GOLDEN=1 rewrites it).
-func compareGolden(t *testing.T, name, got string) {
-	t.Helper()
-	path := filepath.Join("testdata", name+".golden")
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(path, []byte(got), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diff := transcriptDifference(string(want), got); diff != "" {
-		t.Fatalf("transcript mismatch: %s\n%s", diff, got)
 	}
 }
 
@@ -185,8 +170,8 @@ func TestSetupExpiredToken(t *testing.T) {
 	os.WriteFile(token, []byte("old-token"), 0600)
 	os.WriteFile(token+".meta.json", []byte(`{"obtained_at":"2026-01-02T03:04:05Z"}`), 0600)
 	var out strings.Builder
-	u := setupUI{strings.NewReader(""), &out, func() ([]byte, error) { return []byte("abc123"), nil }}
-	e := acquire(context.Background(), aulaglobal.New(ts.URL, nil), token, filepath.Join(root, "data"), u)
+	ui := termui.UI{In: strings.NewReader(""), Out: &out, Password: func() ([]byte, error) { return []byte("abc123"), nil }}
+	e := acquire(context.Background(), aulaglobal.New(ts.URL, nil), token, filepath.Join(root, "data"), ui)
 	if e != nil {
 		t.Fatal(e, out.String())
 	}
@@ -197,7 +182,7 @@ func TestSetupExpiredToken(t *testing.T) {
 	if b, _ := os.ReadFile(token); strings.TrimSpace(string(b)) != "new-token" {
 		t.Fatal("expired token not replaced")
 	}
-	compareGolden(t, "setup-expired-token", stableTranscript(got, root))
+	testutil.Golden(t, "setup-expired-token", stableTranscript(got, root))
 }
 
 func TestSetupValidTokenKeepsQuestion(t *testing.T) {
@@ -208,8 +193,8 @@ func TestSetupValidTokenKeepsQuestion(t *testing.T) {
 	os.MkdirAll(filepath.Dir(token), 0700)
 	os.WriteFile(token, []byte("good-token"), 0600)
 	var out strings.Builder
-	u := setupUI{strings.NewReader("\n"), &out, func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
-	e := acquire(context.Background(), aulaglobal.New(ts.URL, nil), token, filepath.Join(root, "data"), u)
+	ui := termui.UI{In: strings.NewReader("\n"), Out: &out, Password: func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
+	e := acquire(context.Background(), aulaglobal.New(ts.URL, nil), token, filepath.Join(root, "data"), ui)
 	got := out.String()
 	if e != nil || !strings.Contains(got, "¿Quieres reemplazarlo? [s/N]") || !strings.Contains(got, "✓ Conservamos tu token.") || !strings.Contains(got, "✓ Token válido. Hola, Ana") || strings.Contains(got, "caducado") {
 		t.Fatal(e, got)
@@ -223,8 +208,8 @@ func TestSetupUnverifiableToken(t *testing.T) {
 	os.WriteFile(token, []byte("some-token"), 0600)
 	os.WriteFile(token+".meta.json", []byte(`{"obtained_at":"2026-01-02T03:04:05Z"}`), 0600)
 	var out strings.Builder
-	u := setupUI{strings.NewReader("\n"), &out, func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
-	e := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), token, filepath.Join(root, "data"), u)
+	ui := termui.UI{In: strings.NewReader("\n"), Out: &out, Password: func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
+	e := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), token, filepath.Join(root, "data"), ui)
 	got := out.String()
 	if e != nil || strings.Contains(got, "✓") {
 		t.Fatal(e, got)
@@ -232,5 +217,5 @@ func TestSetupUnverifiableToken(t *testing.T) {
 	if strings.Contains(got, "caducado") || !strings.Contains(got, "¿Quieres reemplazarlo? [s/N]") {
 		t.Fatal(got)
 	}
-	compareGolden(t, "setup-unverifiable-token", stableTranscript(got, root))
+	testutil.Golden(t, "setup-unverifiable-token", stableTranscript(got, root))
 }
