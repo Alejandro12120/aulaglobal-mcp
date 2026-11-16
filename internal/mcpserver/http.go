@@ -9,9 +9,9 @@ import (
 
 // SecureHTTP authenticates every MCP method, checks Host and exact Origin, and caps bodies.
 func SecureHTTP(next http.Handler, token string, unsafe bool, allowedHosts, origins []string) http.Handler {
-	contains := func(a []string, s string) bool {
-		for _, v := range a {
-			if v == s {
+	contains := func(list []string, value string) bool {
+		for _, item := range list {
+			if item == value {
 				return true
 			}
 		}
@@ -22,9 +22,9 @@ func SecureHTTP(next http.Handler, token string, unsafe bool, allowedHosts, orig
 			http.Error(w, "Host refused", http.StatusForbidden)
 			return
 		}
-		if o := r.Header.Get("Origin"); o != "" {
-			u, e := url.Parse(o)
-			if e != nil || u.Host == "" || u.User != nil || !contains(origins, o) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			originURL, err := url.Parse(origin)
+			if err != nil || originURL.Host == "" || originURL.User != nil || !contains(origins, origin) {
 				http.Error(w, "Origin refused", http.StatusForbidden)
 				return
 			}

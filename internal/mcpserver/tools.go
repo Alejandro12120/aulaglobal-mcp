@@ -31,12 +31,12 @@ type AuthOutput struct {
 }
 
 func (s *Service) authStatus(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, AuthOutput, error) {
-	a, e := s.API.Auth(ctx)
-	out := AuthOutput{TokenValid: e == nil, Sitename: a.Sitename, Release: a.Release, ExpiresAt: a.ExpiresAt, TokenObtainedAt: a.TokenObtainedAt, TokenAgeDays: a.TokenAgeDays, ExpirySource: a.ExpirySource}
+	auth, err := s.API.Auth(ctx)
+	out := AuthOutput{TokenValid: err == nil, Sitename: auth.Sitename, Release: auth.Release, ExpiresAt: auth.ExpiresAt, TokenObtainedAt: auth.TokenObtainedAt, TokenAgeDays: auth.TokenAgeDays, ExpirySource: auth.ExpirySource}
 	if s.updates != nil {
 		out.UpdateAvailable = s.updates.Available()
 	}
-	return nil, out, e
+	return nil, out, err
 }
 
 type CoursesInput struct {
@@ -48,8 +48,8 @@ type CoursesOutput struct {
 }
 
 func (s *Service) listCourses(ctx context.Context, _ *mcp.CallToolRequest, in CoursesInput) (*mcp.CallToolResult, CoursesOutput, error) {
-	a, e := s.API.Courses(ctx, in.Classification, in.Language)
-	return nil, CoursesOutput{a}, e
+	courses, err := s.API.Courses(ctx, in.Classification, in.Language)
+	return nil, CoursesOutput{courses}, err
 }
 
 type FilesInput struct {
@@ -62,8 +62,8 @@ type FilesOutput struct {
 }
 
 func (s *Service) listCourseFiles(ctx context.Context, _ *mcp.CallToolRequest, in FilesInput) (*mcp.CallToolResult, FilesOutput, error) {
-	ss, e := s.catalog(ctx, in.CourseID, in.Include, in.Exclude)
-	return nil, FilesOutput{ss}, e
+	sections, err := s.catalog(ctx, in.CourseID, in.Include, in.Exclude)
+	return nil, FilesOutput{sections}, err
 }
 
 type DownloadInput struct {
@@ -79,32 +79,32 @@ func (s *Service) downloadFiles(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, DownloadOutput{}, errors.New("provide handles (max 10000) OR positive course_id")
 	}
 	var files []aulaglobal.File
-	var e error
+	var err error
 	if in.CourseID > 0 {
-		files, e = s.courseFiles(ctx, in.CourseID)
+		files, err = s.courseFiles(ctx, in.CourseID)
 	} else {
-		files, e = s.filesByHandle(in.Handles)
+		files, err = s.filesByHandle(in.Handles)
 	}
-	if e != nil {
-		return nil, DownloadOutput{}, e
+	if err != nil {
+		return nil, DownloadOutput{}, err
 	}
-	results, e := s.Store.Download(ctx, s.API, withoutDuplicates(files))
-	if e != nil {
-		return nil, DownloadOutput{}, e
+	results, err := s.Store.Download(ctx, s.API, withoutDuplicates(files))
+	if err != nil {
+		return nil, DownloadOutput{}, err
 	}
 	return nil, DownloadOutput{results}, nil
 }
 
 // courseFiles lists every file of a course.
 func (s *Service) courseFiles(ctx context.Context, courseID int64) ([]aulaglobal.File, error) {
-	ss, e := s.catalog(ctx, courseID, nil, nil)
-	if e != nil {
-		return nil, e
+	sections, err := s.catalog(ctx, courseID, nil, nil)
+	if err != nil {
+		return nil, err
 	}
 	files := []aulaglobal.File{}
-	for _, sec := range ss {
-		for _, m := range sec.Modules {
-			files = append(files, m.Files...)
+	for _, sec := range sections {
+		for _, module := range sec.Modules {
+			files = append(files, module.Files...)
 		}
 	}
 	return files, nil
@@ -115,12 +115,12 @@ func (s *Service) filesByHandle(handles []string) ([]aulaglobal.File, error) {
 	files := []aulaglobal.File{}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, h := range handles {
-		f, ok := s.files[h]
+	for _, handle := range handles {
+		file, ok := s.files[handle]
 		if !ok {
 			return nil, errors.New("unknown handle; call list_course_files first")
 		}
-		files = append(files, f)
+		files = append(files, file)
 	}
 	return files, nil
 }
@@ -129,10 +129,10 @@ func (s *Service) filesByHandle(handles []string) ([]aulaglobal.File, error) {
 func withoutDuplicates(files []aulaglobal.File) []aulaglobal.File {
 	seen := map[string]bool{}
 	unique := files[:0]
-	for _, f := range files {
-		if !seen[f.Handle] {
-			seen[f.Handle] = true
-			unique = append(unique, f)
+	for _, file := range files {
+		if !seen[file.Handle] {
+			seen[file.Handle] = true
+			unique = append(unique, file)
 		}
 	}
 	return unique
@@ -148,8 +148,8 @@ func (s *Service) readFile(ctx context.Context, _ *mcp.CallToolRequest, in ReadI
 	if in.Length == 0 {
 		in.Length = 16384
 	}
-	a, e := s.Store.Read(ctx, in.Path, in.Offset, in.Length)
-	return nil, a, e
+	result, err := s.Store.Read(ctx, in.Path, in.Offset, in.Length)
+	return nil, result, err
 }
 
 type SearchInput struct {
@@ -166,42 +166,42 @@ func (s *Service) searchFiles(ctx context.Context, _ *mcp.CallToolRequest, in Se
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
-	a, e := s.Store.Search(ctx, in.Query, in.Regex, in.Limit, in.PathPrefix)
-	return nil, SearchOutput{a}, e
+	matches, err := s.Store.Search(ctx, in.Query, in.Regex, in.Limit, in.PathPrefix)
+	return nil, SearchOutput{matches}, err
 }
 
 func (s *Service) listAssignments(ctx context.Context, _ *mcp.CallToolRequest, in aulaglobal.AssignmentInput) (*mcp.CallToolResult, aulaglobal.AssignmentsOutput, error) {
-	out, e := s.API.Assignments(ctx, in, store.PlainHTML)
+	out, err := s.API.Assignments(ctx, in, store.PlainHTML)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, a := range out.Assignments {
-		for _, f := range a.Attachments {
+	for _, assignment := range out.Assignments {
+		for _, file := range assignment.Attachments {
 			if len(s.files) >= maxHandles {
 				return nil, out, errors.New("handle cache full")
 			}
-			s.files[f.Handle] = f
+			s.files[file.Handle] = file
 		}
 	}
-	return nil, out, e
+	return nil, out, err
 }
 
 // catalog lists a course's files and remembers their handles for download_files.
 func (s *Service) catalog(ctx context.Context, id int64, include, exclude []string) ([]aulaglobal.Section, error) {
-	ss, e := s.API.Files(ctx, id, include, exclude)
-	if e != nil {
-		return nil, e
+	sections, err := s.API.Files(ctx, id, include, exclude)
+	if err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, sec := range ss {
-		for _, m := range sec.Modules {
-			for _, f := range m.Files {
+	for _, sec := range sections {
+		for _, module := range sec.Modules {
+			for _, file := range module.Files {
 				if len(s.files) >= maxHandles {
 					return nil, errors.New("handle cache full; restart server")
 				}
-				s.files[f.Handle] = f
+				s.files[file.Handle] = file
 			}
 		}
 	}
-	return ss, nil
+	return sections, nil
 }

@@ -37,8 +37,8 @@ type Updates interface {
 //
 // To add a tool: write its input and output types and a handler method in
 // tools.go, then register it below. The description is sent to the assistant.
-func New(api *aulaglobal.Client, st *store.Store, updates Updates) *mcp.Server {
-	s := &Service{API: api, Store: st, updates: updates, files: map[string]aulaglobal.File{}}
+func New(api *aulaglobal.Client, dataStore *store.Store, updates Updates) *mcp.Server {
+	s := &Service{API: api, Store: dataStore, updates: updates, files: map[string]aulaglobal.File{}}
 	server := mcp.NewServer(&mcp.Implementation{Name: "aulaglobal-mcp", Version: "0.1.0"}, nil)
 	if updates != nil {
 		server.AddReceivingMiddleware(noticeMiddleware(updates))

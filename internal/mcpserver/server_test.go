@@ -14,7 +14,7 @@ import (
 )
 
 func TestSecurity(t *testing.T) {
-	h := SecureHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }), "secret", false, []string{"localhost:8080"}, []string{"http://localhost:8080"})
+	handler := SecureHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }), "secret", false, []string{"localhost:8080"}, []string{"http://localhost:8080"})
 	for _, tc := range []struct {
 		host, origin, auth string
 		want               int
@@ -25,7 +25,7 @@ func TestSecurity(t *testing.T) {
 		r.Header.Set("Authorization", tc.auth)
 		r.Header.Set("Origin", tc.origin)
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 		if w.Code != tc.want {
 			t.Fatalf("%+v: %d", tc, w.Code)
 		}
@@ -56,11 +56,11 @@ func connect(t *testing.T, updates Updates) *mcp.ClientSession {
 	}))
 	t.Cleanup(moodle.Close)
 	api := aulaglobal.New(moodle.URL, aulaglobal.StaticToken{Value: "secret"})
-	var up Updates = updates
+	var notifier Updates = updates
 	if updates == (*fakeUpdates)(nil) {
-		up = nil
+		notifier = nil
 	}
-	server := New(api, nil, up)
+	server := New(api, nil, notifier)
 	ctx := context.Background()
 	t1, t2 := mcp.NewInMemoryTransports()
 	if _, err := server.Connect(ctx, t1, nil); err != nil {
@@ -74,9 +74,9 @@ func connect(t *testing.T, updates Updates) *mcp.ClientSession {
 	return session
 }
 
-func call(t *testing.T, s *mcp.ClientSession, name string, args map[string]any) *mcp.CallToolResult {
+func call(t *testing.T, session *mcp.ClientSession, name string, args map[string]any) *mcp.CallToolResult {
 	t.Helper()
-	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,12 +94,12 @@ func texts(res *mcp.CallToolResult) []string {
 }
 
 func TestUpdateNoticeAppendedOnceAndAuthField(t *testing.T) {
-	s := connect(t, &fakeUpdates{latest: "v0.9.0"})
+	session := connect(t, &fakeUpdates{latest: "v0.9.0"})
 	// A failing call must not consume the notice.
-	if res := call(t, s, "download_files", map[string]any{}); !res.IsError || strings.Contains(strings.Join(texts(res), ""), "NOTICE") {
+	if res := call(t, session, "download_files", map[string]any{}); !res.IsError || strings.Contains(strings.Join(texts(res), ""), "NOTICE") {
 		t.Fatalf("error result: %+v", res)
 	}
-	first := call(t, s, "auth_status", nil)
+	first := call(t, session, "auth_status", nil)
 	if first.IsError {
 		t.Fatalf("%+v", first)
 	}
@@ -107,43 +107,43 @@ func TestUpdateNoticeAppendedOnceAndAuthField(t *testing.T) {
 	if len(got) != 2 || got[1] != "NOTICE v0.9.0" {
 		t.Fatalf("first result contents: %q", got)
 	}
-	sc, _ := first.StructuredContent.(map[string]any)
-	if sc["update_available"] != "v0.9.0" || sc["sitename"] != "AulaGlobal" || sc["token_valid"] != true {
-		t.Fatalf("structured: %v", sc)
+	structured, _ := first.StructuredContent.(map[string]any)
+	if structured["update_available"] != "v0.9.0" || structured["sitename"] != "AulaGlobal" || structured["token_valid"] != true {
+		t.Fatalf("structured: %v", structured)
 	}
-	second := call(t, s, "auth_status", nil)
+	second := call(t, session, "auth_status", nil)
 	if len(texts(second)) != 1 {
 		t.Fatalf("notice repeated: %q", texts(second))
 	}
-	if sc, _ := second.StructuredContent.(map[string]any); sc["update_available"] != "v0.9.0" {
-		t.Fatalf("auth_status lost update_available: %v", sc)
+	if structured, _ := second.StructuredContent.(map[string]any); structured["update_available"] != "v0.9.0" {
+		t.Fatalf("auth_status lost update_available: %v", structured)
 	}
 }
 
 func TestNoUpdateNoNoticeAndNoField(t *testing.T) {
-	for name, u := range map[string]*fakeUpdates{"up to date": {}, "disabled": nil} {
-		s := connect(t, u)
-		res := call(t, s, "auth_status", nil)
+	for name, updates := range map[string]*fakeUpdates{"up to date": {}, "disabled": nil} {
+		session := connect(t, updates)
+		res := call(t, session, "auth_status", nil)
 		if len(texts(res)) != 1 {
 			t.Errorf("%s: %q", name, texts(res))
 		}
-		sc, _ := res.StructuredContent.(map[string]any)
-		if _, present := sc["update_available"]; present || sc["sitename"] != "AulaGlobal" {
-			t.Errorf("%s: %v", name, sc)
+		structured, _ := res.StructuredContent.(map[string]any)
+		if _, present := structured["update_available"]; present || structured["sitename"] != "AulaGlobal" {
+			t.Errorf("%s: %v", name, structured)
 		}
 	}
 }
 
 func TestNoticeAppearsWhenCheckFinishesLater(t *testing.T) {
-	u := &fakeUpdates{}
-	s := connect(t, u)
-	if len(texts(call(t, s, "auth_status", nil))) != 1 {
+	updates := &fakeUpdates{}
+	session := connect(t, updates)
+	if len(texts(call(t, session, "auth_status", nil))) != 1 {
 		t.Fatal("notice before the check")
 	}
-	u.mu.Lock()
-	u.latest = "v1.0.0"
-	u.mu.Unlock()
-	if got := texts(call(t, s, "auth_status", nil)); len(got) != 2 {
+	updates.mu.Lock()
+	updates.latest = "v1.0.0"
+	updates.mu.Unlock()
+	if got := texts(call(t, session, "auth_status", nil)); len(got) != 2 {
 		t.Fatalf("%q", got)
 	}
 }
@@ -151,30 +151,30 @@ func TestNoticeAppearsWhenCheckFinishesLater(t *testing.T) {
 // auth_status must not hand the assistant who the user is: neither in the
 // structured result nor in the text copy, nor in the published output schema.
 func TestAuthStatusExposesNoPersonalData(t *testing.T) {
-	s := connect(t, nil)
-	res := call(t, s, "auth_status", nil)
+	session := connect(t, nil)
+	res := call(t, session, "auth_status", nil)
 	if res.IsError {
 		t.Fatalf("%+v", res)
 	}
-	sc, _ := res.StructuredContent.(map[string]any)
+	structured, _ := res.StructuredContent.(map[string]any)
 	for _, k := range []string{"fullname", "userid", "username", "firstname", "lastname", "userpictureurl"} {
-		if _, present := sc[k]; present {
+		if _, present := structured[k]; present {
 			t.Errorf("auth_status returned %q", k)
 		}
 	}
 	for _, want := range []string{"token_valid", "sitename", "release", "expires_at", "expiry_source"} {
-		if _, present := sc[want]; !present {
-			t.Errorf("auth_status lacks %q: %v", want, sc)
+		if _, present := structured[want]; !present {
+			t.Errorf("auth_status lacks %q: %v", want, structured)
 		}
 	}
-	if sc["release"] != "4.1" {
-		t.Errorf("release: %v", sc["release"])
+	if structured["release"] != "4.1" {
+		t.Errorf("release: %v", structured["release"])
 	}
 	all := strings.Join(texts(res), "\n")
 	if strings.Contains(all, "Ana") || strings.Contains(all, "userid") || strings.Contains(all, "fullname") {
 		t.Errorf("personal data in text content: %s", all)
 	}
-	tools, err := s.ListTools(context.Background(), nil)
+	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
