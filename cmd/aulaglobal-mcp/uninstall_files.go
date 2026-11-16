@@ -14,15 +14,6 @@ import (
 // files: shell-profile PATH lines, the Windows user PATH value, the materials
 // folder and the program itself.
 
-type stepStatus int
-
-const (
-	stOK stepStatus = iota
-	stInfo
-	stWarn
-	stFail
-)
-
 // ---- program names and paths -----------------------------------------------
 
 const (
