@@ -117,7 +117,7 @@ func askConfigureAll(u setupUI, clients []*foundClient) bool {
 func (c *foundClient) configure(u setupUI, e clientEnv, w desiredEntry, all bool) (failed bool) {
 	a, i := c.a, c.i
 	fail := func() bool {
-		c.outcome = "falló → ver instrucciones arriba"
+		c.outcome = "falló (ver instrucciones arriba)"
 		fmt.Fprintln(u.out, "✗ "+a.Name()+": no se pudo configurar con seguridad.")
 		fmt.Fprintln(u.out, a.Manual(w))
 		return true

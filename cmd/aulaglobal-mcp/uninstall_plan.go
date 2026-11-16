@@ -78,9 +78,9 @@ func (e uninstallEnv) inspectClients() []clientLink {
 
 func quote(s string) string { return "«" + s + "»" }
 
-// planClients adds one step per assistant to disconnect. sel nil = every
-// assistant that has the entry; otherwise only the IDs in sel (explicit names
-// also get a note when they have nothing to remove).
+// planClients adds one step per assistant to disconnect. A nil sel means every
+// assistant that has the entry. Otherwise only the IDs in sel are considered,
+// and an assistant named there that has nothing to remove gets a note.
 func (e uninstallEnv) planClients(u setupUI, o uninstallOpts, p *planner, cls []clientLink, sel map[string]bool) {
 	explicit := sel != nil
 	for _, c := range cls {
@@ -147,8 +147,9 @@ func (e uninstallEnv) tokenCandidates(cls []clientLink) []string {
 
 func isDir(p string) bool { fi, err := os.Lstat(p); return err == nil && fi.IsDir() }
 
-// planToken deletes the token files and, if it is then empty, their folder.
-// With wholeConfig the program's own config folder goes entirely.
+// planToken deletes the token files and, once empty, their folder. With
+// wholeConfig the program's config folder is skipped here, because planAll
+// deletes it as a whole.
 func (e uninstallEnv) planToken(p *planner, cls []clientLink, wholeConfig bool) {
 	dirs := map[string]bool{}
 	var order []string

@@ -298,8 +298,8 @@ Opción [1]: `)
 	return modeNone
 }
 
-// selectClients returns the set of assistant IDs to disconnect (nil = all that
-// are connected). ok is false when the user chose none.
+// selectClients returns the IDs of the assistants to disconnect, or nil for all
+// that are connected. ok is false when the user chose none.
 func selectClients(u setupUI, o uninstallOpts, cls []clientLink) (map[string]bool, bool) {
 	if o.clientsSet {
 		sel := map[string]bool{}

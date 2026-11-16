@@ -264,8 +264,6 @@ func TestSymlinkedConfigIsNotReplaced(t *testing.T) {
 	}
 }
 
-// ---- Claude Code -------------------------------------------------------------
-
 // symlinkOrSkip creates link -> target, skipping the test where the platform
 // cannot create symlinks (Windows without the privilege) or does not report them
 // as symlinks (Wine), since the code under test relies on Lstat telling them apart.
