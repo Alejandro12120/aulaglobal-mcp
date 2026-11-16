@@ -52,20 +52,20 @@ func AssetName(version, goos, goarch string) (string, error) {
 func checksumFor(checksums []byte, name string) (string, error) {
 	found := ""
 	for _, line := range strings.Split(string(checksums), "\n") {
-		f := strings.Fields(line)
-		if len(f) != 2 || strings.TrimPrefix(f[1], "*") != name {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || strings.TrimPrefix(fields[1], "*") != name {
 			continue
 		}
 		if found != "" {
 			return "", fmt.Errorf("checksums.txt lista %s más de una vez", name)
 		}
-		if len(f[0]) != sha256.Size*2 {
+		if len(fields[0]) != sha256.Size*2 {
 			return "", fmt.Errorf("checksum de %s con formato inválido", name)
 		}
-		if _, err := hex.DecodeString(f[0]); err != nil {
+		if _, err := hex.DecodeString(fields[0]); err != nil {
 			return "", fmt.Errorf("checksum de %s con formato inválido", name)
 		}
-		found = strings.ToLower(f[0])
+		found = strings.ToLower(fields[0])
 	}
 	if found == "" {
 		return "", fmt.Errorf("checksums.txt no incluye %s", name)
@@ -108,15 +108,15 @@ func entryMatches(name, bin string) bool {
 	return !strings.ContainsAny(name, "\\") && path.Clean(name) == bin
 }
 
-func readCapped(r io.Reader) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(r, maxBinaryBytes+1))
+func readCapped(reader io.Reader) ([]byte, error) {
+	content, err := io.ReadAll(io.LimitReader(reader, maxBinaryBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxBinaryBytes {
+	if len(content) > maxBinaryBytes {
 		return nil, errors.New("el ejecutable del archivo supera el tamaño máximo permitido")
 	}
-	return b, nil
+	return content, nil
 }
 
 func fromTarGz(archive []byte, bin string) ([]byte, error) {
@@ -148,19 +148,19 @@ func fromZip(archive []byte, bin string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("archivo zip inválido")
 	}
-	for _, f := range zr.File {
-		if !f.Mode().IsRegular() || !entryMatches(f.Name, bin) {
+	for _, zipFile := range zr.File {
+		if !zipFile.Mode().IsRegular() || !entryMatches(zipFile.Name, bin) {
 			continue
 		}
-		if f.UncompressedSize64 > maxBinaryBytes {
+		if zipFile.UncompressedSize64 > maxBinaryBytes {
 			return nil, errors.New("el ejecutable del archivo supera el tamaño máximo permitido")
 		}
-		rc, err := f.Open()
+		reader, err := zipFile.Open()
 		if err != nil {
 			return nil, errors.New("archivo zip inválido")
 		}
-		defer rc.Close()
-		return readCapped(rc)
+		defer reader.Close()
+		return readCapped(reader)
 	}
 	return nil, nil
 }

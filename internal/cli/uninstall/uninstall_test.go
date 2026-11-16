@@ -832,8 +832,8 @@ func TestMain(m *testing.M) {
 }
 
 func fakeClaudeMain(stateFile string, args []string) int {
-	b, _ := os.ReadFile(stateFile)
-	command := strings.TrimSpace(string(b)) // "" = no server
+	content, _ := os.ReadFile(stateFile)
+	command := strings.TrimSpace(string(content)) // "" = no server
 	if len(args) < 3 || args[0] != "mcp" {
 		return 2
 	}
@@ -893,29 +893,29 @@ func TestClaudeCodeThroughARealSubprocess(t *testing.T) {
 	testutil.WriteFile(t, state, exe+"\n")
 	t.Setenv("AULAGLOBAL_FAKE_CLAUDE", state)
 
-	e := assistantstest.FileEnv(t)
-	e.LookPath = func(n string) (string, error) {
+	env := assistantstest.FileEnv(t)
+	env.LookPath = func(n string) (string, error) {
 		if n == "claude" {
 			return cli, nil
 		}
 		return "", os.ErrNotExist
 	}
-	e.RunClaude = assistants.RealEnv(runtime.GOOS, "", "").RunClaude
-	a := assistantstest.ByID(t, "claude-code")
-	l := a.Find(e)
+	env.RunClaude = assistants.RealEnv(runtime.GOOS, "", "").RunClaude
+	assistant := assistantstest.ByID(t, "claude-code")
+	l := assistant.Find(env)
 	if l.State != assistants.LinkPresent || !pointsToProgram(l.Command, exe, runtime.GOOS == "windows") {
 		t.Fatalf("%+v", l)
 	}
-	if err := a.Remove(e); err != nil {
+	if err := assistant.Remove(env); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(state); strings.TrimSpace(string(b)) != "" {
+	if content, _ := os.ReadFile(state); strings.TrimSpace(string(content)) != "" {
 		t.Fatal("the fake server was not removed")
 	}
-	if l := a.Find(e); l.State != assistants.LinkNone {
+	if l := assistant.Find(env); l.State != assistants.LinkNone {
 		t.Fatalf("%+v", l)
 	}
-	if err := a.Remove(e); err != nil {
+	if err := assistant.Remove(env); err != nil {
 		t.Fatal(err)
 	}
 }

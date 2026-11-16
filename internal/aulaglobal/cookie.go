@@ -19,8 +19,8 @@ import (
 
 func ParseLaunch(location, site, passport string) (string, string, error) {
 	// Custom scheme uses token= as authority, not an ordinary URL query.
-	u, err := url.Parse(location)
-	if err != nil || u.Scheme != "moodlemobile" {
+	redirect, err := url.Parse(location)
+	if err != nil || redirect.Scheme != "moodlemobile" {
 		return "", "", errors.New("expected moodlemobile redirect; session may need login/confirmation")
 	}
 	encoded := strings.TrimPrefix(location, "moodlemobile://token=")
@@ -31,11 +31,11 @@ func ParseLaunch(location, site, passport string) (string, string, error) {
 	if err != nil {
 		return "", "", errors.New("invalid launch encoding")
 	}
-	b, err := base64.StdEncoding.DecodeString(encoded)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", "", errors.New("invalid launch base64")
 	}
-	parts := strings.Split(string(b), ":::")
+	parts := strings.Split(string(decoded), ":::")
 	if len(parts) < 2 || len(parts) > 3 || parts[1] == "" {
 		return "", "", errors.New("invalid launch payload")
 	}

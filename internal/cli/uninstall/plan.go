@@ -405,8 +405,8 @@ func (plan *planner) hasFailedNote() bool {
 // print shows what the plan will do, what it keeps and what it cannot do.
 func (plan *planner) print(out io.Writer) {
 	fmt.Fprintln(out, "\nPlan:")
-	for _, s := range plan.steps {
-		fmt.Fprintln(out, "  · "+s.description)
+	for _, step := range plan.steps {
+		fmt.Fprintln(out, "  · "+step.description)
 	}
 	if len(plan.conserved) > 0 {
 		fmt.Fprintln(out, "\nSe conservará: "+strings.Join(plan.conserved, "; ")+".")
@@ -424,8 +424,8 @@ func (plan *planner) print(out io.Writer) {
 func (plan *planner) run(out io.Writer) error {
 	failed := plan.hasFailedNote()
 	fmt.Fprintln(out, "\nResultado:")
-	for _, s := range plan.steps {
-		status, text := s.run()
+	for _, step := range plan.steps {
+		status, text := step.run()
 		failed = failed || status == stFail
 		printItem(out, status, text)
 	}

@@ -62,7 +62,7 @@ func Path(file aulaglobal.File) string {
 	}
 	return filepath.ToSlash(filepath.Join(append(parts, Sanitize(file.Filename))...))
 }
-func fmtCourse(id int64) string { b, _ := json.Marshal(id); return "course-" + string(b) }
+func fmtCourse(id int64) string { encoded, _ := json.Marshal(id); return "course-" + string(encoded) }
 func (s *Store) paths(files []aulaglobal.File) (map[string]string, error) {
 	manifest := map[string]manifestEntry{}
 	content, err := s.cacheRead(".aulaglobal-cache/manifest.json")

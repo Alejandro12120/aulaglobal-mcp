@@ -200,8 +200,8 @@ func generate(root string) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(&out, "\n## Go standard library and runtime\n\nStatically linked into every binary. License: BSD-3-Clause. Copyright 2009 The Go Authors. Source: https://go.dev/ (toolchain %s).\n\n", strings.TrimSpace(string(goversion)))
-	for _, f := range std {
-		block(&out, "**"+f.Name+"**", f.Text)
+	for _, file := range std {
+		block(&out, "**"+file.Name+"**", file.Text)
 	}
 
 	out.WriteString("\n## Go modules\n\nEvery module below is compiled into the release binaries (`go list -deps` of `./cmd/aulaglobal-mcp` with `CGO_ENABLED=0`, for linux, darwin and windows on amd64 and arm64). Test-only dependencies are not linked and not listed. Regenerate with `scripts/gen-third-party-notices.sh`; CI fails if this list and the build disagree.\n\n")
@@ -228,8 +228,8 @@ func generate(root string) (string, error) {
 			compiled = strings.Join(tg, ", ")
 		}
 		fmt.Fprintf(&out, "### %s %s\n\n- License: %s\n- Source: https://pkg.go.dev/%s@%s\n- Compiled into: %s\n\n", mod.Path, mod.Version, spdx, mod.Path, mod.Version, compiled)
-		for _, f := range files {
-			block(&out, "**"+f.Name+"**", f.Text)
+		for _, file := range files {
+			block(&out, "**"+file.Name+"**", file.Text)
 		}
 	}
 	return strings.TrimRight(out.String(), "\n") + "\n", nil

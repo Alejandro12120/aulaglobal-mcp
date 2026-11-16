@@ -47,16 +47,16 @@ func (registryPath) Set(value string) error {
 // spawnDetached starts cmdline (a full cmd.exe command line) without a console
 // window and without tying it to this process, so it outlives us.
 func spawnDetached(cmdline string) error {
-	c := exec.Command("cmd.exe")
-	c.SysProcAttr = &syscall.SysProcAttr{
+	command := exec.Command("cmd.exe")
+	command.SysProcAttr = &syscall.SysProcAttr{
 		CmdLine:       cmdline,
 		HideWindow:    true,
 		CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP,
 	}
-	if err := c.Start(); err != nil {
+	if err := command.Start(); err != nil {
 		return err
 	}
-	return c.Process.Release()
+	return command.Process.Release()
 }
 
 // broadcastEnvironmentChange tells running programs (Explorer) that the user

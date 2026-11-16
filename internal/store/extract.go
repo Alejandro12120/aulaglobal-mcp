@@ -132,8 +132,8 @@ func (s *Store) decodeDocument(ctx context.Context, path string, content []byte)
 	doc := document{Pages: []Page{}}
 	add := func(page int, text string) error {
 		total := len(text)
-		for _, p := range doc.Pages {
-			total += len(p.Text)
+		for _, page := range doc.Pages {
+			total += len(page.Text)
 		}
 		if total > textCap {
 			return errors.New("extracted text exceeds 8 MiB")

@@ -104,8 +104,8 @@ func (s *Store) Download(ctx context.Context, client *aulaglobal.Client, files [
 		defer func() { <-s.batch }()
 	case <-ctx.Done():
 		out := make([]Result, len(files))
-		for i, f := range files {
-			out[i] = Result{Path: Path(f), Status: "error", Error: ctx.Err().Error()}
+		for i, file := range files {
+			out[i] = Result{Path: Path(file), Status: "error", Error: ctx.Err().Error()}
 		}
 		return out, nil
 	}
