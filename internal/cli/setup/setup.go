@@ -15,6 +15,7 @@ import (
 	"aulaglobal-mcp/internal/assistants"
 	"aulaglobal-mcp/internal/aulaglobal"
 	"aulaglobal-mcp/internal/cli/env"
+	"aulaglobal-mcp/internal/clipboard"
 	"aulaglobal-mcp/internal/termui"
 	"aulaglobal-mcp/internal/userpaths"
 	"golang.org/x/term"
@@ -78,7 +79,7 @@ func Run(args []string) (result error) {
 			}
 			checkToken(context.Background(), aulaglobal.New(aulaglobal.Site, nil), tokenFile, ui)
 		} else {
-			if err := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), tokenFile, dataDir, ui); err != nil {
+			if err := acquire(context.Background(), aulaglobal.New(aulaglobal.Site, nil), tokenFile, dataDir, ui, clipboard.New()); err != nil {
 				return err
 			}
 		}
@@ -119,17 +120,25 @@ func connectThisComputer(ui termui.UI, tokenFile, dataDir string, selected []ass
 	return nil
 }
 
-// cookieInstructions is shown at step 2. The DevTools console line that reads
+// cookieCommand is shown at step 2. The DevTools console line that reads
 // the MoodleSessionag cookie is based on AGDownloader (MIT, see
 // THIRD_PARTY_NOTICES.md).
+const cookieCommand = `copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())`
+
+type systemClipboard interface {
+	Copy(string) error
+	Read() (string, error)
+	Clear() error
+}
+
 const cookieInstructions = `1. Entra en https://aulaglobal.uc3m.es e inicia sesión.
 
 2. Pulsa F12 (Mac: Cmd + Option + I).
    Abre Consola.
 
-3. Pega este comando y pulsa Enter:
+3. %s
 
-   copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
+   ` + cookieCommand + `
 
    Si Chrome bloquea pegar, escribe «allow pasting» primero.
    También puede aparecer como «permitir pegar».
@@ -146,7 +155,7 @@ const cookieInstructions = `1. Entra en https://aulaglobal.uc3m.es e inicia sesi
 // acquire runs steps 1 to 3: it shows the folders, gets a token from the
 // user's session cookie, saves it and checks it. If the user keeps the token
 // already saved, it only checks that one.
-func acquire(ctx context.Context, api *aulaglobal.Client, tokenFile, dataDir string, ui termui.UI) error {
+func acquire(ctx context.Context, api *aulaglobal.Client, tokenFile, dataDir string, ui termui.UI, clipboard systemClipboard) error {
 	if err := os.MkdirAll(filepath.Dir(tokenFile), 0700); err != nil {
 		return err
 	}
@@ -170,7 +179,11 @@ func acquire(ctx context.Context, api *aulaglobal.Client, tokenFile, dataDir str
 			return err
 		}
 	}
-	fmt.Fprintln(ui.Out, cookieInstructions)
+	commandInstruction := "Copia este comando, pégalo en la consola y pulsa Enter:"
+	if clipboard.Copy(cookieCommand) == nil {
+		commandInstruction = "✓ Comando copiado al portapapeles. Pégalo en la consola y pulsa Enter."
+	}
+	fmt.Fprintf(ui.Out, cookieInstructions+"\n", commandInstruction)
 	cookie, err := askCookie(ui)
 	if err != nil {
 		return err
@@ -181,6 +194,11 @@ func acquire(ctx context.Context, api *aulaglobal.Client, tokenFile, dataDir str
 	}
 	if err != nil {
 		return errors.New("No se pudo obtener el token. Cierra sesión, vuelve a entrar en AulaGlobal y repite setup.")
+	}
+	if contents, err := clipboard.Read(); err == nil && contents == cookie {
+		if clipboard.Clear() == nil {
+			fmt.Fprintln(ui.Out, "· Portapapeles vaciado.")
+		}
 	}
 	if err = aulaglobal.SaveSecret(tokenFile, tokenValue, force); err != nil {
 		return err
