@@ -170,7 +170,8 @@ steps:
 1. **Folders.** Shows where the access key and the materials will be stored.
 2. **AulaGlobal account.** Asks for your browser's session cookie and turns it
    into an access key. Instructions are shown on screen.
-   When available, setup copies the command to the clipboard and clears it after obtaining the key only if it still contains the cookie.
+   When it can, setup copies the command to the clipboard for you. Once it
+   has the key, it clears the clipboard if it still holds the cookie.
 3. **Check.** Verifies the key and shows the account name.
 4. **Assistants.** Detects the installed assistants and offers to connect them.
 

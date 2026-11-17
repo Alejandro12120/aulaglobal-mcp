@@ -167,7 +167,8 @@ cuatro pasos:
 1. **Carpetas.** Indica dónde se guardarán la clave de acceso y los materiales.
 2. **Cuenta de AulaGlobal.** Te pide la cookie de sesión del navegador y la
    convierte en una clave de acceso. Las instrucciones aparecen en pantalla.
-   Cuando puede, setup copia el comando al portapapeles y lo vacía después de obtener la clave solo si aún contiene la cookie.
+   Si el sistema lo permite, setup copia el comando al portapapeles por ti.
+   Cuando ya tiene la clave, vacía el portapapeles si todavía contiene la cookie.
 3. **Comprobación.** Verifica la clave y muestra el nombre de la cuenta.
 4. **Asistentes.** Detecta los asistentes instalados y te ofrece conectarlos.
 

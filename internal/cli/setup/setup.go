@@ -125,6 +125,7 @@ func connectThisComputer(ui termui.UI, tokenFile, dataDir string, selected []ass
 // THIRD_PARTY_NOTICES.md).
 const cookieCommand = `copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())`
 
+// systemClipboard is the clipboard setup uses. Tests pass a fake.
 type systemClipboard interface {
 	Copy(string) error
 	Read() (string, error)
