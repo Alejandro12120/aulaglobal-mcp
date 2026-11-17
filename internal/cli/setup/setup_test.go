@@ -55,7 +55,7 @@ func TestSetupOffline(t *testing.T) {
 		}
 		return []byte(` "MoodleSessionag=abc123" `), nil
 	}}
-	err := acquire(context.Background(), aulaglobal.New(site, nil), token, filepath.Join(root, "data"), ui)
+	err := acquire(context.Background(), aulaglobal.New(site, nil), token, filepath.Join(root, "data"), ui, &fakeClipboard{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSetupOffline(t *testing.T) {
 	}
 	var decline strings.Builder
 	ui = termui.UI{In: strings.NewReader("\n"), Out: &decline, Password: func() ([]byte, error) { t.Fatal("password read after decline"); return nil, nil }}
-	err = acquire(context.Background(), aulaglobal.New(site, nil), token, root, ui)
+	err = acquire(context.Background(), aulaglobal.New(site, nil), token, root, ui, &fakeClipboard{})
 	if err != nil || !strings.Contains(decline.String(), "Obtenido el:") {
 		t.Fatal(err, decline.String())
 	}
@@ -97,7 +97,7 @@ func TestThreeEmptyAttempts(t *testing.T) {
 	calls := 0
 	ui := termui.UI{In: strings.NewReader(""), Out: &out, Password: func() ([]byte, error) { calls++; return nil, nil }}
 	root := t.TempDir()
-	err := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), filepath.Join(root, "secrets", "token"), filepath.Join(root, "data"), ui)
+	err := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), filepath.Join(root, "secrets", "token"), filepath.Join(root, "data"), ui, &fakeClipboard{})
 	if err == nil || calls != 3 {
 		t.Fatal(err, calls)
 	}
@@ -171,7 +171,7 @@ func TestSetupExpiredToken(t *testing.T) {
 	os.WriteFile(token+".meta.json", []byte(`{"obtained_at":"2026-01-02T03:04:05Z"}`), 0600)
 	var out strings.Builder
 	ui := termui.UI{In: strings.NewReader(""), Out: &out, Password: func() ([]byte, error) { return []byte("abc123"), nil }}
-	err := acquire(context.Background(), aulaglobal.New(moodle.URL, nil), token, filepath.Join(root, "data"), ui)
+	err := acquire(context.Background(), aulaglobal.New(moodle.URL, nil), token, filepath.Join(root, "data"), ui, &fakeClipboard{})
 	if err != nil {
 		t.Fatal(err, out.String())
 	}
@@ -194,7 +194,7 @@ func TestSetupValidTokenKeepsQuestion(t *testing.T) {
 	os.WriteFile(token, []byte("good-token"), 0600)
 	var out strings.Builder
 	ui := termui.UI{In: strings.NewReader("\n"), Out: &out, Password: func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
-	err := acquire(context.Background(), aulaglobal.New(moodle.URL, nil), token, filepath.Join(root, "data"), ui)
+	err := acquire(context.Background(), aulaglobal.New(moodle.URL, nil), token, filepath.Join(root, "data"), ui, &fakeClipboard{})
 	got := out.String()
 	if err != nil || !strings.Contains(got, "¿Quieres reemplazarlo? [s/N]") || !strings.Contains(got, "✓ Conservamos tu token.") || !strings.Contains(got, "✓ Token válido. Hola, Ana") || strings.Contains(got, "caducado") {
 		t.Fatal(err, got)
@@ -209,7 +209,7 @@ func TestSetupUnverifiableToken(t *testing.T) {
 	os.WriteFile(token+".meta.json", []byte(`{"obtained_at":"2026-01-02T03:04:05Z"}`), 0600)
 	var out strings.Builder
 	ui := termui.UI{In: strings.NewReader("\n"), Out: &out, Password: func() ([]byte, error) { t.Fatal("cookie requested"); return nil, nil }}
-	err := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), token, filepath.Join(root, "data"), ui)
+	err := acquire(context.Background(), aulaglobal.New("http://127.0.0.1:1", nil), token, filepath.Join(root, "data"), ui, &fakeClipboard{})
 	got := out.String()
 	if err != nil || strings.Contains(got, "✓") {
 		t.Fatal(err, got)

@@ -361,6 +361,7 @@ Estructura del código:
   `uninstall`.
 - `internal/termui` (preguntas por terminal), `internal/atomicfile` (escritura
   atómica) e `internal/testutil` (ayudas de prueba comunes).
+- `internal/clipboard`: portapapeles mediante comandos externos, sin dependencias nuevas; selección por sistema y entorno, con límite de dos segundos por comando.
 - `internal/aulaglobal`: API de Moodle, token, cookie y acceso respetuoso.
 - `internal/store`: descarga, lectura y búsqueda.
 - `internal/mcpserver`: `server.go` registra las herramientas (nombre,
@@ -747,6 +748,22 @@ El proyecto usa licencia MIT (archivo LICENSE). Cada archivo de release y la ima
 
 El instalador separa carpetas, token, comprobación y asistentes en cuatro pasos.
 La entrada de cookie sigue oculta; también comprueba el token conservado.
+En el paso 2 intenta copiar el comando JavaScript al portapapeles y confirma
+el éxito con ✓; si no puede, indica cómo copiarlo a mano sin mostrar errores.
+El comando siempre aparece en pantalla. Tras intercambiar la cookie por un
+token, lee el portapapeles y solo lo vacía si coincide exactamente con la cookie;
+solo entonces muestra «· Portapapeles vaciado.». Si leer o vaciar falla, continúa
+sin avisos ni secretos en los errores. La lectura y el vaciado no son atómicos.
+
+Usa `pbcopy`/`pbpaste` en macOS; `clip.exe` en Windows (allí no se lee ni
+se vacía); `wl-copy`/`wl-paste --no-newline` si hay `WAYLAND_DISPLAY`; o,
+con `DISPLAY`, `xclip -selection clipboard` y como alternativa `xsel`.
+Los comandos se buscan en PATH; no instala nada ni usa SSH u OSC 52. Los datos
+se pasan por stdin, nunca por argumentos. Cada comando tiene dos segundos
+de plazo; las escrituras no tienen pipes de stdout/stderr que los procesos
+hijos de Wayland/X11 puedan mantener abiertos. Setup recibe una interfaz
+inyectable; sus pruebas usan un portapapeles falso y las del paquete comprueban
+la selección con entorno y búsqueda de ejecutables simulados.
 Los encabezados usan negrita solo con stdout terminal y NO_COLOR ausente;
 Windows usa texto sin códigos ANSI.
 

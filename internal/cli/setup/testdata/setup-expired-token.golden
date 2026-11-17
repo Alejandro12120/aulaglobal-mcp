@@ -18,7 +18,7 @@ Obtenido el: 2026-01-02T03:04:05Z
 2. Pulsa F12 (Mac: Cmd + Option + I).
    Abre Consola.
 
-3. Pega este comando y pulsa Enter:
+3. ✓ Comando copiado al portapapeles. Pégalo en la consola y pulsa Enter.
 
    copy(("; " + document.cookie).split("; MoodleSessionag=").pop().split(";").shift())
 
