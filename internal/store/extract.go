@@ -102,7 +102,7 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 			}
 			done <- result
 		}()
-		content, err := io.ReadAll(io.LimitReader(file, 64<<20+1))
+		content, err := readSized(file, info.Size(), 64<<20+1)
 		if err != nil {
 			result.err = err
 			return
@@ -250,6 +250,9 @@ func (s *Store) decodeDocument(ctx context.Context, path string, content []byte)
 	return doc, nil
 }
 func (d document) text() string {
+	if len(d.Pages) == 1 && d.Pages[0].Number <= 0 {
+		return d.Pages[0].Text
+	}
 	var builder strings.Builder
 	for _, page := range d.Pages {
 		if page.Number > 0 {
@@ -266,9 +269,26 @@ func (s *Store) cacheRead(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer file.Close()
-	content, err := io.ReadAll(io.LimitReader(file, 2*textCap+1))
+	var size int64
+	if info, err := file.Stat(); err == nil {
+		size = info.Size()
+	}
+	content, err := readSized(file, size, 2*textCap+1)
 	if len(content) > 2*textCap {
 		return nil, errors.New("cache too large")
 	}
 	return content, err
+}
+
+// Use the file size to avoid growing and copying the buffer on large reads.
+// Keep reading to EOF or the limit because the file can change after Stat.
+func readSized(reader io.Reader, size, limit int64) ([]byte, error) {
+	bounded := io.LimitReader(reader, limit)
+	if size <= bytes.MinRead {
+		return io.ReadAll(bounded)
+	}
+	var content bytes.Buffer
+	content.Grow(int(min(size, limit)) + bytes.MinRead)
+	_, err := content.ReadFrom(bounded)
+	return content.Bytes(), err
 }
