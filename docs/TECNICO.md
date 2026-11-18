@@ -1054,3 +1054,30 @@ directorio, y transcripciones doradas (`testdata/uninstall-*.golden`,
 `UPDATE_GOLDEN=1` las regenera). El código específico de Windows se compila en los
 seis destinos; su parte pura se prueba en todos los sistemas, pero el registro y el
 proceso auxiliar solo se han podido verificar compilando.
+
+## Benchmarks sin acceso a Moodle
+
+Desde la raíz del repositorio, ejecuta `PROFILE=1 bash scripts/bench/run.sh`.
+El script crea y elimina árboles de trabajo temporales para medir 927ab6c,
+6f7bc19, 0626e64 y HEAD con la misma imagen `golang:1.26.9`. Una vez
+descargados los módulos, los contenedores de medición se ejecutan con
+`--network none`. Los benchmarks Go simulan Moodle en loopback y distinguen
+el límite por defecto de 4 peticiones/s del máximo de 100 peticiones/s. Las
+pruebas de proceso usan un HOME y un directorio de datos temporales, un token
+ficticio y el chequeo de actualización desactivado. Solo llaman a herramientas
+que trabajan con archivos locales.
+
+Los resultados quedan en `.bench-results/`. `results.csv` indica la mediana y
+el p95 de rango más próximo en microsegundos, y la mediana de bytes y
+asignaciones por operación para los benchmarks Go. Cada muestra Go es
+un promedio de las iteraciones de esa ejecución. La búsqueda recorre 300
+archivos de unos 30 MiB en total. La prueba en proceso distingue la primera
+extracción de la búsqueda con caché de extracción. El directorio también
+contiene las salidas originales, los hashes de `tools/list` y, con
+`PROFILE=1`, los perfiles de CPU y memoria y sus informes `pprof -top`.
+El script compara el hash de HEAD con el de 0626e64.
+
+Por defecto se toman 10 muestras Go y 20 muestras de proceso por escenario.
+Se pueden ajustar con `BENCH_RUNS`, `BENCH_TIME` y `PROCESS_RUNS`. Para
+repetir solo una revisión, pasa su etiqueta al script, por ejemplo
+`PROFILE=1 bash scripts/bench/run.sh optimized`.
