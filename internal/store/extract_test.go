@@ -87,6 +87,28 @@ func TestCacheAndFullSearch(t *testing.T) {
 		t.Fatalf("cache invalidation entries: %d", len(entries))
 	}
 }
+
+func TestSizedReadTreatsSizeAsHint(t *testing.T) {
+	content := strings.Repeat("text", 3000)
+	for _, sample := range []struct {
+		name  string
+		size  int64
+		limit int64
+		want  string
+	}{
+		{"file grew", 5000, 16000, content},
+		{"file shrank", 16000, 16000, content},
+		{"larger than limit", 5000, 8000, content[:8000]},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			got, err := readSized(strings.NewReader(content), sample.size, sample.limit)
+			if err != nil || string(got) != sample.want {
+				t.Fatalf("read %d bytes, want %d: %v", len(got), len(sample.want), err)
+			}
+		})
+	}
+}
+
 func TestManifestReplacement(t *testing.T) {
 	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, r.URL.Query().Get("body")) }))
 	defer moodle.Close()

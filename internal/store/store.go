@@ -53,6 +53,9 @@ func Open(path string, maxFile int64, workers int) (*Store, error) {
 	}
 	return &Store{Root: root, MaxFile: maxFile, Workers: workers, ExtractTimeout: time.Duration(timeout) * time.Second, batch: make(chan struct{}, 1)}, nil
 }
+
+var reservedDeviceName = regexp.MustCompile(`^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$`)
+
 func Sanitize(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || strings.ContainsRune("/\\<>:\"|?*", r) {
@@ -68,8 +71,8 @@ func Sanitize(name string) string {
 			name = name[:len(name)-1]
 		}
 	}
-	base := strings.ToUpper(strings.Split(name, ".")[0])
-	if regexp.MustCompile(`^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$`).MatchString(base) {
+	base, _, _ := strings.Cut(name, ".")
+	if reservedDeviceName.MatchString(strings.ToUpper(base)) {
 		name = "_" + name
 	}
 	if name == "" {
