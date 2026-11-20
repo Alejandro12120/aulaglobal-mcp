@@ -53,7 +53,8 @@ func (document *zipDocument) decodeODF(docFormat format, sink *pageSink, md *mar
 		heading := headingLevel
 		headingLevel = 0
 		switch {
-		case inNotes && frameClass != "notes":
+		// Some producers omit presentation:class on the notes frame; only a frame that names another class is dropped.
+		case inNotes && frameClass != "" && frameClass != "notes":
 			md.discard()
 		case !inNotes && (frameClass == "header" || frameClass == "footer" || frameClass == "date-time" || frameClass == "page-number"):
 			md.discard()

@@ -235,9 +235,10 @@ func TestODPPages(t *testing.T) {
 	}
 	body := `<draw:page draw:name="one">` + frame("title", "First") + frame("outline", "body text") + frame("footer", "foot") +
 		`<presentation:notes><draw:frame presentation:class="page"><draw:page-thumbnail/></draw:frame>` + frame("notes", "say hi") + `</presentation:notes></draw:page>` +
-		`<draw:page draw:name="two">` + frame("title", "Second") + `</draw:page>` + `<draw:page draw:name="three"></draw:page><draw:page>` + frame("title", "Fourth") + `</draw:page>`
+		`<draw:page draw:name="two">` + frame("title", "Second") + `</draw:page>` + `<draw:page draw:name="three"></draw:page><draw:page>` + frame("title", "Fourth") +
+		`<presentation:notes><draw:frame><draw:text-box><text:p>unclassed note</text:p></draw:text-box></draw:frame></presentation:notes></draw:page>`
 	expectPages(t, pagesOf(t, "a.odp", buildZip(t, zipPart{"content.xml", odfContent("presentation", body)})),
-		Page{1, "## First\n\nbody text\n\n**Notes:**\n\nsay hi\n"}, Page{2, "## Second\n"}, Page{4, "## Fourth\n"})
+		Page{1, "## First\n\nbody text\n\n**Notes:**\n\nsay hi\n"}, Page{2, "## Second\n"}, Page{4, "## Fourth\n\n**Notes:**\n\nunclassed note\n"})
 }
 
 func TestXLSXSheets(t *testing.T) {
