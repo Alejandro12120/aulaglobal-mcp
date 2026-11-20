@@ -21,7 +21,7 @@ escritorio), OpenCode y Antigravity.
 |---|---|
 | Asignaturas | Lista tus asignaturas actuales, pasadas o futuras. |
 | Materiales | Muestra y descarga los archivos de cada asignatura, organizados por tema. |
-| Lectura y búsqueda | Lee PDF, Word, PowerPoint y texto, y busca en todo lo descargado. |
+| Lectura y búsqueda | Lee PDF, Word, PowerPoint, Excel, LibreOffice y texto, y busca en todo lo descargado. Conserva títulos, listas, tablas y notas del orador. |
 | Entregas | Muestra fechas, enunciados y, si lo pides, el estado y la calificación. |
 
 Algunos ejemplos de lo que puedes pedir:
@@ -34,7 +34,7 @@ Algunos ejemplos de lo que puedes pedir:
 
 > [!IMPORTANT]
 > **Proyecto no oficial**, sin relación con la Universidad Carlos III de Madrid.
-> Úsalo solo con tu propia cuenta, respetando la normativa de la universidad y
+> Úsalo solo con tu propia cuenta y respeta la normativa de la universidad y
 > los derechos de autor de los materiales.
 
 ---
@@ -45,7 +45,7 @@ Necesitas un ordenador con Windows, macOS o Linux y uno de los asistentes
 compatibles. No hace falta instalar nada más.
 
 Hay dos formas de instalarlo. La **instalación automática** es la más sencilla y
-se recomienda en la mayoría de los casos.
+sirve en la mayoría de los casos.
 
 ### Opción A: instalación automática (recomendada)
 
@@ -63,7 +63,7 @@ curl -fsSL https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/down
 irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
 ```
 
-El instalador hace lo siguiente, pidiendo confirmación cuando hace falta:
+El instalador hace lo siguiente y pide confirmación cuando hace falta:
 
 1. Detecta tu sistema y descarga la última versión.
 2. Comprueba la firma digital y la integridad de la descarga. Si algo no
@@ -103,9 +103,10 @@ Ejemplo en Windows:
 $env:AULAGLOBAL_VERSION = "v0.1.5"; irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
 ```
 
-La firma se comprueba con `ssh-keygen`, que viene incluido en macOS, en la
-mayoría de distribuciones Linux y en Windows 10 y 11. Si tu equipo no lo tiene,
-el instalador explica cómo añadirlo; también puedes usar la instalación manual.
+El instalador comprueba la firma con `ssh-keygen`, que viene incluido en macOS,
+en la mayoría de distribuciones Linux y en Windows 10 y 11. Si tu equipo no lo
+tiene, el instalador explica cómo añadirlo. También puedes usar la instalación
+manual.
 
 </details>
 
@@ -127,8 +128,8 @@ Si prefieres no ejecutar un script, puedes descargar el programa tú mismo.
 
 En Mac, el tipo de procesador aparece en **menú Apple → Acerca de este Mac**.
 
-**2. Descomprime** el archivo y guarda el programa en una carpeta donde vaya a
-quedarse; los asistentes buscarán el programa en esa ubicación.
+**2. Descomprime** el archivo y guarda el programa en una carpeta definitiva,
+porque los asistentes lo buscarán en esa ruta.
 
 **3. Abre una terminal en esa carpeta** y ejecuta el programa de configuración:
 
@@ -196,7 +197,7 @@ Si la línea no funciona, también puedes copiar el valor desde
 
 > [!WARNING]
 > La cookie da acceso a tu cuenta mientras la sesión esté abierta. No la
-> compartas ni la pegues en el chat del asistente: introdúcela solo en el
+> compartas ni la pegues en el chat del asistente. Introdúcela solo en el
 > programa de configuración.
 
 En el paso 4, el programa revisa cada asistente que encuentra:
@@ -211,7 +212,7 @@ En el paso 4, el programa revisa cada asistente que encuentra:
 Antes de modificar un archivo, guarda una copia con extensión `.bak`. Al
 terminar, muestra un resumen y explica cómo recargar cada asistente.
 
-Para comprobar que funciona, escribe `/mcp` en el asistente: debería aparecer
+Para comprobar que funciona, escribe `/mcp` en el asistente. Debería aparecer
 `aulaglobal`.
 
 <details>
@@ -254,7 +255,7 @@ AulaGlobal/
             └── enunciado.pdf
 ```
 
-Cuando vuelvas a descargar, solo se bajan los archivos nuevos o modificados.
+Si vuelves a descargar, el programa solo baja los archivos nuevos o modificados.
 
 ---
 
@@ -277,8 +278,8 @@ asistente.
 - `aulaglobal-mcp update --check` solo comprueba si hay una versión nueva, sin
   instalarla.
 - Una vez al día como máximo, el programa comprueba si hay una versión nueva; si
-  la hay, el asistente te lo dirá. El asistente nunca actualiza por su cuenta:
-  la actualización siempre la haces tú desde la terminal.
+  la hay, el asistente te lo dirá. El asistente nunca actualiza por su cuenta.
+  La actualización siempre la haces tú desde la terminal.
 - Para desactivar esa comprobación, añade la variable de entorno
   `AULAGLOBAL_UPDATE_CHECK=0` a la configuración del servidor en tu asistente.
 
@@ -414,12 +415,12 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
 |---|---|
 | `aulaglobal-mcp: command not found` o «no se reconoce como comando» | Abre una terminal nueva para que se aplique el PATH. Si sigue sin funcionar, ejecuta el programa con su ruta completa. |
 | El instalador dice que falta `ssh-keygen` | Sigue las instrucciones que muestra o usa la [instalación manual](#opción-b-instalación-manual). En Windows, se activa en **Configuración → Aplicaciones → Características opcionales → Cliente OpenSSH**. |
-| «La sesión de AulaGlobal ha caducado…» | AulaGlobal caduca las claves de acceso cada cierto tiempo. Inicia sesión en AulaGlobal en el navegador y ejecuta `aulaglobal-mcp setup`: te pedirá una cookie nueva. No hace falta reiniciar el asistente. |
-| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» | No es una caducidad: AulaGlobal no permite esa función con tu cuenta. No hace falta renovar nada. |
+| «La sesión de AulaGlobal ha caducado…» | AulaGlobal caduca las claves de acceso cada cierto tiempo. Inicia sesión en AulaGlobal en el navegador y ejecuta `aulaglobal-mcp setup`, que te pedirá una cookie nueva. No hace falta reiniciar el asistente. |
+| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» | La clave no ha caducado. AulaGlobal no permite esa función con tu cuenta, así que no hace falta renovar nada. |
 | `cannot read token file` | Ejecuta `aulaglobal-mcp setup` de nuevo. Si usaste otras carpetas, revisa la configuración manual. |
 | El asistente no muestra `aulaglobal` | Reinicia el asistente. Si sigue sin aparecer, ejecuta `aulaglobal-mcp setup --only-clients`. |
 | No se puede obtener la clave de acceso | Cierra sesión en AulaGlobal, vuelve a entrar y repite el paso con una cookie nueva. |
-| Un PDF no se puede leer | Los PDF escaneados no contienen texto. Los muy largos pueden tardar: repite la petición unos segundos después. |
+| Un archivo no se puede leer | El programa no hace OCR, así que no lee PDF escaneados. Tampoco lee archivos con contraseña ni los formatos antiguos `.doc`, `.ppt` y `.xls`. Guarda una copia en `.docx`, `.pptx`, `.xlsx` o PDF con texto. Si un archivo muy largo tarda, repite la petición unos segundos después. |
 
 ---
 
@@ -427,8 +428,8 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
 
 **Qué hace este programa con tus datos**
 
-- **No se usa tu contraseña.** El acceso se obtiene a partir de tu sesión del
-  navegador.
+- **El programa no usa tu contraseña.** Obtiene el acceso a partir de tu sesión
+  del navegador.
 - **La clave de acceso se queda en tu equipo**, en la carpeta de configuración
   de tu usuario y con permisos restringidos. El asistente de IA nunca la recibe.
 - **Sin intermediarios.** El programa se conecta directamente a AulaGlobal desde
@@ -437,8 +438,8 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
   versiones nuevas en GitHub, que puedes desactivar (ver
   [Actualización](#actualización)).
 - **Datos personales mínimos.** Al comprobar la conexión, el asistente no recibe
-  tu nombre ni tu identificador de usuario. Las calificaciones y el estado de
-  las entregas solo se consultan si lo pides.
+  tu nombre ni tu identificador de usuario. El programa solo consulta las
+  calificaciones y el estado de las entregas si lo pides.
 - **Uso moderado de AulaGlobal.** El programa limita el número de peticiones por
   segundo, reutiliza durante unos segundos las respuestas recientes y, si
   AulaGlobal pide esperar, se detiene el tiempo indicado.
@@ -449,9 +450,9 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
 
 - **El asistente recibe lo que devuelven las herramientas**: listas de
   asignaturas, textos de tus apuntes, enunciados de entregas, etc. Según el
-  asistente que uses, ese contenido se envía a su proveedor de IA (Anthropic,
-  OpenAI, Google…) y se trata según sus condiciones y su política de privacidad.
-  Revísalas antes de usarlo con materiales que no quieras compartir.
+  asistente que uses, ese contenido llega a su proveedor de IA (Anthropic,
+  OpenAI, Google…), que lo trata según sus condiciones y su política de
+  privacidad. Revísalas antes de usarlo con materiales que no quieras compartir.
 - **Los límites de carpeta solo afectan a este programa.** Las herramientas de
   AulaGlobal MCP solo pueden leer y escribir dentro de la carpeta `AulaGlobal`,
   pero el asistente puede tener sus propios permisos (por ejemplo, para leer
@@ -467,12 +468,12 @@ Al usar este programa aceptas lo siguiente:
 1. **Proyecto independiente.** No está desarrollado, respaldado ni supervisado
    por la Universidad Carlos III de Madrid.
 2. **Solo con acceso autorizado.** Úsalo únicamente con tu propia cuenta de
-   AulaGlobal y para acceder a contenido al que ya tienes acceso, respetando la
-   normativa de la universidad.
+   AulaGlobal, para contenido al que ya tienes acceso, y respeta la normativa
+   de la universidad.
 3. **Tú decides qué compartes.** Eres responsable de comprobar que puedes
    compartir con el asistente y con su proveedor de IA el contenido que le
-   pides procesar, teniendo en cuenta los derechos de autor de los materiales y
-   los datos personales que puedan contener.
+   pides procesar. Ten en cuenta los derechos de autor de los materiales y los
+   datos personales que puedan contener.
 4. **Sin garantías.** El software se ofrece tal cual, sin garantía de ningún
    tipo. En la medida en que lo permita la ley, los autores no son responsables
    de los daños o perjuicios derivados de su uso, como se indica en la
@@ -497,8 +498,8 @@ El programa te pregunta qué quieres hacer:
 | 3. Desinstalar todo | Desconecta todos los asistentes y borra la clave, el programa y la línea que el instalador añadió al PATH. |
 
 Antes de cambiar nada, muestra la lista exacta de lo que va a hacer y te pide
-confirmación. Tus materiales descargados no se borran salvo que lo indiques: en
-la opción 3 se pregunta aparte, y la respuesta por defecto es «No».
+confirmación. El programa no borra tus materiales descargados salvo que lo
+indiques. La opción 3 lo pregunta aparte, y la respuesta por defecto es «No».
 
 Con `aulaglobal-mcp uninstall --dry-run` puedes ver lo que se haría sin cambiar
 nada. Las demás opciones se muestran con `aulaglobal-mcp uninstall --help`.
@@ -535,8 +536,8 @@ el tratamiento de los nombres de las asignaturas.
 
 ## Licencia
 
-Distribuido bajo la [licencia MIT](LICENSE). El software se proporciona
-**tal cual, sin garantía de ningún tipo**.
+Distribuido bajo la [licencia MIT](LICENSE). El software se proporciona tal
+cual, sin garantía de ningún tipo.
 
 El programa incluye partes basadas en AGDownloader y bibliotecas de terceros,
 cada una con su propia licencia. Sus avisos y textos de licencia están en

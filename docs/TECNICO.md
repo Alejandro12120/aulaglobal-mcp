@@ -1,18 +1,19 @@
 # AulaGlobal MCP · Referencia técnica
 
-Servidor Go ligero para consultar asignaturas y descargar/leer sus documentos en
-AulaGlobal UC3M. SDK oficial MCP Go, stdio o Streamable HTTP en /mcp.
-Go **1.26.9** fijado (incluido el contenedor de compilación); no requiere Go en el host.
+Servidor en Go que consulta las asignaturas de AulaGlobal (UC3M) y descarga y lee
+sus documentos. Usa el SDK oficial de MCP para Go y funciona por stdio o por
+Streamable HTTP en /mcp. La versión de Go está fijada en 1.26.9, también en el
+contenedor de compilación, así que no hace falta Go en el host.
 
 ## Token
 
-No se aceptan credenciales por herramientas MCP. Configura **una** de
-AULAGLOBAL_TOKEN o AULAGLOBAL_TOKEN_FILE (el archivo tiene prioridad).
-Mantén los archivos de secretos con permisos 0600 y directorios 0700.
+Las herramientas MCP no aceptan credenciales. Configura solo una de
+AULAGLOBAL_TOKEN o AULAGLOBAL_TOKEN_FILE; si están las dos, gana el archivo.
+Mantén los archivos de secretos con permisos 0600 y sus directorios con 0700.
 
-Para convertir una cookie MoodleSessionag de tu propia sesión, copia **solo su
-valor** desde las herramientas del navegador. En Bash, sin eco ni historial del
-valor, usando el binario compilado:
+Para convertir una cookie MoodleSessionag de tu propia sesión, copia solo su
+valor desde las herramientas del navegador. Este ejemplo en Bash usa el binario
+compilado y no deja el valor en pantalla ni en el historial:
 
 ```bash
 IFS= read -rs -p 'MoodleSessionag: ' cookie
@@ -21,13 +22,20 @@ printf '%s' "$cookie" | ./aulaglobal-mcp token-from-cookie --output secrets/toke
 unset cookie
 ```
 
-El subcomando lee stdin (rechaza terminales para evitar eco), no argv; no sigue
-redirecciones, exige Location moodlemobile://token=..., decodifica base64 y
-verifica MD5(siteurl+passport) usando un passport aleatorio. Nunca imprime el
-token. Crea archivos nuevos con 0600; usa `--force` para sustituirlos atómicamente dentro de un directorio privado. Si existe
-privatetoken lo guarda en secrets/token.private; no se necesita para este
-servidor. Guarda también `<tokenfile>.meta.json` (0600), con `obtained_at` RFC3339 sin secretos. `auth_status` lo lee junto a AULAGLOBAL_TOKEN_FILE y devuelve `token_obtained_at` y `token_age_days`. No lo compartas. Puede que Moodle exija volver a iniciar sesión o una
-confirmación: el subcomando devuelve un error, no automatiza SSO.
+El subcomando lee la cookie de stdin, nunca de argv, y rechaza un terminal como
+entrada para que no haya eco. No sigue redirecciones: exige una cabecera Location
+`moodlemobile://token=...`, decodifica el base64 y verifica
+MD5(siteurl+passport) con un passport aleatorio. Nunca imprime el token.
+
+Crea los archivos nuevos con permisos 0600. Con `--force` los sustituye de forma
+atómica dentro de un directorio privado. Si Moodle devuelve un privatetoken, lo
+guarda en secrets/token.private, aunque este servidor no lo necesita. También
+guarda `<tokenfile>.meta.json` (0600), que solo contiene `obtained_at` en
+RFC3339. `auth_status` lee ese archivo junto a AULAGLOBAL_TOKEN_FILE y devuelve
+`token_obtained_at` y `token_age_days`. No compartas estos archivos.
+
+Si Moodle exige volver a iniciar sesión o una confirmación, el subcomando
+devuelve un error. No automatiza el SSO.
 
 Para compilar el binario sin instalar Go:
 
@@ -41,7 +49,8 @@ docker run --rm -v "$PWD":/src -w /src golang:1.26.9   sh -c 'CGO_ENABLED=0 go b
 AULAGLOBAL_TOKEN_FILE="$PWD/secrets/token" ./aulaglobal-mcp --transport stdio
 ```
 
-Claude Code (también formato habitual en clientes MCP; sustituye rutas absolutas):
+Configuración para Claude Code, con el formato habitual de los clientes MCP.
+Sustituye las rutas absolutas:
 
 ```json
 {
@@ -75,8 +84,9 @@ Cliente genérico mediante Docker, sin pseudo-TTY:
 }
 ```
 
-El UID 65532 del contenedor debe poder leer los secretos: para archivos 0600,
-utiliza propietario 65532 o ejecuta con tu UID y un directorio de datos escribible.
+El contenedor se ejecuta con el UID 65532, que debe poder leer los secretos. Con
+archivos 0600, haz que su propietario sea 65532 o ejecuta el contenedor con tu UID
+y un directorio de datos en el que pueda escribir.
 
 ## HTTP con Docker
 
@@ -86,78 +96,197 @@ docker build -t aulaglobal-mcp:local .
 docker run --rm --name aulaglobal -p 127.0.0.1:8080:8080   -e MCP_HTTP_AUTH_TOKEN   -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token   -v /ruta/secrets/token:/run/secrets/token:ro   -v ag-data:/data aulaglobal-mcp:local
 ```
 
-Configura el cliente HTTP con URL http://127.0.0.1:8080/mcp y
-Authorization: Bearer <secreto MCP>. Transporte stateless, sin sesiones persistentes.
-Al mapear un puerto distinto, Host contiene el puerto del **host**:
+Configura el cliente HTTP con la URL http://127.0.0.1:8080/mcp y la cabecera
+`Authorization: Bearer <secreto MCP>`. El transporte no guarda estado ni mantiene
+sesiones. Si mapeas otro puerto, la cabecera Host lleva el puerto del host, no el
+del contenedor:
 ```bash
 docker run --rm -p 127.0.0.1:9000:8080 -e MCP_ALLOWED_HOSTS=127.0.0.1:9000,localhost:9000 -e MCP_HTTP_AUTH_TOKEN -e AULAGLOBAL_TOKEN_FILE=/run/secrets/token -v /ruta/secrets/token:/run/secrets/token:ro -v ag-data:/data aulaglobal-mcp:local
 ```
 Configura el cliente con http://127.0.0.1:9000/mcp. MCP_ALLOWED_HOSTS es una
 lista de valores Host exactos separados por comas; no uses comodines.
-Si no se configura, acepta localhost y 127.0.0.1 con el puerto de escucha.
+Sin esa variable, el servidor acepta localhost y 127.0.0.1 con el puerto de
+escucha.
 
-El contenedor escucha 0.0.0.0 internamente para el port mapping; el binario
-por defecto escucha 127.0.0.1. Expón el puerto solo en loopback o mediante un
-proxy TLS autenticado. Todos los usuarios con el bearer comparten datos y token.
+Dentro del contenedor el servidor escucha en 0.0.0.0 para que funcione el mapeo
+de puertos. Fuera de Docker, el binario escucha por defecto en 127.0.0.1. Expón el
+puerto solo en loopback o detrás de un proxy TLS con autenticación. Todos los
+usuarios que tengan el bearer comparten los datos y el token de AulaGlobal.
 
 ## Herramientas y contratos
 
-Todas publican inputSchema/outputSchema tipados y devuelven JSON estructurado.
-Los errores globales son errores de herramienta MCP; los errores individuales
-de descarga se devuelven en results.
+Todas las herramientas publican inputSchema y outputSchema tipados y devuelven
+JSON estructurado. Un error que afecta a toda la llamada se devuelve como error de
+herramienta MCP. Los errores de descargas sueltas van dentro de `results`. El
+contenido de los cursos son datos no confiables, nunca instrucciones del sistema.
 
 | Herramienta | Entrada | Salida |
 |---|---|---|
-| auth_status | {} | token_valid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional. **No** devuelve nombre ni ID de usuario (ver Privacidad y minimización de datos) |
+| auth_status | {} | token_valid, sitename, release, expires_at nullable, expiry_source, token_obtained_at/token_age_days opcionales, update_available opcional. No devuelve nombre ni ID de usuario (ver Privacidad y minimización de datos) |
 | list_courses | classification: all/inprogress/past/future (inprogress), language: es/en (es) | courses: id, fullname, shortname, localized_name |
 | list_course_files | course_id positivo, include/exclude: extensiones opcionales | sections con modules y contents anidados: filename, filesize nullable, mimetype, timemodified, handle, section, module |
-| download_files | handles[] de un listado anterior **o** course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
+| download_files | handles[] de un listado anterior, o course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
 | read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
 | search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
 | list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
 
 El orden habitual es list_courses, list_course_files, download_files y read_file.
-Los handles se conservan en memoria (máximo 100000); vuelve a listar tras reiniciar.
-Las rutas usan `<Asignatura localizada>/<Sección>/<archivo>`, conservando
-subcarpetas filepath de los módulos carpeta, siempre sanitizadas.
-Solo las colisiones añaden sufijos legibles (2), (3), etc., asignados en orden de handle y conservados en el manifiesto.
-Cada curso usa un nombre local canónico en español, persistido por ID en el manifiesto incluso tras renombrarlo; el idioma de visualización no cambia la carpeta. Los nombres conocidos se reutilizan en memoria sin otra consulta de curso.
-El manifiesto atómico `.aulaglobal-cache/manifest.json` registra handle estable
-(hash de curso + módulo + filepath + filename), ruta, tamaño y timemodified.
-Una revisión de URL no cambia el handle ni crea otra copia; skip funciona tras
-reiniciar. Las rutas ya asignadas se conservan aunque cambie el nombre del curso.
-Para descargar por handle tras reiniciar, vuelve a listar para recuperar la URL.
-No migra automáticamente las descargas del diseño antiguo.
-Excluir siempre prevalece sobre incluir. Fallback de cursos en Moodle antiguo:
-devuelve **todas** las matrículas, sin clasificación temporal.
 
-Lectura: texto UTF-8/HTML, PDF con marcadores [Page N], docx, pptx, odt y odp.
-No realiza OCR ni ejecuta macros. PDF usa ledongthuc/pdf (Go puro, BSD-3-Clause,
-sin dependencias transitivas; versión fijada en go.mod; [fuente](https://github.com/ledongthuc/pdf)). ZIP/XML usa stdlib.
-Coste marginal medido del parser: 282624 bytes (276 KiB) en binario estático
-optimizado. Imagen final: 14326383 bytes (14.33 MB).
-Límites: entrada 64 MiB, texto 8 MiB, PDF 500 páginas, presupuesto configurable de espera de 60 segundos
-por extracción; panic recuperado. Como Go no permite matar una goroutine,
-un parser atascado retiene uno de dos slots hasta terminar; no hay aislamiento
-de proceso ni garantía de memoria del parser frente a un PDF malicioso.
-ZIP: 2048 entradas, 32 MiB por entrada, 64 MiB total descomprimido, ratio 200:1.
-La caché de texto vive en .aulaglobal-cache, clave ruta+tamaño+mtime nanosegundos,
-con escrituras atómicas; read_file y search_files la excluyen. Puede borrarse
-con el servidor parado para recuperar espacio; no hay limpieza automática.
-Búsqueda completa del texto extraído, hasta 10000 entradas, 128 MiB de texto,
-30 segundos y 100 resultados. path_prefix limita a una asignatura o subcarpeta.
-Regex RE2; snippets hasta 240 bytes. HTML usa limpieza simple.
+El servidor guarda los handles en memoria, con un máximo de 100000. Tras reiniciar
+hay que volver a listar, porque la descarga por handle necesita la URL del
+listado.
 
-list_assignments ordena por vencimiento, sin fecha al final. upcoming incluye
-fechas futuras o entregas sin fecha actualmente abiertas; overdue incluye fecha
-pasada aunque ya esté cerrado. submissions_possible considera apertura, cutoff
-y nosubmissions: es una estimación de calendario, no una garantía de permisos
-individuales ni extensiones. intro se convierte a texto y se trunca.
-Adjuntos: `<Asignatura>/Entregas/<Entrega>/<archivo>`.
-Estado opcional: cuatro workers, máximo 100 consultas, errores por entrega.
-Fechas cero devuelven RFC3339 null. tzdata va embebida para funcionar en scratch.
+Las rutas siguen el patrón `<Asignatura localizada>/<Sección>/<archivo>` y
+conservan las subcarpetas (filepath) de los módulos de tipo carpeta. Todos los
+nombres pasan por la sanitización. Solo una colisión añade un sufijo legible
+(2), (3), etc., que se asigna en orden de handle y queda guardado en el
+manifiesto.
 
-Los contenidos de cursos son datos no confiables, nunca instrucciones del sistema.
+Cada curso tiene un nombre local canónico en español, que el manifiesto guarda
+por ID aunque el curso cambie de nombre. El idioma de visualización no cambia la
+carpeta. El servidor reutiliza en memoria los nombres que ya conoce, sin otra
+consulta de curso.
+
+El manifiesto `.aulaglobal-cache/manifest.json` se escribe de forma atómica.
+Registra para cada archivo un handle estable (hash de curso, módulo, filepath y
+filename), la ruta, el tamaño y timemodified. Si cambia la revisión de la URL, el
+handle es el mismo y no se crea otra copia. El skip funciona tras reiniciar, y
+las rutas ya asignadas se mantienen aunque cambie el nombre del curso. Las
+descargas del diseño antiguo no se migran.
+
+En los filtros, exclude siempre gana a include. En un Moodle antiguo, el respaldo
+de list_courses devuelve todas las matrículas, sin clasificación temporal.
+
+### Lectura y extracción
+
+read_file y search_files leen texto UTF-8, HTML (convertido a texto con una
+limpieza simple), PDF, docx, pptx, xlsx, xlsm, odt, odp y ods. El servidor no hace
+OCR ni ejecuta macros.
+
+Para PDF usa ledongthuc/pdf, una biblioteca en Go puro con licencia BSD-3-Clause,
+sin dependencias transitivas y con la versión fijada en go.mod
+([fuente](https://github.com/ledongthuc/pdf)). El texto de cada página va
+precedido de un marcador `[Page N]`. Para ZIP y XML solo usa la biblioteca
+estándar. El XML lo lee `internal/store/xmlscan.go`, un tokenizador propio que no
+reserva memoria por token. Existe porque `encoding/xml` era el mayor coste: con
+él, un docx tardaba unas 5 veces más.
+
+Los formatos de oficina se convierten a Markdown (GFM). Todos los parsers
+escriben, en una sola pasada y sin árbol DOM, en el mismo serializador
+(`markdown.go`). Solo la tabla en curso queda en búfer, porque GFM necesita el
+número de columnas antes de escribir la cabecera. El escapado de `|` y `\`, el
+paso de los saltos de línea de una celda a `<br>` y el resto de la normalización
+están solo en ese archivo. `[Page N]`, `Page{Number, Text}` y `Match.Page` no
+cambian. Lo que cambia es que el texto de cada página es Markdown.
+
+- docx. Los títulos salen del estilo del párrafo. Los ids de estilo están
+  localizados (en español, `Ttulo1`), así que el parser los resuelve con
+  `word/styles.xml` mediante `w:name` ("heading N" o "Title"), `w:outlineLvl` y
+  `w:basedOn`. Las listas salen de `w:numPr`, numeradas o con viñetas según
+  `word/numbering.xml`. Una celda combinada con `w:gridSpan` produce celdas
+  vacías, y una tabla anidada se aplana dentro de su celda. El parser ignora el
+  texto de revisiones borradas (`w:del`) y el de los campos (`w:instrText`). Solo
+  lee los estilos y la numeración cuando un párrafo los necesita. No hay
+  negrita, cursiva ni notas al pie.
+- pptx. El orden y el número de página salen de `ppt/presentation.xml`
+  (`sldIdLst`) y sus relaciones, no del nombre del archivo, así que slide10 va
+  después de slide9. Si faltan esos archivos o están rotos, el parser ordena por
+  el número del nombre y usa ese número como página. El título (`title` o
+  `ctrTitle`) sale como `## `, las viñetas siguen `lvl`, `buChar` y `buAutoNum`, y
+  las tablas `a:tbl` salen como tablas GFM. Las notas del orador (relación
+  `notesSlide`) van detrás de la diapositiva, en la misma página, en un bloque
+  `**Notes:**`. Los marcadores `sldNum`, `sldImg`, `hdr`, `ftr` y `dt` se omiten.
+- odt. Lee `text:h`, `text:p`, listas anidadas y tablas, en las que cada
+  `covered-table-cell` cuenta como celda vacía. `text:s`, `text:tab` y
+  `text:line-break` pasan a espacios y saltos de línea. Omite comentarios, notas
+  al pie y cambios registrados.
+- odp. Cada `draw:page` es una página. Los marcos con
+  `presentation:class="title"` salen como `## ` y `presentation:notes` como
+  bloque `**Notes:**`.
+- xlsx, xlsm y ods. Cada hoja es una página, en el orden del libro
+  (`xl/workbook.xml` y sus relaciones; el número de página es la posición de la
+  hoja). La página empieza con `## <nombre>` y sigue con una tabla GFM del rango
+  usado. Las filas y columnas vacías del final se recortan.
+  - En xlsx, el parser carga `xl/sharedStrings.xml` una sola vez, con un tope de
+    8 MiB y 1 Mi cadenas. Coloca cada celda según su referencia `r="C5"` y
+    rellena los huecos de columna. Los valores salen tal como están guardados,
+    sin formato de número.
+  - En ods, toma el texto mostrado de la celda o, si no lo hay, su valor
+    guardado. Nunca expande `number-columns-repeated` ni `number-rows-repeated`
+    más allá de la última celda o fila con contenido. Una fila admite como
+    máximo 1024 columnas y una tabla 1 Mi celdas, y se conservan como máximo 8
+    filas vacías seguidas.
+- `.csv` se sigue leyendo como texto, sin convertir.
+
+`decodeDocument` detecta el formato por los primeros bytes antes de mirar la
+extensión. `%PDF-` indica PDF. `PK\x03\x04` indica ZIP, y entonces las entradas y
+el `mimetype` de ODF deciden entre docx, pptx, xlsx, odt, odp y ods. La firma
+OLE/CFB indica un `.doc`, `.ppt` o `.xls` antiguo, o un OOXML cifrado. Por eso un
+`.docx` que en realidad es un PDF se lee como PDF. `supported()` sigue decidiendo
+por la extensión, e incluye `.doc`, `.ppt` y `.xls` para que read_file devuelva
+una nota clara.
+
+Los errores tienen tipo y se comprueban con `errors.Is` (paquete `store`):
+
+| Error | Casos |
+|---|---|
+| `ErrUnsupported` | Formato antiguo, ZIP que no es un documento conocido. |
+| `ErrNeedsOCR` | "PDF has no text layer (scanned); OCR not supported". |
+| `ErrEncrypted` | PDF con `/Encrypt`, documento de Office con contraseña. |
+| `ErrMalformed` | "invalid PDF", "invalid ZIP document", "invalid document XML", "PDF text extraction failed". |
+| `ErrLimit` | Los límites que se indican más abajo. |
+
+Los mensajes anteriores no cambian y se añaden los nuevos. read_file los
+devuelve en `note`.
+
+La caché de extracción está en `.aulaglobal-cache`. Su clave combina la ruta, el
+tamaño y el mtime en nanosegundos, con el prefijo `v2:` para no servir el texto
+plano de versiones anteriores. Las escrituras son atómicas, y read_file y
+search_files no pueden leer esa carpeta. Los fallos deterministas de la tabla
+anterior también se guardan, como `code` y `error` en el mismo archivo, y se
+devuelven sin volver a analizar el documento. Los vencimientos, las
+cancelaciones, los errores de E/S y los pánicos nunca se guardan. Puedes borrar
+la caché con el servidor parado para recuperar espacio; no hay limpieza
+automática.
+
+Límites de extracción:
+
+- Entrada de 64 MiB y texto extraído de 8 MiB.
+- PDF de 500 páginas. Un PDF más largo se rechaza para no presentar contenido
+  incompleto.
+- ZIP: 2048 entradas, 32 MiB por entrada, 64 MiB descomprimidos en total y una
+  relación de compresión máxima de 200:1.
+
+Cada extracción tiene un plazo de espera configurable, de 60 segundos por
+defecto. Si vence, read_file devuelve "extraction in progress, retry shortly". El
+parser sigue en uno de los dos slots globales y, al terminar, guarda en la caché
+el resultado o el fallo determinista, aunque el cliente haya cancelado o agotado
+su plazo. Un pánico del parser se recupera. Go no permite matar una goroutine,
+así que un parser atascado retiene su slot hasta terminar. No hay aislamiento de
+proceso ni límite duro de memoria frente a un PDF malicioso.
+
+El parser de PDF añade 282624 bytes (276 KiB) al binario estático optimizado. La
+imagen final ocupa 14326383 bytes (14.33 MB).
+
+search_files recorre todo el texto extraído, con un máximo de 10000 entradas,
+128 MiB de texto, 30 segundos y 100 resultados. `path_prefix` limita la búsqueda
+a una asignatura o subcarpeta. Las expresiones regulares son RE2 y los
+fragmentos miden hasta 240 bytes.
+
+### Entregas
+
+list_assignments ordena por fecha de vencimiento y deja al final las entregas sin
+fecha. `upcoming` incluye las entregas con fecha futura y las que no tienen fecha
+y están abiertas. `overdue` incluye las de fecha pasada, aunque ya estén
+cerradas. `submissions_possible` se calcula con la apertura, el cutoff y
+nosubmissions. Es una estimación por calendario y no tiene en cuenta permisos
+individuales ni prórrogas. `intro` se convierte a texto y se corta a 2000 runas,
+seguidas de ` [truncated]`. Los adjuntos se guardan en
+`<Asignatura>/Entregas/<Entrega>/<archivo>`.
+
+El estado de entrega opcional usa cuatro workers, hace como máximo 100 consultas
+y devuelve los errores por entrega. Las fechas a cero salen como null en
+RFC3339. tzdata va embebida para que las fechas funcionen en la imagen scratch.
 
 ## Configuración y seguridad
 
@@ -178,27 +307,44 @@ Los contenidos de cursos son datos no confiables, nunca instrucciones del sistem
 | AULAGLOBAL_UPDATE_CHECK | activada; `0` desactiva la consulta diaria de versiones nuevas |
 | AULAGLOBAL_IN_CONTAINER | definida en la imagen Docker; desactiva update y la consulta |
 
-Host se valida para evitar DNS rebinding; Origin se compara de forma exacta.
-Para otro puerto/hostname configura --allowed-hosts explícitamente.
---dangerously-disable-http-auth desactiva autenticación con advertencia en stderr.
-Cuerpos HTTP limitados a 1 MiB, cabeceras 16 KiB, ReadHeaderTimeout 10s, ReadTimeout 30s e IdleTimeout 60s.
-Go 1.26 elimina el deadline de lectura tras consumir el cuerpo al iniciar la lectura de fondo; ReadTimeout no limita la ejecución posterior (test con conexión real).
-Sin WriteTimeout global para permitir llamadas MCP largas; desconectar el cliente cancela su contexto.
-SIGINT/SIGTERM cierran el servidor con hasta 10 segundos de margen.
-Logs JSON slog solo en stderr; stdout queda reservado para MCP stdio.
+El servidor valida la cabecera Host para evitar DNS rebinding y compara Origin de
+forma exacta. Para otro puerto u otro hostname, configura `--allowed-hosts`.
+`--dangerously-disable-http-auth` desactiva la autenticación y escribe una
+advertencia en stderr.
 
-Cliente HTTP compartido: dial/TLS 10s, cabeceras 30s, WS y conversión de cookie 60s; descargas sin timeout total, con detector de inactividad;
-contexto propagado, redirecciones solo al mismo host/esquema (máximo 5).
-POST form para WS; token query solo para pluginfile. Errores de red redactados,
-mensajes Moodle arbitrarios no se propagan. Las descargas (GET idempotentes) reintentan
-timeouts/5xx (3 intentos, backoff cancelable). Los POST de WS solo se repiten tras 429/503 y solo si la función es de solo lectura (ver Acceso respetuoso a AulaGlobal).
-Descargas verifican status, rechazan HTML inesperado y errores JSON, tamaño,
-y escriben un temporal exclusivo, lo sincronizan con fsync y lo renombran. Skip compara tamaño y mtime.
-os.Root confina lecturas/escrituras incluso ante enlaces simbólicos hacia fuera.
-Usa un volumen dedicado; no permitas que procesos no confiables escriban en él.
-Los archivos se crean 0600, directorios 0700; no se almacena una cookie.
-La imagen scratch contiene únicamente binario estático, CA, /data y /licenses (LICENSE y THIRD_PARTY_NOTICES.md), UID 65532;
-incluye tzdata embebida (Europe/Madrid con horario de verano).
+Límites HTTP: cuerpo de 1 MiB, cabeceras de 16 KiB, ReadHeaderTimeout de 10 s,
+ReadTimeout de 30 s e IdleTimeout de 60 s. Go 1.26 quita el deadline de lectura
+cuando termina de leer el cuerpo y empieza la lectura de fondo, así que
+ReadTimeout no limita la ejecución posterior (lo comprueba un test con una
+conexión real). No hay WriteTimeout global, para permitir llamadas MCP largas. Si
+el cliente se desconecta, su contexto se cancela. SIGINT y SIGTERM cierran el
+servidor con hasta 10 segundos de margen. Los logs JSON de slog van solo a
+stderr, porque stdout es el canal de MCP stdio.
+
+Todas las peticiones a AulaGlobal usan un cliente HTTP compartido. Sus plazos son
+10 s para la conexión y TLS, 30 s para las cabeceras y 60 s para las llamadas WS y
+la conversión de la cookie. Las descargas no tienen plazo total, pero sí un
+detector de inactividad. Cada petición recibe el contexto de la llamada, y las
+redirecciones solo pueden ir al mismo host y esquema, con un máximo de 5. Las
+llamadas WS van por POST de formulario, y el token solo viaja en la query para
+pluginfile. Los errores de red se redactan y los mensajes arbitrarios de Moodle
+no se propagan.
+
+Las descargas son GET idempotentes y reintentan tras un timeout o un 5xx (3
+intentos, con un backoff que se puede cancelar). Los POST de WS solo se repiten
+tras un 429 o un 503, y solo si la función es de solo lectura (ver Acceso
+respetuoso a AulaGlobal). Cada descarga comprueba el status y el tamaño, rechaza
+HTML inesperado y errores JSON, y escribe en un temporal exclusivo que sincroniza
+con fsync y después renombra. El skip compara tamaño y mtime.
+
+os.Root confina las lecturas y escrituras, también ante enlaces simbólicos que
+apunten fuera. Usa un volumen dedicado y no dejes que procesos no confiables
+escriban en él. Los archivos se crean con 0600 y los directorios con 0700. El
+servidor no guarda ninguna cookie.
+
+La imagen scratch contiene solo el binario estático, los certificados CA, /data y
+/licenses (LICENSE y THIRD_PARTY_NOTICES.md), y se ejecuta con el UID 65532. El
+binario lleva tzdata embebida (Europe/Madrid con horario de verano).
 
 ## Acceso respetuoso a AulaGlobal
 
@@ -208,32 +354,35 @@ launch.php) pasa por una única puerta por proceso
 (AULAGLOBAL_CONCURRENCY) y no sustituye al respeto de las normas de uso de la
 universidad.
 
-**Limitador de ritmo.** Cubo de fichas (token bucket) con la reserva de hueco
-futuro, de modo que los hilos esperan en orden. Por defecto 4 peticiones/s con
-ráfaga de 8: una consulta interactiva (cursos, contenidos, tareas) no espera
-nunca, y una descarga masiva o la consulta de estado de entregas queda en
-240 peticiones por minuto, del orden de lo que genera un navegador, muy lejos de
-una carga abusiva. Se configura con `AULAGLOBAL_MAX_RPS` (número decimal entre
-0.1 y 100; la ráfaga es el doble, mínimo 1); un valor no válido impide arrancar.
-Un curso de 200 archivos tarda unos 50 s con el valor por defecto. La espera
-respeta la cancelación del contexto. Las redirecciones del mismo host (máximo 5)
-no consumen ficha propia.
+**Limitador de ritmo.** Es un cubo de fichas (token bucket) que reserva el hueco
+futuro, de modo que los hilos esperan en orden. Por defecto permite 4
+peticiones/s con ráfaga de 8. Con eso, una consulta interactiva (cursos,
+contenidos, tareas) no espera nunca, y una descarga masiva o la consulta del
+estado de entregas se queda en 240 peticiones por minuto, del orden de lo que
+genera un navegador. Se configura con `AULAGLOBAL_MAX_RPS`, un número decimal
+entre 0.1 y 100. La ráfaga es el doble, con un mínimo de 1. Con un valor no
+válido, el servidor no arranca. Un curso de 200 archivos tarda unos 50 s con el
+valor por defecto. La espera respeta la cancelación del contexto. Las
+redirecciones del mismo host (máximo 5) no consumen ficha propia.
 
-**429 y 503.** Se lee `Retry-After` (segundos o fecha HTTP); sin cabecera, 5 s
-duplicando por intento con ±25 % de jitter; siempre se limita a 120 s (mínimo 1 s
-si el servidor indica 0). La pausa es **global**: la fijan y la respetan todas
-las goroutines (también las peticiones que ya estaban en cola), no solo la que
-recibió el error. Se reintenta como máximo 2 veces (3 intentos) y solo si la
-petición es de solo lectura: GET de descarga y launch.php, y funciones WS de la
-lista cerrada `readOnlyFns` (todas las que usa el cliente leen; ninguna escribe
-en Moodle). Una función WS que no esté en esa lista nunca se reintenta, ni se
-deduplica ni se cachea. Si la pausa es mayor que el tiempo que le queda al
-llamante, o se agotan los reintentos, la herramienta devuelve «AulaGlobal está
-limitando las peticiones; vuelve a intentarlo en N s.» (`errors.Is(err,
-aulaglobal.ErrRateLimited)`). Una descarga por lotes o el estado de entregas
-se detiene entera con ese único error en vez de seguir golpeando; lo ya
-descargado se omite al repetir. Los errores JSON con HTTP 200 (errorcode de
-Moodle) **no** son límites de ritmo y no se reintentan.
+**429 y 503.** El cliente lee `Retry-After`, en segundos o como fecha HTTP. Sin
+esa cabecera espera 5 s y duplica la espera en cada intento, con ±25 % de
+jitter. La espera nunca pasa de 120 s, y es de 1 s si el servidor indica 0. La
+pausa es global. Cualquier goroutine puede fijarla y todas la respetan, también
+las peticiones que ya estaban en cola. El cliente reintenta como máximo 2 veces
+(3 intentos), y solo si la petición es de solo lectura. Son de solo lectura los
+GET de descarga y de launch.php y las funciones WS de la lista cerrada
+`readOnlyFns`. Todas las funciones que usa el cliente leen y ninguna escribe en
+Moodle. Una función WS que no esté en esa lista nunca se reintenta, ni se
+deduplica ni se cachea.
+
+Si la pausa es mayor que el tiempo que le queda al llamante, o se agotan los
+reintentos, la herramienta devuelve «AulaGlobal está limitando las peticiones;
+vuelve a intentarlo en N s.» (`errors.Is(err, aulaglobal.ErrRateLimited)`). Una
+descarga por lotes o la consulta del estado de entregas se detiene entera con ese
+único error, en lugar de seguir enviando peticiones. Al repetirla, lo ya
+descargado se omite. Los errores JSON con HTTP 200 (errorcode de Moodle) no son
+límites de ritmo y no se reintentan.
 
 **Deduplicación.** Las llamadas WS de solo lectura idénticas (misma función,
 mismos parámetros, mismo token) que coinciden en vuelo comparten una sola
@@ -248,27 +397,27 @@ máximo 32 entradas, 32 MiB en total y 8 MiB por entrada, solo en memoria. No se
 cachean: `core_webservice_get_site_info` (auth_status y setup deben ver un token
 muerto al instante), el estado de entrega (cambia al entregar), los errores de
 cualquier tipo, las descargas ni la conversión de cookie en token. La clave es un
-SHA-256 de token+función+parámetros: el token nunca aparece en claro en la
-clave ni en logs, y cambiar de token cambia de clave.
+SHA-256 de token, función y parámetros, así que el token nunca aparece en claro
+en la clave ni en los logs, y un token distinto produce una clave distinta.
 
 ## Privacidad y minimización de datos
 
-Este programa solo habla con AulaGlobal (y, para la comprobación diaria de
-versiones, con GitHub, sin datos del usuario ni del curso). Lo que devuelven las
-herramientas MCP se entrega al asistente conectado, que puede enviarlo a su
-proveedor de IA según sus condiciones; ni este programa ni sus restricciones
-controlan eso. Las restricciones de carpeta (os.Root, rutas relativas) solo se
-aplican a las herramientas de AulaGlobal MCP: un asistente con acceso propio al
-sistema de archivos tiene los permisos que él mismo se conceda. `setup` muestra
-este aviso antes de conectar asistentes.
+Este programa solo se conecta a AulaGlobal y, para la comprobación diaria de
+versiones, a GitHub, sin enviar datos del usuario ni del curso. Lo que devuelven
+las herramientas MCP llega al asistente conectado, que puede enviarlo a su
+proveedor de IA según sus condiciones. Este programa no controla ese envío. Las
+restricciones de carpeta (os.Root, rutas relativas) solo se aplican a las
+herramientas de AulaGlobal MCP. Un asistente con acceso propio al sistema de
+archivos tiene los permisos que tenga configurados. `setup` muestra este aviso
+antes de conectar asistentes.
 
-Minimización: `auth_status` no devuelve el nombre completo ni el ID de usuario
-(tipo `AuthOutput` propio en `internal/mcpserver`, separado de `aulaglobal.Auth`,
-que sí los decodifica para uso local: el saludo de `setup` y el userid del
-respaldo de matrículas en Moodle antiguo). Ninguna otra herramienta devuelve datos
-de la cuenta; las notas/calificaciones solo salen si se pide
-`include_submission_status`. El servidor MCP no define `instructions`, por lo que
-no se añade texto de privacidad al prompt del asistente.
+`auth_status` no devuelve el nombre completo ni el ID de usuario. Usa su propio
+tipo `AuthOutput` en `internal/mcpserver`, separado de `aulaglobal.Auth`.
+`aulaglobal.Auth` sí decodifica esos datos, pero solo para uso local: el saludo de
+`setup` y el userid del respaldo de matrículas en Moodle antiguo. Ninguna otra
+herramienta devuelve datos de la cuenta, y las calificaciones solo salen si se
+pide `include_submission_status`. El servidor MCP no define `instructions`, así
+que no añade texto de privacidad al prompt del asistente.
 
 ## Avisos de terceros
 
@@ -298,7 +447,8 @@ No se debe asumir que un token móvil no caduca. En Moodle 4.5,
 [generate_token_for_current_user](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/external/classes/util.php)
 asigna validuntil = timecreated + CFG->tokenduration a nuevos tokens y describe
 12 semanas como valor por defecto. Puede reutilizar un token existente.
-Esto **no demuestra** la política/version de UC3M ni la fecha de este token.
+Esto no demuestra cuál es la política ni la versión de UC3M, ni la fecha de este
+token.
 
 [get_site_info](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/webservice/externallib.php)
 no expone validuntil.
@@ -308,21 +458,25 @@ envía firma:::token[:::privatetoken], sin fecha de creación/caducidad.
 no exponen en esa versión el validuntil del token; los ajustes de autologin no
 son la caducidad del token WS. Por eso auth_status devuelve expires_at:null y
 expiry_source:unknown..., nunca calcula 12 semanas desde la fecha de conversión.
-invalidtoken/invalidtimedtoken indican token caducado; accessexception se confirma con
-core_webservice_get_site_info: si también falla, el token está caducado (ErrTokenExpired,
-mensaje en español con instrucciones de renovación); si funciona, es un problema de
-permisos y el mensaje lo distingue. Con token caducado, download_files y
-list_assignments abortan el lote con un único error en lugar de un error por elemento.
+Los errores invalidtoken e invalidtimedtoken indican un token caducado. Ante un
+accessexception, el cliente llama a core_webservice_get_site_info para
+confirmarlo. Si esa llamada también falla, el token está caducado y se devuelve
+ErrTokenExpired, con un mensaje en español que explica cómo renovarlo. Si
+funciona, es un problema de permisos y el mensaje lo dice. Con un token caducado,
+download_files y list_assignments cancelan el lote con un único error en lugar de
+un error por elemento.
 
-TokenProvider.Get(ctx) permite incorporar renovación sin cambiar API/herramientas;
-Invalidator es una interfaz opcional. El proveedor estático relee archivos por
-petición (rotación externa posible). Futuro: proveedor sincronizado que invalide
-al recibir error de autenticación y use un flujo Moodle explícitamente compatible,
-quizás el privatetoken para autologin. **No existe aquí una renovación automática**
-ni se considera privatetoken un refresh token OAuth.
+`TokenProvider.Get(ctx)` permite añadir renovación sin cambiar la API ni las
+herramientas, e `Invalidator` es una interfaz opcional. El proveedor estático
+relee el archivo en cada petición, así que otro proceso puede rotarlo. Una
+posible ampliación es un proveedor sincronizado que invalide el token al recibir
+un error de autenticación y use un flujo de Moodle explícitamente compatible,
+quizá el privatetoken para autologin. Hoy no hay renovación automática, y
+privatetoken no se trata como un refresh token de OAuth.
+
 Si la política tokenduration del sitio caduca el token (12 semanas por defecto
-upstream), ejecuta de nuevo `aulaglobal-mcp setup`: valida el token guardado y, si ha
-caducado, salta directamente al paso de la cookie. `token-from-cookie --force` sigue
+upstream), ejecuta de nuevo `aulaglobal-mcp setup`. Setup valida el token
+guardado y, si ha caducado, salta directamente al paso de la cookie. `token-from-cookie --force` sigue
 disponible como alternativa de bajo nivel. No hace falta reiniciar el asistente
 (el archivo del token se relee en cada petición). obtained_at registra
 la conversión, no la creación del token; expires_at sigue siendo null.
@@ -375,8 +529,6 @@ Para añadir una herramienta MCP: tipos de entrada y salida y un método en
 Para añadir un subcomando: un paquete `internal/cli/<nombre>` con una función
 `Run` y un `case` en `run` (`cmd/aulaglobal-mcp/main.go`).
 
-Si vence la espera de extracción, read_file devuelve “extraction in progress, retry shortly”. El parser continúa en uno de los dos slots globales y guarda la caché al terminar con éxito, incluso si el cliente cancela o agota su plazo. Un parser bloqueado retiene su slot; no existe aislamiento de proceso ni límite duro de memoria. Se mantiene el rechazo de PDFs de más de 500 páginas para no presentar contenido incompleto. Las introducciones de entregas se limitan a 2000 runas más “ [truncated]”.
-
 ## Guía rápida: servidor HTTP con Docker
 
 Si prefieres tenerlo como servicio (por ejemplo, para varios clientes en tu
@@ -425,7 +577,7 @@ las conexiones personalizadas web están disponibles en Business y Enterprise/Ed
 con permisos del administrador. Se añaden desde **Plugins → + → Add custom MCP
 server**, con nombre, descripción opcional, URL HTTPS pública (o Secure MCP
 Tunnel) y autenticación. Esa vía no lee tu configuración local. Para empezar,
-usa stdio en el escritorio: evita exponer tus archivos de cursos y el acceso a
+usa stdio en el escritorio, que no expone tus archivos de cursos ni el acceso a
 AulaGlobal a través de una URL pública. Nunca publiques este servidor con la
 autenticación HTTP desactivada.
 
@@ -435,16 +587,18 @@ Fuentes consultadas el 14 de noviembre de 2026; los menús pueden cambiar.
 ## Instalación nativa y compatibilidad
 
 `aulaglobal-mcp setup [--secrets-dir RUTA] [--data-dir RUTA] [--no-pause]`
-usa entrada oculta con x/term y verifica con Auth, sin curl. Espera Enter al
-terminar si stdin es terminal; --no-pause lo evita. En Windows, sin argumentos
-y con terminal, abre setup para permitir doble clic.
+lee la cookie con entrada oculta (x/term) y verifica el token con Auth, sin curl.
+Si stdin es un terminal, espera a que pulses Enter al terminar; `--no-pause` lo
+evita. En Windows, si el programa se abre sin argumentos y con terminal, ejecuta
+setup, para que funcione el doble clic.
 
 Secretos predeterminados (os.UserConfigDir()/aulaglobal-mcp/token):
 - Linux: $XDG_CONFIG_HOME/aulaglobal-mcp/token o ~/.config/aulaglobal-mcp/token.
 - macOS: ~/Library/Application Support/aulaglobal-mcp/token.
 - Windows: %APPDATA%/aulaglobal-mcp/token.
 
-Apuntes: os.UserHomeDir()/AulaGlobal en los tres sistemas. No depende del cwd.
+Los apuntes van a os.UserHomeDir()/AulaGlobal en los tres sistemas, sin depender
+del cwd.
 AULAGLOBAL_TOKEN_FILE y AULAGLOBAL_DOWNLOAD_DIR conservan prioridad sobre estos
 valores. En setup los flags tienen prioridad sobre las variables.
 AULAGLOBAL_TOKEN sigue funcionando en el servidor; setup obtiene un token nuevo
@@ -461,9 +615,9 @@ pero la documentación de os.Rename no garantiza atomicidad en sistemas no Unix.
 No se promete una transacción entre token, metadatos y token privado.
 Solo se limpian token.meta.json, token.private y .token-* si falta token.
 
-Claude JSON se combina conservando valores ajenos (incluso números grandes).
-TOML usa github.com/pelletier/go-toml/v2 solo para validar y serializar el bloque
-nuevo: el resto se conserva al añadir. Se pide confirmación antes de sustituir.
+La configuración JSON de Claude se combina y conserva los valores ajenos,
+incluidos los números grandes. Para TOML, github.com/pelletier/go-toml/v2 solo
+valida y serializa el bloque nuevo; el resto del archivo no cambia al añadir. Se pide confirmación antes de sustituir.
 La sustitución conservadora rechaza texto multilínea o tablas inline ambiguas;
 en esos casos se edita a mano. Se usa el parser pequeño para no aceptar TOML
 inválido ni duplicar tablas con claves entrecomilladas. Copia .bak antes de
@@ -472,13 +626,14 @@ Detección de clientes por sus carpetas de configuración; si todavía no existe
 abre primero la aplicación o usa los ejemplos manuales. No detecta cada variante
 de empaquetado (por ejemplo, instalaciones sandbox).
 
-Manifiestos nuevos guardan rutas con /; también se normalizan separadores de
-manifiestos antiguos al leer. os.Root mantiene el confinamiento en cada OS.
+Los manifiestos nuevos guardan las rutas con /, y al leer un manifiesto antiguo
+se normalizan sus separadores. os.Root mantiene el confinamiento en cada OS.
 Sanitize elimina caracteres reservados, puntos/espacios extremos y nombres DOS.
 Skip compara segundos Unix exactos: en FAT con resolución de dos segundos puede
 volver a descargar un archivo con fecha impar; es conservador y evita omitir
-cambios. NTFS/APFS no necesitan tolerancia. Entradas interactivas aceptan CRLF.
-SIGINT/SIGTERM compilan en Windows; el cierre por señal Unix requiere CI/host Unix.
+cambios. NTFS y APFS no necesitan tolerancia. Las entradas interactivas aceptan
+CRLF. El manejo de SIGINT y SIGTERM compila en Windows, pero el cierre por señal
+solo se puede probar en CI o en un host Unix.
 
 ## Actualización automática
 
@@ -491,7 +646,7 @@ prereleases), compara versiones semver estrictas (`vX.Y.Z`; nunca se baja de
 versión) y, si hay una más reciente y el usuario confirma ([S/n], o `--yes`):
 
 1. Descarga `checksums.txt` y `checksums.txt.sig` y verifica la firma con la
-   clave embebida **antes** de fiarse de nada más.
+   clave embebida antes de fiarse de nada más.
 2. Descarga el archivo de la plataforma actual
    (`aulaglobal-mcp_<ver>_<os>_<arch>.tar.gz`, zip en Windows; mismo
    name_template que .goreleaser.yaml) y comprueba su SHA-256 contra la línea
@@ -564,7 +719,7 @@ ssh-keygen -t ed25519 -N "" -C aulaglobal-mcp-update -f aulaglobal-update
   `ssh-keygen -Y verify` y un allowed_signers construido desde update_key.pub.
 - Rotación: los binarios ya instalados solo confían en la clave con la que se
   compilaron. Para rotar, publica primero una versión firmada con la clave
-  **antigua** que embeba la clave nueva; las siguientes pueden firmarse con la
+  antigua que embeba la clave nueva; las siguientes pueden firmarse con la
   nueva (en esa versión de transición hay que relajar temporalmente la
   comprobación de coincidencia clave-secreto de release.yml). Si la clave
   se pierde o se compromete, los usuarios deben descargar manualmente una
@@ -689,7 +844,7 @@ zip, `checksums.txt`) y las firma con una clave ed25519 desechable generada en l
 prueba, y `server.go` las sirve en loopback imitando `/releases/latest` (redirección),
 `/releases/latest/download/…` y `/releases/download/<tag>/…`. Para que el script
 publicado no tenga ningún mecanismo de cambio de clave, las pruebas ejecutan una
-**copia** con la línea `SIGN_KEY` sustituida (se comprueba que difiere solo en esa
+copia con la línea `SIGN_KEY` sustituida (se comprueba que difiere solo en esa
 línea); el script original, contra la misma versión, debe fallar por la firma.
 
 install.sh se ejecuta como `cat install.sh | env -i … <shell>` (stdin es el script,
@@ -746,8 +901,9 @@ El proyecto usa licencia MIT (archivo LICENSE). Cada archivo de release y la ima
 
 ### Presentación y registro de Claude Code en setup
 
-El instalador separa carpetas, token, comprobación y asistentes en cuatro pasos.
-La entrada de cookie sigue oculta; también comprueba el token conservado.
+`setup` separa carpetas, token, comprobación y asistentes en cuatro pasos. La
+cookie se escribe con entrada oculta, y setup también comprueba el token que ya
+estaba guardado.
 En el paso 2 intenta copiar el comando JavaScript al portapapeles y confirma
 el éxito con ✓; si no puede, indica cómo copiarlo a mano sin mostrar errores.
 El comando siempre aparece en pantalla. Tras intercambiar la cookie por un
@@ -806,8 +962,8 @@ seguro, sin quitarla antes ni depender de un comando remove.
 
 La ruta global es ~/.config/opencode/opencode.json(c), con XDG_CONFIG_HOME
 absoluto como alternativa. Si no hay CLI scriptable, debe existir la carpeta.
-Se rechazan ambos archivos simultáneos, JSONC con comentarios/comas finales,
-JSON inválido y estructuras ambiguas. Se muestran bloques manuales V1 y V2.
+Se rechaza tener los dos archivos a la vez, el JSONC con comentarios o comas
+finales, el JSON inválido y las estructuras ambiguas. Se muestran bloques manuales V1 y V2.
 Se preservan valores desconocidos y servidores ajenos, reformateando JSON.
 El original exacto se guarda en .bak; la escritura usa temporal y rename.
 No se imprime la salida del CLI ni errores con posible contenido privado.
@@ -887,7 +1043,7 @@ no preguntan. El resumen distingue añadido, actualizado, ya estaba, omitido y
 falló, y solo imprime Reload de los clientes modificados. Las transcripciones en
 `internal/cli/setup/testdata/setup-*.golden` fijan el formato.
 
-Para añadir un asistente, sigue **3 pasos**:
+Para añadir un asistente:
 
 1. Crea `internal/assistants/<id>.go` con un tipo que implemente `Assistant` (o construye
    un `fileAssistant` con las particularidades del formato, ruta, detección y
@@ -951,7 +1107,7 @@ mismo estilo visual que setup (✓ ! ✗ ·, `[s/N]`).
 
 Sin flags y con terminal abre el menú: 1 desconectar asistentes (predeterminada),
 2 cerrar la sesión (borrar la clave de acceso), 3 desinstalar todo. En todos los
-casos se imprime el **plan** exacto y se pide `¿Continuar? [s/N]` (Enter = no);
+casos se imprime el plan exacto y se pide `¿Continuar? [s/N]` (Enter = no);
 después se imprime el resultado con ✓/·/!/✗ por elemento. Cualquier ✗ da salida
 distinta de 0.
 
@@ -961,7 +1117,7 @@ distinta de 0.
 | `--logout` | opción 2 |
 | `--all` | opción 3 (conserva la carpeta de apuntes) |
 | `--delete-data` | con `--all`, permite borrar la carpeta de apuntes (reglas abajo) |
-| `--yes` | omite las confirmaciones; **no** implica `--delete-data` ni quita entradas ajenas |
+| `--yes` | omite las confirmaciones; no implica `--delete-data` ni quita entradas ajenas |
 | `--dry-run` | imprime el plan y no cambia nada |
 | `--secrets-dir`, `--data-dir` | rutas personalizadas, como en setup (`AULAGLOBAL_TOKEN_FILE` y `AULAGLOBAL_DOWNLOAD_DIR` también se respetan) |
 | `--help` | uso, salida 0 |
@@ -975,19 +1131,19 @@ sale con error; con flags pero sin terminal exige `--yes` (o `--dry-run`).
 
 La interfaz `assistant` tiene tres métodos nuevos: `Find` (qué hay bajo
 `aulaglobal`: comando y env), `Remove` (quita solo esa entrada) y `ManualRemove`
-(instrucciones manuales). Solo se quitan entradas cuyo comando es **este**
+(instrucciones manuales). Solo se quitan entradas cuyo comando es este
 ejecutable o un binario llamado `aulaglobal-mcp`; si la entrada difiere se
 muestra y se pregunta (`[s/N]`). Con `--yes` o sin terminal las ajenas no se
 tocan nunca (aviso `!`).
 
 - Claude Code: `claude mcp remove --scope user aulaglobal` y comprobación
   posterior con `mcp get`. Los ámbitos local y proyecto se detectan y se
-  explican (con el comando para quitar el local en su carpeta); **no** se tocan
+  explican (con el comando para quitar el local en su carpeta); no se tocan
   ni `.mcp.json` ni el ámbito local. Limitación: `mcp get` solo muestra el
   ámbito de mayor prioridad, de modo que una entrada de usuario tapada por una
   local no se ve desde esa carpeta. La salida del CLI nunca se imprime.
 - Claude Desktop y Antigravity (`mcpServers`) y OpenCode (V2 `mcp.servers`, V1
-  `mcp`): la entrada se corta **por bytes** (se localiza con el decodificador JSON
+  `mcp`): la entrada se corta por bytes (se localiza con el decodificador JSON
   y se elimina solo ese miembro y su coma), así que orden de claves, sangría y
   números grandes del resto del archivo quedan idénticos. JSON inválido, claves
   duplicadas, JSONC con comentarios y formatos ambiguos se rechazan.
@@ -1017,7 +1173,7 @@ llaman exactamente `aulaglobal-mcp`.
 
 | Sistema | PATH | Programa |
 |---|---|---|
-| Linux / macOS | Se buscan, en todos los perfiles que escribe install.sh (`~/.zshrc` o `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.bash_profile`, `$XDG_CONFIG_HOME/fish/config.fish`, `~/.profile`), las líneas con la forma exacta del instalador y terminadas en `# aulaglobal-mcp`. Solo se quita la que añade la carpeta de **este** ejecutable (las de otra carpeta se dejan y se avisa). Copia en `<perfil>.bak`; se conservan permisos y enlaces simbólicos; idempotente | `os.Remove` del ejecutable (resuelto con EvalSymlinks); su carpeta solo si se llama `aulaglobal-mcp` y está vacía. La carpeta típica `~/.local/bin` nunca se borra |
+| Linux / macOS | Se buscan, en todos los perfiles que escribe install.sh (`~/.zshrc` o `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.bash_profile`, `$XDG_CONFIG_HOME/fish/config.fish`, `~/.profile`), las líneas con la forma exacta del instalador y terminadas en `# aulaglobal-mcp`. Solo se quita la que añade la carpeta de este ejecutable (las de otra carpeta se dejan y se avisa). Copia en `<perfil>.bak`; se conservan permisos y enlaces simbólicos; idempotente | `os.Remove` del ejecutable (resuelto con EvalSymlinks); su carpeta solo si se llama `aulaglobal-mcp` y está vacía. La carpeta típica `~/.local/bin` nunca se borra |
 | Windows | Se quita solo la entrada igual (expandida, sin barra final, sin distinguir mayúsculas, como install.ps1) del valor `Path` de `HKCU\Environment` con `golang.org/x/sys/windows/registry` (ahora dependencia directa; ya estaba enlazada, THIRD_PARTY_NOTICES.md no cambia), conservando el tipo REG_SZ/REG_EXPAND_SZ y el resto del valor; después `WM_SETTINGCHANGE`. No se guarda copia del valor | Un ejecutable en uso no se puede borrar: `selfupdate.MoveAside` lo renombra a `<exe>.old` y se lanza `cmd.exe /d /s /c "ping -n 3 127.0.0.1 >nul & del /f /q "<exe>.old" & rmdir "<carpeta>""` sin ventana (`CREATE_NO_WINDOW`, grupo de procesos nuevo) que sobrevive a este proceso; `rmdir` solo vacía y solo si la carpeta se llama `aulaglobal-mcp`. Rutas con `% & ^ \| < > " !` no se programan. Si falla, se dice el archivo exacto que borrar (la limpieza de `.old` al arrancar de selfupdate sigue de respaldo si se reinstala) |
 
 En un contenedor (`selfupdate.InContainer`) no se borran el binario ni el PATH
@@ -1031,7 +1187,8 @@ predeterminada `~/AulaGlobal` si no lo tiene), `--data-dir` /
 Si difieren se pregunta por cada una:
 `¿Borrar también la carpeta AulaGlobal con tus materiales (<ruta>)? [s/N]`
 (Enter = conservar). Con `--yes` o sin terminal se conserva salvo `--delete-data`.
-Nunca se borra fuera de esa carpeta. **Se rechaza** (aviso y se deja a mano) si:
+Nunca se borra fuera de esa carpeta. El borrado se rechaza, con un aviso para
+hacerlo a mano, si:
 la ruta está vacía o no es absoluta, es la raíz, es la carpeta personal o la
 contiene, contiene el programa/configuración/caché/token, es un enlace simbólico
 o no es una carpeta, se llama como una carpeta personal del sistema (Documents,

@@ -7,12 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,7 +33,7 @@ var extractionSlots = make(chan struct{}, 2)
 
 func supported(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".pdf", ".docx", ".pptx", ".odt", ".odp":
+	case ".pdf", ".docx", ".pptx", ".odt", ".odp", ".xlsx", ".xlsm", ".ods", ".doc", ".ppt", ".xls":
 		return true
 	}
 	return textLike(path)
@@ -60,13 +58,16 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 	}
 	if info.Size() > 64<<20 {
 		file.Close()
-		return doc, errors.New("extraction input exceeds 64 MiB")
+		return doc, fail(ErrLimit, "extraction input exceeds 64 MiB")
 	}
-	key := sha256.Sum256([]byte(fmt.Sprintf("v1:%s:%d:%d", path, info.Size(), info.ModTime().UnixNano())))
+	key := sha256.Sum256([]byte(fmt.Sprintf("v2:%s:%d:%d", path, info.Size(), info.ModTime().UnixNano())))
 	cache := filepath.Join(".aulaglobal-cache", hex.EncodeToString(key[:])+".json")
-	if content, err := s.cacheRead(cache); err == nil && json.Unmarshal(content, &doc) == nil {
+	if entry, ok := s.cachedEntry(cache); ok {
 		file.Close()
-		return doc, nil
+		if entry.Code != "" {
+			return doc, failureFromCode(entry.Code, entry.Error)
+		}
+		return document{Pages: entry.Pages}, nil
 	}
 	budget := s.ExtractTimeout
 	if budget <= 0 {
@@ -99,6 +100,10 @@ func (s *Store) extract(ctx context.Context, path string) (document, error) {
 					err = s.atomic(cache, content)
 				}
 				result.err = err
+			} else if code := failureCode(result.err); code != "" {
+				if content, err := json.Marshal(cacheEntry{Code: code, Error: result.err.Error()}); err == nil {
+					s.atomic(cache, content)
+				}
 			}
 			done <- result
 		}()
@@ -125,130 +130,146 @@ func extractionWaitError(ctx context.Context) error {
 	}
 	return errors.New("extraction in progress, retry shortly")
 }
+
+// cacheEntry is the cache file: pages on success, or a deterministic failure that must not be parsed again.
+type cacheEntry struct {
+	Pages []Page `json:"pages,omitempty"`
+	Code  string `json:"code,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Store) cachedEntry(path string) (cacheEntry, bool) {
+	var entry cacheEntry
+	content, err := s.cacheRead(path)
+	if err != nil || json.Unmarshal(content, &entry) != nil {
+		return entry, false
+	}
+	return entry, entry.Code == "" || failureFromCode(entry.Code, "") != nil
+}
+
+type pageSink struct {
+	pages []Page
+	total int
+}
+
+func (sink *pageSink) add(number int, text string) error {
+	if text == "" {
+		return nil
+	}
+	if sink.total += len(text); sink.total > textCap {
+		return fail(ErrLimit, "extracted text exceeds 8 MiB")
+	}
+	sink.pages = append(sink.pages, Page{number, strings.ToValidUTF8(text, "�")})
+	return nil
+}
+
 func decodeDocument(ctx context.Context, path string, content []byte) (document, error) {
 	return (&Store{}).decodeDocument(ctx, path, content)
 }
+
+// decodeDocument identifies the format from the content and reads it as Markdown (or raw text).
 func (s *Store) decodeDocument(ctx context.Context, path string, content []byte) (document, error) {
-	doc := document{Pages: []Page{}}
-	add := func(page int, text string) error {
-		total := len(text)
-		for _, page := range doc.Pages {
-			total += len(page.Text)
-		}
-		if total > textCap {
-			return errors.New("extracted text exceeds 8 MiB")
-		}
-		doc.Pages = append(doc.Pages, Page{page, strings.ToValidUTF8(text, "�")})
-		return nil
+	ext := strings.ToLower(filepath.Ext(path))
+	sink := &pageSink{pages: []Page{}}
+	switch sniff(ext, content) {
+	case formatPDF:
+		return s.decodePDF(ctx, sink, content)
+	case formatOLE:
+		return document{Pages: sink.pages}, oleError(content)
+	case formatZIP:
+		err := decodeArchive(ctx, ext, sink, content)
+		return document{Pages: sink.pages}, err
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".pdf":
-		if s.pdfExtractor != nil {
-			return s.pdfExtractor(ctx, content)
+	switch {
+	case legacyExtension(ext):
+		return document{Pages: sink.pages}, fail(ErrUnsupported, "legacy binary Office format (.doc/.ppt/.xls) is not supported; save it as docx, pptx, xlsx or PDF")
+	case officeExtension(ext):
+		return document{Pages: sink.pages}, fail(ErrMalformed, "invalid ZIP document")
+	}
+	if len(content) > textCap {
+		return document{Pages: sink.pages}, fail(ErrLimit, "text exceeds 8 MiB")
+	}
+	if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+		return document{Pages: sink.pages}, nil
+	}
+	text := string(content)
+	if ext == ".html" || ext == ".htm" {
+		text = PlainHTML(text)
+	}
+	err := sink.add(0, text)
+	return document{Pages: sink.pages}, err
+}
+
+func (s *Store) decodePDF(ctx context.Context, sink *pageSink, content []byte) (document, error) {
+	if s.pdfExtractor != nil {
+		return s.pdfExtractor(ctx, content)
+	}
+	doc := document{Pages: sink.pages}
+	reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		if errors.Is(err, pdf.ErrInvalidPassword) || bytes.Contains(content[max(0, len(content)-2048):], []byte("/Encrypt")) {
+			return doc, fail(ErrEncrypted, "PDF is encrypted; password-protected PDFs are not supported")
 		}
-		reader, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
+		return doc, fail(ErrMalformed, "invalid PDF")
+	}
+	pageCount := reader.NumPage()
+	if pageCount > 500 {
+		return doc, fail(ErrLimit, "PDF exceeds 500 pages")
+	}
+	hasText := false
+	for page := 1; page <= pageCount; page++ {
+		if err := ctx.Err(); err != nil {
+			return doc, err
+		}
+		text, err := reader.Page(page).GetPlainText(nil)
 		if err != nil {
-			return doc, errors.New("invalid PDF")
+			return doc, fail(ErrMalformed, "PDF text extraction failed")
 		}
-		pageCount := reader.NumPage()
-		if pageCount > 500 {
-			return doc, errors.New("PDF exceeds 500 pages")
-		}
-		for i := 1; i <= pageCount; i++ {
-			if err := ctx.Err(); err != nil {
-				return doc, err
-			}
-			text, err := reader.Page(i).GetPlainText(nil)
-			if err != nil {
-				return doc, errors.New("PDF text extraction failed")
-			}
-			if err = add(i, text); err != nil {
-				return doc, err
-			}
-		}
-	case ".docx", ".pptx", ".odt", ".odp":
-		archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
-		if err != nil {
-			return doc, errors.New("invalid ZIP document")
-		}
-		if len(archive.File) > 2048 {
-			return doc, errors.New("ZIP entry limit")
-		}
-		var total uint64
-		for _, entry := range archive.File {
-			if entry.UncompressedSize64 > 32<<20 || entry.UncompressedSize64 > max(uint64(1), entry.CompressedSize64)*200 {
-				return doc, errors.New("ZIP expansion refused")
-			}
-			total += entry.UncompressedSize64
-			if total > 64<<20 {
-				return doc, errors.New("ZIP size limit")
-			}
-		}
-		sort.Slice(archive.File, func(i, j int) bool { return archive.File[i].Name < archive.File[j].Name })
-		for _, entry := range archive.File {
-			name := entry.Name
-			selected := name == "word/document.xml" || name == "content.xml" || (strings.HasPrefix(name, "ppt/slides/slide") && strings.HasSuffix(name, ".xml"))
-			if !selected {
-				continue
-			}
-			entryFile, err := entry.Open()
-			if err != nil {
-				return doc, err
-			}
-			decoder := xml.NewDecoder(io.LimitReader(entryFile, 32<<20+1))
-			var text strings.Builder
-			for {
-				if err = ctx.Err(); err != nil {
-					entryFile.Close()
-					return doc, err
-				}
-				tok, err := decoder.Token()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					entryFile.Close()
-					return doc, errors.New("invalid document XML")
-				}
-				switch t := tok.(type) {
-				case xml.CharData:
-					text.Write(t)
-				case xml.EndElement:
-					if t.Name.Local == "p" || t.Name.Local == "t" {
-						text.WriteByte('\n')
-					}
-				}
-				if text.Len() > textCap {
-					entryFile.Close()
-					return doc, errors.New("XML output limit")
-				}
-			}
-			entryFile.Close()
-			number := 0
-			if strings.HasPrefix(name, "ppt/slides/slide") {
-				fmt.Sscanf(name, "ppt/slides/slide%d.xml", &number)
-			}
-			if err = add(number, text.String()); err != nil {
-				return doc, err
-			}
-		}
-	default:
-		if len(content) > textCap {
-			return doc, errors.New("text exceeds 8 MiB")
-		}
-		if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
-			return doc, nil
-		}
-		text := string(content)
-		if ext := strings.ToLower(filepath.Ext(path)); ext == ".html" || ext == ".htm" {
-			text = PlainHTML(text)
-		}
-		if err := add(0, text); err != nil {
+		hasText = hasText || len(strings.TrimSpace(text)) > 0
+		if err = sink.add(page, text); err != nil {
 			return doc, err
 		}
 	}
-	return doc, nil
+	if pageCount > 0 && !hasText {
+		return doc, fail(ErrNeedsOCR, "PDF has no text layer (scanned); OCR not supported")
+	}
+	return document{Pages: sink.pages}, nil
 }
+
+func decodeArchive(ctx context.Context, ext string, sink *pageSink, content []byte) error {
+	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		return fail(ErrMalformed, "invalid ZIP document")
+	}
+	if len(archive.File) > 2048 {
+		return fail(ErrLimit, "ZIP entry limit")
+	}
+	var total uint64
+	for _, entry := range archive.File {
+		if entry.UncompressedSize64 > 32<<20 || entry.UncompressedSize64 > max(uint64(1), entry.CompressedSize64)*200 {
+			return fail(ErrLimit, "ZIP expansion refused")
+		}
+		total += entry.UncompressedSize64
+		if total > 64<<20 {
+			return fail(ErrLimit, "ZIP size limit")
+		}
+	}
+	document := &zipDocument{ctx: ctx, files: archive.File}
+	writer := acquireMarkdown()
+	defer writer.release()
+	switch kind := classify(ext, archive.File); kind {
+	case formatDOCX:
+		return document.decodeDOCX(sink, writer)
+	case formatPPTX:
+		return document.decodePPTX(sink, writer)
+	case formatXLSX:
+		return document.decodeXLSX(sink, writer)
+	case formatODT, formatODP, formatODS:
+		return document.decodeODF(kind, sink, writer)
+	}
+	return fail(ErrUnsupported, "ZIP archive is not a supported document")
+}
+
 func (d document) text() string {
 	if len(d.Pages) == 1 && d.Pages[0].Number <= 0 {
 		return d.Pages[0].Text
