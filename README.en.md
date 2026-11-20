@@ -21,7 +21,7 @@ work with them. It works with Claude Code, Claude Desktop, Codex, ChatGPT
 |---|---|
 | Courses | Lists your current, past or upcoming courses. |
 | Materials | Shows and downloads each course's files, organised by section. |
-| Reading and search | Reads PDF, Word, PowerPoint and text files, and searches everything downloaded. |
+| Reading and search | Reads PDF, Word, PowerPoint, Excel, LibreOffice and text files, and searches everything downloaded. Keeps headings, lists, tables and speaker notes. |
 | Assignments | Shows due dates, instructions and, if you ask, submission status and grade. |
 
 Some examples of what you can ask:
@@ -48,7 +48,7 @@ You need a computer running Windows, macOS or Linux and one of the supported
 assistants. Nothing else needs to be installed.
 
 There are two ways to install it. The **automatic installation** is the simplest
-and is recommended in most cases.
+and works in most cases.
 
 ### Option A: automatic installation (recommended)
 
@@ -66,7 +66,7 @@ curl -fsSL https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/down
 irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
 ```
 
-The installer does the following, asking for confirmation where needed:
+The installer does the following and asks for confirmation where needed:
 
 1. Detects your system and downloads the latest version.
 2. Checks the digital signature and integrity of the download. If anything does
@@ -106,9 +106,10 @@ Example on Windows:
 $env:AULAGLOBAL_VERSION = "v0.1.5"; irm https://github.com/Alejandro12120/aulaglobal-mcp/releases/latest/download/install.ps1 | iex
 ```
 
-The signature is checked with `ssh-keygen`, which ships with macOS, most Linux
-distributions and Windows 10 and 11. If your computer does not have it, the
-installer explains how to add it; you can also use the manual installation.
+The installer checks the signature with `ssh-keygen`, which ships with macOS,
+most Linux distributions and Windows 10 and 11. If your computer does not have
+it, the installer explains how to add it. You can also use the manual
+installation.
 
 </details>
 
@@ -130,8 +131,8 @@ If you prefer not to run a script, you can download the program yourself.
 
 On a Mac, the processor type is shown under **Apple menu → About This Mac**.
 
-**2. Extract** the file and keep the program in a folder where it will stay; your
-assistants will look for the program in that location.
+**2. Extract** the file and keep the program in a permanent folder, because your
+assistants will look for it at that path.
 
 **3. Open a terminal in that folder** and run the setup program:
 
@@ -199,7 +200,7 @@ press Enter. If the line does not work, you can also copy the value from
 
 > [!WARNING]
 > The cookie gives access to your account while the session is open. Do not
-> share it or paste it into the assistant's chat: enter it only in the setup
+> share it or paste it into the assistant's chat. Enter it only in the setup
 > program.
 
 In step 4, the program checks each assistant it finds:
@@ -214,8 +215,8 @@ In step 4, the program checks each assistant it finds:
 Before changing a file, it saves a copy with the `.bak` extension. When it
 finishes, it shows a summary and explains how to reload each assistant.
 
-To check that it works, type `/mcp` in the assistant: `aulaglobal` should be
-listed.
+To check that it works, type `/mcp` in the assistant. It should list
+`aulaglobal`.
 
 <details>
 <summary><strong>Setup program options</strong></summary>
@@ -256,7 +257,7 @@ AulaGlobal/
             └── enunciado.pdf
 ```
 
-When you download again, only new or changed files are fetched.
+When you download again, the program only fetches new or changed files.
 
 ---
 
@@ -273,14 +274,14 @@ folder (`./aulaglobal-mcp update`, or `.\aulaglobal-mcp.exe update` on Windows).
 
 The program shows the installed and the new version, asks for confirmation and
 updates itself. Before installing, it checks the digital signature and the
-integrity of the download; if anything fails, nothing is changed. When it
+integrity of the download. If anything fails, it changes nothing. When it
 finishes, restart the assistant.
 
 - `aulaglobal-mcp update --check` only checks whether a new version exists,
   without installing it.
 - At most once a day, the program checks whether a new version is available; if
   there is one, the assistant will let you know. The assistant never updates on
-  its own: you always run the update yourself from the terminal.
+  its own. You always run the update yourself from the terminal.
 - To turn that check off, add the environment variable
   `AULAGLOBAL_UPDATE_CHECK=0` to the server configuration in your assistant.
 
@@ -419,12 +420,12 @@ appear, with a translation where useful.
 |---|---|
 | `aulaglobal-mcp: command not found` or "is not recognized as a command" | Open a new terminal so the PATH change takes effect. If it still fails, run the program with its full path. |
 | The installer says `ssh-keygen` is missing | Follow the instructions it shows or use the [manual installation](#option-b-manual-installation). On Windows, enable it under **Settings → Apps → Optional features → OpenSSH Client**. |
-| «La sesión de AulaGlobal ha caducado…» (the session has expired) | AulaGlobal expires access keys from time to time. Sign in to AulaGlobal in your browser and run `aulaglobal-mcp setup`: it will ask for a new cookie. You do not need to restart the assistant. |
-| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» (the token is valid, but access was denied) | It has not expired: AulaGlobal does not allow that feature for your account. Nothing needs renewing. |
+| «La sesión de AulaGlobal ha caducado…» (the session has expired) | AulaGlobal expires access keys from time to time. Sign in to AulaGlobal in your browser and run `aulaglobal-mcp setup`, which will ask for a new cookie. You do not need to restart the assistant. |
+| «El token de AulaGlobal es válido, pero Moodle ha denegado el acceso…» (the token is valid, but access was denied) | The key has not expired. AulaGlobal does not allow that feature for your account, so nothing needs renewing. |
 | `cannot read token file` | Run `aulaglobal-mcp setup` again. If you used other folders, check the manual configuration. |
 | The assistant does not list `aulaglobal` | Restart the assistant. If it is still missing, run `aulaglobal-mcp setup --only-clients`. |
 | The access key cannot be obtained | Sign out of AulaGlobal, sign in again and repeat the step with a new cookie. |
-| A PDF cannot be read | Scanned PDFs contain no text. Very long ones can take a while: repeat the request a few seconds later. |
+| A file cannot be read | The program does no OCR, so it cannot read scanned PDFs. It also cannot read password-protected files or the old `.doc`, `.ppt` and `.xls` formats. Save a copy as `.docx`, `.pptx`, `.xlsx` or a PDF with text. If a very long file takes a while, repeat the request a few seconds later. |
 
 ---
 
@@ -432,7 +433,8 @@ appear, with a translation where useful.
 
 **What this program does with your data**
 
-- **Your password is not used.** Access is obtained from your browser session.
+- **The program does not use your password.** It gets access from your browser
+  session.
 - **The access key stays on your computer**, in your user's configuration
   folder with restricted permissions. The AI assistant never receives it.
 - **No intermediaries.** The program connects directly to AulaGlobal from your
@@ -441,8 +443,8 @@ appear, with a translation where useful.
   for new versions on GitHub, which you can turn off (see
   [Updating](#updating)).
 - **Minimal personal data.** When checking the connection, the assistant does
-  not receive your name or user ID. Grades and submission status are only
-  requested if you ask for them.
+  not receive your name or user ID. The program only requests grades and
+  submission status if you ask for them.
 - **Light use of AulaGlobal.** The program limits the number of requests per
   second, reuses recent responses for a few seconds and, if AulaGlobal asks it
   to wait, pauses for the time requested.
@@ -453,8 +455,8 @@ appear, with a translation where useful.
 
 - **The assistant receives whatever the tools return**: course lists, the text
   of your notes, assignment instructions and so on. Depending on the assistant
-  you use, that content is sent to its AI provider (Anthropic, OpenAI,
-  Google…) and handled under its terms and privacy policy. Review them before
+  you use, that content goes to its AI provider (Anthropic, OpenAI,
+  Google…), which handles it under its terms and privacy policy. Review them before
   using it with material you do not want to share.
 - **Folder limits only apply to this program.** AulaGlobal MCP's tools can only
   read and write inside the `AulaGlobal` folder, but the assistant may have its
@@ -473,7 +475,7 @@ By using this program you agree to the following:
    for content you already have access to, in line with the university's rules.
 3. **You decide what you share.** You are responsible for checking that you may
    share the content you ask the assistant to process with the assistant and its
-   AI provider, taking into account the copyright of the materials and any
+   AI provider. Take into account the copyright of the materials and any
    personal data they contain.
 4. **No warranty.** The software is provided as is, without warranty of any
    kind. To the extent permitted by law, the authors are not liable for any
@@ -498,8 +500,8 @@ The program asks what you want to do:
 | 3. Uninstall everything | Disconnects every assistant and deletes the access key, the program and the line the installer added to your PATH. |
 
 Before changing anything, it shows exactly what it will do and asks for
-confirmation. Your downloaded materials are not deleted unless you say so: in
-option 3 it asks separately, and the default answer is "No".
+confirmation. The program does not delete your downloaded materials unless you
+say so. Option 3 asks separately, and the default answer is "No".
 
 `aulaglobal-mcp uninstall --dry-run` shows what would be done without changing
 anything. The other options are listed by `aulaglobal-mcp uninstall --help`.
@@ -537,8 +539,8 @@ names come from it.
 
 ## Licence
 
-Released under the [MIT licence](LICENSE). The software is provided
-**as is, without warranty of any kind**.
+Released under the [MIT licence](LICENSE). The software is provided as is,
+without warranty of any kind.
 
 The program includes parts based on AGDownloader and third-party libraries,
 each under its own licence. Their notices and licence texts are in
