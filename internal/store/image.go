@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 )
 
@@ -23,7 +24,10 @@ func (s *Store) Image(ctx context.Context, path string) ([]byte, string, error) 
 		return nil, "", err
 	}
 	// Lstat does not follow the last element, so a symlink is refused outright.
-	if info, err := s.Root.Lstat(path); err != nil {
+	if info, err := s.Root.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		// The OS wording differs (Windows: "cannot find the file"), so say it once here.
+		return nil, "", errors.New("file not found in download root; download it first with download_files")
+	} else if err != nil {
 		return nil, "", err
 	} else if !info.Mode().IsRegular() {
 		return nil, "", errors.New("regular file required")

@@ -359,7 +359,7 @@ func TestToolSchemas(t *testing.T) {
 func TestViewImageRefusals(t *testing.T) {
 	session, _, root := feedbackSession(t, `{}`)
 	os.WriteFile(filepath.Join(root, "note.png"), []byte("not an image"), 0600)
-	for path, want := range map[string]string{"note.png": "not a supported image", "../x.png": "relative", "missing.png": "no such file"} {
+	for path, want := range map[string]string{"note.png": "not a supported image", "../x.png": "relative", "missing.png": "file not found"} {
 		res := call(t, session, "view_image", map[string]any{"path": path})
 		if !res.IsError || !strings.Contains(strings.Join(texts(res), " "), want) {
 			t.Errorf("%s: %+v", path, res)

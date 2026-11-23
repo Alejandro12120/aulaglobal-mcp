@@ -60,7 +60,7 @@ func TestImage(t *testing.T) {
 		"/etc/passwd":                  "relative to download root",
 		"Curso/../../x.png":            "relative to download root",
 		".aulaglobal-cache/secret.png": "relative to download root",
-		"Curso/missing.png":            "",
+		"Curso/missing.png":            "file not found",
 	} {
 		if _, _, err := store.Image(context.Background(), name); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want error containing %q", name, err, want)
