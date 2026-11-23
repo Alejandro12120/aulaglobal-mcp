@@ -45,6 +45,10 @@ func TestAssignments(t *testing.T) {
 				fmt.Fprint(w, `{"errorcode":"invalidparameter","exception":"x"}`)
 				return
 			}
+			if r.Form.Get("assignid") == "4" { // Moodle stores -1 when there is no grade
+				fmt.Fprint(w, `{"lastattempt":{"submission":{"status":"new"},"gradingstatus":"notgraded"},"feedback":{"grade":{"grade":"-1.00000"}}}`)
+				return
+			}
 			fmt.Fprint(w, `{"lastattempt":{"submission":{"status":"submitted","timemodified":100},"gradingstatus":"graded"},"feedback":{"grade":{"grade":"9.0"}}}`)
 		default:
 			t.Errorf("unexpected WS %s", r.Form.Get("wsfunction"))
@@ -62,6 +66,9 @@ func TestAssignments(t *testing.T) {
 	}
 	if a[0].Submission.Status != "submitted" || a[0].Submission.Grade != "9.0" || a[1].Submission.Error == "" {
 		t.Fatalf("%+v", a)
+	}
+	if a[2].Submission.Grade != "" || a[2].Submission.Status != "new" {
+		t.Fatalf("ungraded -1 must be omitted: %+v", a[2].Submission)
 	}
 	if strings.Contains(a[1].Attachments[0].URL, "secret") || a[1].Attachments[0].Handle == "" {
 		t.Fatal("attachment secret or missing handle")

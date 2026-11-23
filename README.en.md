@@ -23,6 +23,7 @@ work with them. It works with Claude Code, Claude Desktop, Codex, ChatGPT
 | Materials | Shows and downloads each course's files, organised by section. |
 | Reading and search | Reads PDF, Word, PowerPoint, Excel, LibreOffice and text files, and searches everything downloaded. Keeps headings, lists, tables and speaker notes. |
 | Assignments | Shows due dates, instructions and, if you ask, submission status and grade. |
+| Feedback | Reads the grade and the teacher's comments, downloads their files and shows images to the assistant. |
 
 Some examples of what you can ask:
 
@@ -243,6 +244,7 @@ Ask your assistant in your own words. To check that everything works, try:
 3. "What materials are there in Calculus?"
 4. "Download the Calculus PDFs and summarise the first one."
 5. "Which assignments are pending and which have I submitted?"
+6. "What feedback did the teacher leave on Practice 1?"
 
 Materials are saved in the `AulaGlobal` folder in your user directory, organised
 by course and section:
@@ -254,7 +256,9 @@ AulaGlobal/
     │   └── apuntes.pdf
     └── Entregas/
         └── Práctica 1/
-            └── enunciado.pdf
+            ├── enunciado.pdf
+            └── Feedback/
+                └── corrección.pdf
 ```
 
 When you download again, the program only fetches new or changed files.
@@ -443,8 +447,10 @@ appear, with a translation where useful.
   for new versions on GitHub, which you can turn off (see
   [Updating](#updating)).
 - **Minimal personal data.** When checking the connection, the assistant does
-  not receive your name or user ID. The program only requests grades and
-  submission status if you ask for them.
+  not receive your name or user ID. The program only requests grades, teacher
+  comments and submission status if you ask for them. When you read the feedback
+  on an assignment, AulaGlobal records a "feedback_viewed" event that teachers
+  can see in the course logs.
 - **Light use of AulaGlobal.** The program limits the number of requests per
   second, reuses recent responses for a few seconds and, if AulaGlobal asks it
   to wait, pauses for the time requested.
@@ -462,6 +468,9 @@ appear, with a translation where useful.
   read and write inside the `AulaGlobal` folder, but the assistant may have its
   own permissions (for example, to read other files or run commands), which
   depend on how you have configured it.
+- **Feedback comments are untrusted content** and may include third-party data
+  (for example, a classmate in a peer review). What the assistant sees,
+  images included, goes to its AI provider.
 
 ---
 

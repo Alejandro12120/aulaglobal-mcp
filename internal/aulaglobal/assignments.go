@@ -235,7 +235,7 @@ func (c *Client) addSubmissionStatus(ctx context.Context, list []Assignment) err
 					} `json:"feedback"`
 				}
 				err := c.WS(ctx, "mod_assign_get_submission_status", url.Values{"assignid": {strconv.FormatInt(assignment.ID, 10)}}, &res)
-				assignment.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: res.Feedback.Grade.Grade}
+				assignment.Submission = &Submission{Status: res.LastAttempt.Submission.Status, Modified: res.LastAttempt.Submission.Modified, GradingStatus: res.LastAttempt.GradingStatus, Grade: cleanGrade(res.Feedback.Grade.Grade)}
 				if errors.Is(err, ErrTokenExpired) || errors.Is(err, ErrRateLimited) {
 					once.Do(func() { dead = err; close(stop) })
 					continue

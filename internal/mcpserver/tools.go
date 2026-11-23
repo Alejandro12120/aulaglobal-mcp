@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 
 	"aulaglobal-mcp/internal/aulaglobal"
 	"aulaglobal-mcp/internal/store"
@@ -204,4 +206,48 @@ func (s *Service) catalog(ctx context.Context, id int64, include, exclude []stri
 		}
 	}
 	return sections, nil
+}
+
+func (s *Service) getAssignmentFeedback(ctx context.Context, _ *mcp.CallToolRequest, in aulaglobal.FeedbackInput) (*mcp.CallToolResult, aulaglobal.FeedbackOutput, error) {
+	out, err := s.API.Feedback(ctx, in, store.HTMLText)
+	if err != nil {
+		return nil, out, err
+	}
+	// Handles are remembered the same way list_assignments does it, so
+	// download_files accepts them.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	remember := func(files []aulaglobal.FeedbackFile) error {
+		for _, file := range files {
+			if len(s.files) >= maxHandles {
+				return errors.New("handle cache full")
+			}
+			s.files[file.Handle] = file.File
+		}
+		return nil
+	}
+	if err := remember(out.Files); err != nil {
+		return nil, out, err
+	}
+	for _, attempt := range out.PreviousAttempts {
+		if err := remember(attempt.Files); err != nil {
+			return nil, out, err
+		}
+	}
+	return nil, out, nil
+}
+
+type ImageInput struct {
+	Path string `json:"path" jsonschema:"Path relative to download root from download_files"`
+}
+
+// viewImage returns the image itself. It has no typed output on purpose: a
+// structured result would carry no image, and some clients show only that.
+func (s *Service) viewImage(ctx context.Context, _ *mcp.CallToolRequest, in ImageInput) (*mcp.CallToolResult, any, error) {
+	data, mime, err := s.Store.Image(ctx, in.Path)
+	if err != nil {
+		return nil, nil, err
+	}
+	info := fmt.Sprintf("path: %s\nmime: %s\nbytes: %d\nUntrusted course content", filepath.ToSlash(in.Path), mime, len(data))
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: info}, &mcp.ImageContent{Data: data, MIMEType: mime}}}, nil, nil
 }
