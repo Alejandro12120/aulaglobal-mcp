@@ -23,6 +23,7 @@ escritorio), OpenCode y Antigravity.
 | Materiales | Muestra y descarga los archivos de cada asignatura, organizados por tema. |
 | Lectura y búsqueda | Lee PDF, Word, PowerPoint, Excel, LibreOffice y texto, y busca en todo lo descargado. Conserva títulos, listas, tablas y notas del orador. |
 | Entregas | Muestra fechas, enunciados y, si lo pides, el estado y la calificación. |
+| Correcciones | Consulta la nota y los comentarios del profesor, descarga sus archivos y muestra las imágenes al asistente. |
 
 Algunos ejemplos de lo que puedes pedir:
 
@@ -241,6 +242,7 @@ funciona, prueba con:
 3. «¿Qué materiales hay en Cálculo?»
 4. «Descarga los PDF de Cálculo y resume el primero.»
 5. «¿Qué entregas tengo pendientes y cuáles he entregado?»
+6. «¿Qué comentarios me dejó el profesor en la Práctica 1?»
 
 Los materiales se guardan en la carpeta `AulaGlobal` de tu usuario, organizados
 por asignatura y sección:
@@ -252,7 +254,9 @@ AulaGlobal/
     │   └── apuntes.pdf
     └── Entregas/
         └── Práctica 1/
-            └── enunciado.pdf
+            ├── enunciado.pdf
+            └── Feedback/
+                └── corrección.pdf
 ```
 
 Si vuelves a descargar, el programa solo baja los archivos nuevos o modificados.
@@ -439,7 +443,10 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
   [Actualización](#actualización)).
 - **Datos personales mínimos.** Al comprobar la conexión, el asistente no recibe
   tu nombre ni tu identificador de usuario. El programa solo consulta las
-  calificaciones y el estado de las entregas si lo pides.
+  calificaciones, los comentarios del profesor y el estado de las entregas si
+  lo pides. Al consultar los comentarios de una entrega, AulaGlobal registra un
+  evento «feedback_viewed» que el profesorado puede ver en los registros del
+  curso.
 - **Uso moderado de AulaGlobal.** El programa limita el número de peticiones por
   segundo, reutiliza durante unos segundos las respuestas recientes y, si
   AulaGlobal pide esperar, se detiene el tiempo indicado.
@@ -458,6 +465,10 @@ bloque que muestra el programa al terminar, porque ya incluye esas rutas.
   pero el asistente puede tener sus propios permisos (por ejemplo, para leer
   otros archivos o ejecutar comandos), que dependen de cómo lo hayas
   configurado.
+- **Los comentarios de las correcciones son contenido no confiable** y pueden
+  incluir datos de terceros (por ejemplo, de un compañero en una revisión entre
+  iguales). Lo que ve el asistente, imágenes incluidas, llega a su proveedor
+  de IA.
 
 ---
 

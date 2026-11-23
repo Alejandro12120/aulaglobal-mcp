@@ -5,9 +5,10 @@ const init={jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025
 const list={jsonrpc:'2.0',id:2,method:'tools/list',params:{}};
 const auth={jsonrpc:'2.0',id:3,method:'tools/call',params:{name:'auth_status',arguments:{}}};
 function checkTools(r) {
- assert.equal(r.result.tools.length,7);
- assert.deepEqual(r.result.tools.map(t=>t.name).sort(),['auth_status','download_files','list_assignments','list_course_files','list_courses','read_file','search_files']);
- for(const t of r.result.tools){assert(t.inputSchema);assert(t.outputSchema);}
+ assert.equal(r.result.tools.length,9);
+ assert.deepEqual(r.result.tools.map(t=>t.name).sort(),['auth_status','download_files','get_assignment_feedback','list_assignments','list_course_files','list_courses','read_file','search_files','view_image']);
+ for(const t of r.result.tools){assert(t.inputSchema);// view_image returns an image, so it has no structured output
+  if(t.name==='view_image')assert(!t.outputSchema);else assert(t.outputSchema);}
 }
 function checkAuth(r){assert.equal(r.result.isError,true);assert.match(JSON.stringify(r),/token missing/);}
 const p=spawn('docker',['run','--rm','-i',image,'--transport','stdio'],{stdio:['pipe','pipe','pipe']});

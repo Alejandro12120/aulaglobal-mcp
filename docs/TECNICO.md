@@ -115,9 +115,9 @@ usuarios que tengan el bearer comparten los datos y el token de AulaGlobal.
 
 ## Herramientas y contratos
 
-Todas las herramientas publican inputSchema y outputSchema tipados y devuelven
-JSON estructurado. Un error que afecta a toda la llamada se devuelve como error de
-herramienta MCP. Los errores de descargas sueltas van dentro de `results`. El
+Todas las herramientas publican inputSchema y, salvo view_image, outputSchema
+tipados, y devuelven JSON estructurado. Un error que afecta a toda la llamada se
+devuelve como error de herramienta MCP. Los errores de descargas sueltas van dentro de `results`. El
 contenido de los cursos son datos no confiables, nunca instrucciones del sistema.
 
 | Herramienta | Entrada | Salida |
@@ -129,8 +129,12 @@ contenido de los cursos son datos no confiables, nunca instrucciones del sistema
 | read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
 | search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
 | list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
+| get_assignment_feedback | assignment_id positivo (el `id` de list_assignments, no el cmid), course_id positivo opcional | available y note (sin feedback visible no es un error), grade (omitido si no hay nota), grade_for_display, graded_date, comments: plugin, name, text en texto plano con marcadores `[image N: archivo]`, files con handle, filename, mimetype, filesize, plugin, area e image_index, previous_attempts (attempt_number desde 1, grade, comments, files), content_note. Contenido no confiable que puede incluir datos de terceros. Moodle registra un evento feedback_viewed |
+| view_image | path relativo de download_files | Sin outputSchema ni structuredContent: un bloque de texto (path, mime, bytes, contenido no confiable) y un bloque de imagen. Solo png, jpeg, gif y webp según el contenido, máx. 3,75 MiB |
 
 El orden habitual es list_courses, list_course_files, download_files y read_file.
+Para las correcciones es list_assignments, get_assignment_feedback,
+download_files y view_image.
 
 El servidor guarda los handles en memoria, con un máximo de 100000. Tras reiniciar
 hay que volver a listar, porque la descarga por handle necesita la URL del
@@ -284,6 +288,57 @@ individuales ni prórrogas. `intro` se convierte a texto y se corta a 2000 runas
 seguidas de ` [truncated]`. Los adjuntos se guardan en
 `<Asignatura>/Entregas/<Entrega>/<archivo>`.
 
+### Correcciones e imágenes
+
+get_assignment_feedback llama a `mod_assign_get_assignments` (de solo lectura y
+con caché de 45 s; con `courseids[0]` si se da course_id, y si no, para todas las
+matrículas) para obtener cmid, curso y nombre, y a
+`mod_assign_get_submission_status` para la nota y los comentarios. Si la entrega no aparece, devuelve
+«assignment not found». Si Moodle no devuelve
+el objeto `feedback` (sin nota visible y plugins vacíos, flujo de calificación
+sin liberar o nota oculta), `available` es false y `note` lo explica, sin error.
+La nota -1 de Moodle (ASSIGN_GRADE_NOT_SET) significa sin calificar y se omite.
+
+Los comentarios (HTML) se convierten en texto plano con `store.HTMLText`: las
+etiquetas de bloque, `<br>` y los elementos de lista pasan a saltos de línea
+(`- ` en las listas), se colapsan las líneas en blanco, se decodifican las
+entidades y se descartan script y style. Cada `<img>` se sustituye en su sitio
+por `[image N: archivo]` cuando su ruta (tras `pluginfile.php`, sin consulta y
+decodificada) coincide con un archivo de `fileareas`. N empieza en 1 y es único
+en toda la respuesta, intentos anteriores incluidos. Si no coincide, el marcador
+es `[image: alt]` o `[external image]`, y la imagen nunca se descarga. PlainHTML,
+que usa list_assignments, no cambia.
+
+Los archivos salen de los `fileareas` de cada plugin, salvo editpdf, del que solo
+se conserva el área `download` (el PDF anotado final). Se guardan en
+`<Asignatura>/Entregas/<Entrega>/Feedback/<archivo>` y, para intentos
+anteriores, en `.../Feedback/Intento <n>/<archivo>`. Sus handles se registran
+en el mismo mapa que los de list_assignments y sirven para download_files, que
+mantiene la comprobación de host de `Client.Download`. Se calculan con
+`FeedbackHandle` (hash de curso, cmid, plugin, área y ruta de pluginfile, con un
+prefijo propio), porque `StableHandle` colisionaría con el mismo nombre en dos
+áreas o intentos. Si dos archivos distintos comparten carpeta y nombre, el
+sufijo (2) de siempre los separa. `StableHandle` no cambia, así que los
+manifiestos existentes siguen valiendo.
+
+El `attempt_number` de los intentos anteriores empieza en 1 (Moodle cuenta desde
+0) y es el que usa la carpeta `Intento <n>`.
+
+La llamada hace que Moodle registre un evento `feedback_viewed`, visible para el
+profesorado en los registros del curso. El contenido es no confiable y puede
+incluir datos personales de terceros, por ejemplo el nombre de usuario de un
+compañero en una revisión entre iguales.
+
+view_image lee un archivo ya descargado con las mismas reglas de ruta que
+read_file (relativa, dentro de la carpeta, sin `.aulaglobal-cache`), rechaza
+enlaces simbólicos y archivos que no son regulares, y detecta el tipo con
+`http.DetectContentType` sin fiarse de la extensión. Acepta image/png,
+image/jpeg, image/gif e image/webp, hasta 3,75 MiB (así el base64 queda por
+debajo de 5 MB, un límite habitual de los clientes). No declara outputSchema ni
+structuredContent a propósito: algunos clientes prefieren el resultado
+estructurado y ocultarían la imagen. Devuelve el texto con path, mime y bytes y
+un `ImageContent`.
+
 El estado de entrega opcional usa cuatro workers, hace como máximo 100 consultas
 y devuelve los errores por entrega. Las fechas a cero salen como null en
 RFC3339. tzdata va embebida para que las fechas funcionen en la imagen scratch.
@@ -416,7 +471,9 @@ tipo `AuthOutput` en `internal/mcpserver`, separado de `aulaglobal.Auth`.
 `aulaglobal.Auth` sí decodifica esos datos, pero solo para uso local: el saludo de
 `setup` y el userid del respaldo de matrículas en Moodle antiguo. Ninguna otra
 herramienta devuelve datos de la cuenta, y las calificaciones solo salen si se
-pide `include_submission_status`. El servidor MCP no define `instructions`, así
+pide `include_submission_status`, y los comentarios de las correcciones solo con
+get_assignment_feedback, que además deja un evento `feedback_viewed` en los
+registros del curso y puede devolver datos de terceros. El servidor MCP no define `instructions`, así
 que no añade texto de privacidad al prompt del asistente.
 
 ## Avisos de terceros
