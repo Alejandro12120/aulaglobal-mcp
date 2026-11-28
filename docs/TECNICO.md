@@ -128,7 +128,8 @@ contenido de los cursos son datos no confiables, nunca instrucciones del sistema
 | download_files | handles[] de un listado anterior, o course_id | results: path relativo, bytes, status downloaded/skipped/error, error opcional |
 | read_file | path relativo, offset byte (0), length (16384; máx. 65536) | size, text, next_offset (-1 al terminar), note |
 | search_files | query, regex (false), limit (20; 1..100), path_prefix opcional | matches: path, page (si se conoce), offset dentro de página, snippet |
-| list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, intro no confiable, adjuntos con handles, estado de entrega opcional |
+| list_assignments | course_ids opcional (cursos inprogress), status upcoming/overdue/all, include_submission_status (false), language es/en | assignments: fechas Unix + RFC3339 Europe/Madrid, estado de apertura, vista previa de intro (2000 runas), adjuntos con handles, estado de entrega opcional |
+| get_assignment | assignment_id positivo (el `id` de list_assignments), course_id positivo opcional | intro completo, activity si Moodle la ofrece, fechas Unix + RFC3339 Europe/Madrid, estado de apertura, introattachments y activityattachments con handles. Texto y adjuntos no confiables |
 | get_assignment_feedback | assignment_id positivo (el `id` de list_assignments, no el cmid), course_id positivo opcional | available y note (sin feedback visible no es un error), grade (omitido si no hay nota), grade_for_display, graded_date, comments: plugin, name, text en texto plano con marcadores `[image N: archivo]`, files con handle, filename, mimetype, filesize, plugin, area e image_index, previous_attempts (attempt_number desde 1, grade, comments, files), content_note. Contenido no confiable que puede incluir datos de terceros. Moodle registra un evento feedback_viewed |
 | view_image | path relativo de download_files | Sin outputSchema ni structuredContent: un bloque de texto (path, mime, bytes, contenido no confiable) y un bloque de imagen. Solo png, jpeg, gif y webp según el contenido, máx. 3,75 MiB |
 
@@ -284,9 +285,20 @@ fecha. `upcoming` incluye las entregas con fecha futura y las que no tienen fech
 y están abiertas. `overdue` incluye las de fecha pasada, aunque ya estén
 cerradas. `submissions_possible` se calcula con la apertura, el cutoff y
 nosubmissions. Es una estimación por calendario y no tiene en cuenta permisos
-individuales ni prórrogas. `intro` se convierte a texto y se corta a 2000 runas,
-seguidas de ` [truncated]`. Los adjuntos se guardan en
-`<Asignatura>/Entregas/<Entrega>/<archivo>`.
+individuales ni prórrogas. Ambas herramientas convierten el HTML con
+`store.HTMLText`, que compacta espacios, conserva los saltos de párrafo y las
+listas, y omite imágenes incrustadas sin descargarlas.
+
+Si `intro` supera las 2000 runas, list_assignments indica que se puede abrir
+el texto completo con get_assignment. Pasa el `id` como `assignment_id` y,
+si lo conoces, el `course_id` para limitar la búsqueda a esa asignatura.
+get_assignment consulta `mod_assign_get_assignments` y devuelve `intro` y
+`activity` completos según lo que Moodle muestre al estudiante. Si la entrega
+no aparece, devuelve «assignment not found».
+
+Los handles de ambas herramientas sirven para download_files. Los adjuntos de
+la introducción se guardan en `<Asignatura>/Entregas/<Entrega>/<archivo>` y los
+de la actividad en `<Asignatura>/Entregas/<Entrega>/Actividad/<archivo>`.
 
 ### Correcciones e imágenes
 
@@ -306,8 +318,7 @@ entidades y se descartan script y style. Cada `<img>` se sustituye en su sitio
 por `[image N: archivo]` cuando su ruta (tras `pluginfile.php`, sin consulta y
 decodificada) coincide con un archivo de `fileareas`. N empieza en 1 y es único
 en toda la respuesta, intentos anteriores incluidos. Si no coincide, el marcador
-es `[image: alt]` o `[external image]`, y la imagen nunca se descarga. PlainHTML,
-que usa list_assignments, no cambia.
+es `[image: alt]` o `[external image]`, y la imagen nunca se descarga.
 
 Los archivos salen de los `fileareas` de cada plugin, salvo editpdf, del que solo
 se conserva el área `download` (el PDF anotado final). Se guardan en

@@ -351,7 +351,7 @@ func TestToolSchemas(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, " "); got != "auth_status download_files get_assignment_feedback list_assignments list_course_files list_courses read_file search_files view_image" {
+	if got := strings.Join(names, " "); got != "auth_status download_files get_assignment get_assignment_feedback list_assignments list_course_files list_courses read_file search_files view_image" {
 		t.Errorf("tools: %s", got)
 	}
 }

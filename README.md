@@ -22,7 +22,7 @@ escritorio), OpenCode y Antigravity.
 | Asignaturas | Lista tus asignaturas actuales, pasadas o futuras. |
 | Materiales | Muestra y descarga los archivos de cada asignatura, organizados por tema. |
 | Lectura y búsqueda | Lee PDF, Word, PowerPoint, Excel, LibreOffice y texto, y busca en todo lo descargado. Conserva títulos, listas, tablas y notas del orador. |
-| Entregas | Muestra fechas, enunciados y, si lo pides, el estado y la calificación. |
+| Entregas | Lista fechas y vistas previas. Con `get_assignment` puedes leer el enunciado completo y las instrucciones de la actividad que Moodle muestre. También puedes pedir el estado y la calificación. |
 | Correcciones | Consulta la nota y los comentarios del profesor, descarga sus archivos y muestra las imágenes al asistente. |
 
 Algunos ejemplos de lo que puedes pedir:
