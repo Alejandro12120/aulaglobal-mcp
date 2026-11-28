@@ -22,7 +22,7 @@ work with them. It works with Claude Code, Claude Desktop, Codex, ChatGPT
 | Courses | Lists your current, past or upcoming courses. |
 | Materials | Shows and downloads each course's files, organised by section. |
 | Reading and search | Reads PDF, Word, PowerPoint, Excel, LibreOffice and text files, and searches everything downloaded. Keeps headings, lists, tables and speaker notes. |
-| Assignments | Shows due dates, instructions and, if you ask, submission status and grade. |
+| Assignments | Lists due dates and previews. Use `get_assignment` to read the full statement and any activity instructions Moodle makes available. You can also ask for submission status and grades. |
 | Feedback | Reads the grade and the teacher's comments, downloads their files and shows images to the assistant. |
 
 Some examples of what you can ask:

@@ -166,7 +166,7 @@ func TestIntroRuneLimitAndCanonicalNames(t *testing.T) {
 			}
 			expected := text
 			if len([]rune(text)) > 2000 {
-				expected = string([]rune(text)[:2000]) + " [truncated]"
+				expected = string([]rune(text)[:2000]) + " [truncated; call get_assignment for the full statement]"
 			}
 			a := out.Assignments[0]
 			if a.Intro != expected {

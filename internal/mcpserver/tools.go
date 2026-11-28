@@ -69,7 +69,7 @@ func (s *Service) listCourseFiles(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 type DownloadInput struct {
-	Handles  []string `json:"handles,omitempty" jsonschema:"Handles from list_course_files in this server process"`
+	Handles  []string `json:"handles,omitempty" jsonschema:"Handles from a course or assignment tool in this server process"`
 	CourseID int64    `json:"course_id,omitempty" jsonschema:"Download whole course instead of handles"`
 }
 type DownloadOutput struct {
@@ -120,7 +120,7 @@ func (s *Service) filesByHandle(handles []string) ([]aulaglobal.File, error) {
 	for _, handle := range handles {
 		file, ok := s.files[handle]
 		if !ok {
-			return nil, errors.New("unknown handle; call list_course_files first")
+			return nil, errors.New("unknown handle; obtain a file handle from a course or assignment tool first")
 		}
 		files = append(files, file)
 	}
@@ -173,18 +173,42 @@ func (s *Service) searchFiles(ctx context.Context, _ *mcp.CallToolRequest, in Se
 }
 
 func (s *Service) listAssignments(ctx context.Context, _ *mcp.CallToolRequest, in aulaglobal.AssignmentInput) (*mcp.CallToolResult, aulaglobal.AssignmentsOutput, error) {
-	out, err := s.API.Assignments(ctx, in, store.PlainHTML)
+	out, err := s.API.Assignments(ctx, in, assignmentText)
+	if err != nil {
+		return nil, out, err
+	}
+	for _, assignment := range out.Assignments {
+		if err := s.rememberAssignmentFiles(assignment.Attachments); err != nil {
+			return nil, out, err
+		}
+	}
+	return nil, out, nil
+}
+
+func (s *Service) getAssignment(ctx context.Context, _ *mcp.CallToolRequest, in aulaglobal.AssignmentDetailInput) (*mcp.CallToolResult, aulaglobal.Assignment, error) {
+	out, err := s.API.AssignmentDetail(ctx, in, assignmentText)
+	if err != nil {
+		return nil, out, err
+	}
+	return nil, out, s.rememberAssignmentFiles(out.Attachments, out.ActivityAttachments)
+}
+
+func assignmentText(markup string) string {
+	return store.HTMLText(markup, nil)
+}
+
+func (s *Service) rememberAssignmentFiles(groups ...[]aulaglobal.File) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, assignment := range out.Assignments {
-		for _, file := range assignment.Attachments {
-			if len(s.files) >= maxHandles {
-				return nil, out, errors.New("handle cache full")
+	for _, files := range groups {
+		for _, file := range files {
+			if _, exists := s.files[file.Handle]; !exists && len(s.files) >= maxHandles {
+				return errors.New("handle cache full")
 			}
 			s.files[file.Handle] = file
 		}
 	}
-	return nil, out, err
+	return nil
 }
 
 // catalog lists a course's files and remembers their handles for download_files.
