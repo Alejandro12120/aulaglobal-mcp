@@ -736,24 +736,26 @@ func TestAssignmentStatusStopsWhenThrottled(t *testing.T) {
 
 func TestSingleflightFollowerOutlivesLeaderDeadline(t *testing.T) {
 	var hits atomic.Int32
+	firstStarted := make(chan struct{})
+	release := make(chan struct{})
 	moodle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits.Add(1) == 1 {
-			select { // first request is slow: the leader gives up first
-			case <-time.After(400 * time.Millisecond):
-			case <-r.Context().Done():
-			}
+			close(firstStarted)
+			// First request stays blocked until the test finishes so it can never
+			// race ahead of the leader's deadline.
+			<-release
+			return
 		}
 		fmt.Fprint(w, `{"sitename":"ok"}`)
 	}))
 	defer moodle.Close()
+	defer close(release)
 	client, _ := newFakeClient(moodle.URL)
 	lctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	leader := make(chan error, 1)
 	go func() { leader <- client.WS(lctx, siteInfoFn, nil, &struct{}{}) }()
-	for hits.Load() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	<-firstStarted
 	follower := make(chan error, 1)
 	go func() {
 		var out struct{ Sitename string }
